@@ -60,7 +60,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Suspense>
           <NuqsAdapter>
             <Providers>
-              {IS_PRODUCTION && 
+              {IS_PRODUCTION && disclaimer
               <TopNavbar />
               <Sidebar>
                 <main className={cn("container mx-auto max-w-full", SpacingClasses.main)}>
