@@ -100,7 +100,7 @@ const Disclaimer: React.FC = () => {
 
         <ModalBody>
           <ScrollShadow hideScrollBar className="space-y-4">
-            {DISCLAIMER_CONTENT.paragraphs.map((paragraph) => (
+            {DISCLAIMER_CONTENT.paragraphs.map((paragraph: any) => (
               <DisclaimerParagraph
                 key={paragraph.id}
                 content={paragraph.content}
