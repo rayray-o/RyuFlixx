@@ -2,116 +2,328 @@
 
 import { useEffect, useRef } from "react";
 
+type MotionState = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+};
+
 export default function MangaParallaxBackground() {
   const backgroundRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const background = backgroundRef.current;
+
     if (!background) return;
 
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)"
-    ).matches;
+    );
 
-    if (reducedMotion) return;
+    if (reducedMotion.matches) return;
 
-    const isMobile = window.matchMedia(
-      "(max-width: 768px)"
-    ).matches;
+    let isMobile = window.matchMedia("(max-width: 768px)").matches;
 
     /*
-     * MOBILE
+     * ----------------------------------------
+     * CAMERA
+     * ----------------------------------------
      *
-     * The mobile parallax is handled by CSS scroll-driven
-     * animation instead of JavaScript.
+     * x / y = current camera position
+     * vx / vy = camera velocity
      *
-     * This is considerably smoother because the browser can
-     * handle the animation on the compositor.
+     * This is intentionally physics-based rather
+     * than using a fixed interpolation percentage.
      */
-    if (isMobile) {
-      background.classList.add("manga-mobile-scroll");
+    const current: MotionState = {
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+    };
 
-      return () => {
-        background.classList.remove("manga-mobile-scroll");
-      };
-    }
+    const target = {
+      x: 0,
+      y: 0,
+    };
 
     /*
-     * DESKTOP
-     *
-     * Desktop uses the cursor as a virtual camera.
+     * ----------------------------------------
+     * DESKTOP SETTINGS
+     * ----------------------------------------
      */
 
-    let targetX = 0;
-    let targetY = 0;
+    const DESKTOP_MAX_X = 18;
+    const DESKTOP_MAX_Y = 12;
 
-    let currentX = 0;
-    let currentY = 0;
+    /*
+     * ----------------------------------------
+     * MOBILE SETTINGS
+     * ----------------------------------------
+     *
+     * Small movement is intentional.
+     *
+     * Premium parallax should be felt rather
+     * than constantly noticed.
+     */
+    const MOBILE_MAX_Y = 72;
 
-    let animationFrame = 0;
+    /*
+     * Scroll distance over which the background
+     * reaches most of its available movement.
+     *
+     * We use a smooth curve rather than a hard
+     * clamp, so it never suddenly hits a wall.
+     */
+    const MOBILE_SCROLL_RANGE = 1800;
 
-    const handlePointerMove = (event: PointerEvent) => {
-      if (event.pointerType === "touch") return;
+    let scrollY = window.scrollY;
+
+    /*
+     * ----------------------------------------
+     * HELPERS
+     * ----------------------------------------
+     */
+
+    const clamp = (
+      value: number,
+      min: number,
+      max: number
+    ) => {
+      return Math.max(min, Math.min(max, value));
+    };
+
+    /*
+     * Smooth bounded curve.
+     *
+     * Unlike:
+     *
+     * scrollY * 0.34
+     *
+     * this never sends the image endlessly toward
+     * the bottom of the JPEG.
+     *
+     * It approaches the maximum gradually.
+     */
+    const mobileScrollOffset = (scroll: number) => {
+      const normalized =
+        scroll / MOBILE_SCROLL_RANGE;
 
       /*
-       * Convert cursor position into a range around zero.
-       *
-       * Center of screen:
-       *     0, 0
-       *
-       * Left:
-       *     positive X
-       *
-       * Right:
-       *     negative X
+       * tanh gives us a beautiful natural-looking
+       * ease toward the maximum without a hard stop.
        */
+      const eased = Math.tanh(normalized);
 
-      const x =
+      return eased * MOBILE_MAX_Y;
+    };
+
+    /*
+     * ----------------------------------------
+     * POINTER
+     * ----------------------------------------
+     */
+
+    const handlePointerMove = (
+      event: PointerEvent
+    ) => {
+      if (isMobile) return;
+
+      if (event.pointerType === "touch") return;
+
+      const normalizedX =
         event.clientX / window.innerWidth - 0.5;
 
-      const y =
+      const normalizedY =
         event.clientY / window.innerHeight - 0.5;
 
       /*
-       * Small movement = premium.
+       * The cursor is the camera.
        *
-       * We deliberately DON'T make the background fly
-       * around the screen.
+       * Moving the cursor right makes the artwork
+       * subtly drift left, creating depth.
        */
-      targetX = x * -18;
-      targetY = y * -12;
+      target.x =
+        -normalizedX * DESKTOP_MAX_X;
+
+      target.y =
+        -normalizedY * DESKTOP_MAX_Y;
     };
 
     const handlePointerLeave = () => {
-      targetX = 0;
-      targetY = 0;
+      if (isMobile) return;
+
+      target.x = 0;
+      target.y = 0;
     };
 
-    const animate = () => {
+    /*
+     * ----------------------------------------
+     * SCROLL
+     * ----------------------------------------
+     */
+
+    const handleScroll = () => {
+      if (!isMobile) return;
+
+      scrollY = window.scrollY;
+
       /*
-       * Spring-like interpolation.
+       * Directly map the browser's actual scroll
+       * position to the camera target.
        *
-       * This gives the cursor movement that smooth,
-       * floating live-wallpaper feeling.
+       * No velocity limiter.
        */
-      currentX +=
-        (targetX - currentX) * 0.075;
+      target.y = -mobileScrollOffset(scrollY);
+    };
 
-      currentY +=
-        (targetY - currentY) * 0.075;
+    /*
+     * ----------------------------------------
+     * RESPONSIVE MODE
+     * ----------------------------------------
+     */
 
+    const handleResize = () => {
+      const nextMobile =
+        window.matchMedia(
+          "(max-width: 768px)"
+        ).matches;
+
+      if (nextMobile === isMobile) return;
+
+      isMobile = nextMobile;
+
+      /*
+       * Reset the camera when switching modes.
+       */
+      current.x = 0;
+      current.y = 0;
+      current.vx = 0;
+      current.vy = 0;
+
+      target.x = 0;
+      target.y = isMobile
+        ? -mobileScrollOffset(window.scrollY)
+        : 0;
+    };
+
+    /*
+     * ----------------------------------------
+     * PHYSICS
+     * ----------------------------------------
+     *
+     * This is a critically-damped style spring.
+     *
+     * The important difference from the old code:
+     *
+     * OLD:
+     *
+     * position += difference * fixedAmount
+     *
+     * NEW:
+     *
+     * acceleration → velocity → position
+     *
+     * This gives the camera actual momentum and
+     * makes it much less dependent on frame rate.
+     */
+
+    let previousTime = performance.now();
+
+    const animate = (now: number) => {
+      /*
+       * Convert elapsed time into seconds.
+       *
+       * Clamped so a background tab waking up doesn't
+       * cause a gigantic physics jump.
+       */
+      const dt = Math.min(
+        (now - previousTime) / 1000,
+        0.032
+      );
+
+      previousTime = now;
+
+      /*
+       * ----------------------------------------
+       * SPRING PARAMETERS
+       * ----------------------------------------
+       */
+
+      const stiffness = isMobile
+        ? 135
+        : 150;
+
+      const damping = isMobile
+        ? 20
+        : 22;
+
+      /*
+       * X spring
+       */
+      const ax =
+        (target.x - current.x) * stiffness -
+        current.vx * damping;
+
+      /*
+       * Y spring
+       */
+      const ay =
+        (target.y - current.y) * stiffness -
+        current.vy * damping;
+
+      current.vx += ax * dt;
+      current.vy += ay * dt;
+
+      current.x += current.vx * dt;
+      current.y += current.vy * dt;
+
+      /*
+       * Prevent microscopic floating-point movement
+       * once the camera has settled.
+       */
+      if (
+        Math.abs(current.x - target.x) < 0.001 &&
+        Math.abs(current.vx) < 0.001
+      ) {
+        current.x = target.x;
+        current.vx = 0;
+      }
+
+      if (
+        Math.abs(current.y - target.y) < 0.001 &&
+        Math.abs(current.vy) < 0.001
+      ) {
+        current.y = target.y;
+        current.vy = 0;
+      }
+
+      /*
+       * ----------------------------------------
+       * RENDER
+       * ----------------------------------------
+       *
+       * translate3d keeps the artwork on the
+       * compositor instead of constantly repainting it.
+       */
       background.style.transform = `
         translate3d(
-          ${currentX}px,
-          ${currentY}px,
+          ${current.x.toFixed(3)}px,
+          ${current.y.toFixed(3)}px,
           0
         )
-        scale(1.12)
+        scale(${isMobile ? "1.14" : "1.12"})
       `;
 
-      animationFrame =
-        requestAnimationFrame(animate);
+      requestAnimationFrame(animate);
     };
+
+    /*
+     * ----------------------------------------
+     * EVENTS
+     * ----------------------------------------
+     */
 
     window.addEventListener(
       "pointermove",
@@ -124,9 +336,39 @@ export default function MangaParallaxBackground() {
       handlePointerLeave
     );
 
-    animationFrame =
-      requestAnimationFrame(animate);
+    window.addEventListener(
+      "scroll",
+      handleScroll,
+      { passive: true }
+    );
 
+    window.addEventListener(
+      "resize",
+      handleResize,
+      { passive: true }
+    );
+
+    /*
+     * Set initial mobile target.
+     */
+    if (isMobile) {
+      target.y =
+        -mobileScrollOffset(window.scrollY);
+    }
+
+    /*
+     * Start the renderer.
+     */
+    const frame = requestAnimationFrame(
+      (time) => {
+        previousTime = time;
+        requestAnimationFrame(animate);
+      }
+    );
+
+    /*
+     * Cleanup.
+     */
     return () => {
       window.removeEventListener(
         "pointermove",
@@ -138,7 +380,17 @@ export default function MangaParallaxBackground() {
         handlePointerLeave
       );
 
-      cancelAnimationFrame(animationFrame);
+      window.removeEventListener(
+        "scroll",
+        handleScroll
+      );
+
+      window.removeEventListener(
+        "resize",
+        handleResize
+      );
+
+      cancelAnimationFrame(frame);
     };
   }, []);
 
@@ -146,22 +398,31 @@ export default function MangaParallaxBackground() {
     <div
       aria-hidden="true"
       className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
+      style={{
+        contain: "paint",
+      }}
     >
       {/* =====================================================
-          MANGA IMAGE
+          MANGA CAMERA
           ===================================================== */}
 
       <div
         ref={backgroundRef}
-        className="absolute -inset-[12%] will-change-transform"
+        className="absolute -inset-[14%] will-change-transform"
+        style={{
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
+        }}
       >
         <img
           src="/ryuflixx-manga-bg.jpeg"
           alt=""
           draggable={false}
-          className="h-full w-full select-none object-cover grayscale"
+          className="block h-full w-full select-none object-cover grayscale"
           style={{
             objectPosition: "center center",
+            backfaceVisibility: "hidden",
+            WebkitBackfaceVisibility: "hidden",
           }}
         />
       </div>
@@ -186,7 +447,7 @@ export default function MangaParallaxBackground() {
       />
 
       {/* =====================================================
-          CINEMATIC VIGNETTE
+          VIGNETTE
           ===================================================== */}
 
       <div
@@ -203,7 +464,7 @@ export default function MangaParallaxBackground() {
       />
 
       {/* =====================================================
-          TOP FADE
+          TOP CINEMATIC FADE
           ===================================================== */}
 
       <div
@@ -215,7 +476,7 @@ export default function MangaParallaxBackground() {
       />
 
       {/* =====================================================
-          BOTTOM FADE
+          BOTTOM CINEMATIC FADE
           ===================================================== */}
 
       <div
@@ -231,7 +492,7 @@ export default function MangaParallaxBackground() {
           ===================================================== */}
 
       <div
-        className="absolute inset-0 opacity-[0.03] mix-blend-soft-light"
+        className="absolute inset-0 opacity-[0.025] mix-blend-soft-light"
         style={{
           backgroundImage: `
             radial-gradient(
@@ -242,61 +503,6 @@ export default function MangaParallaxBackground() {
           backgroundSize: "7px 7px",
         }}
       />
-
-      {/* =====================================================
-          MOBILE SCROLL PARALLAX
-          ===================================================== */}
-
-      <style jsx>{`
-        .manga-mobile-scroll {
-          animation-name: mangaScrollParallax;
-          animation-duration: 1ms;
-          animation-timing-function: linear;
-          animation-fill-mode: both;
-
-          /*
-           * Tell modern browsers that the animation
-           * is controlled by document scrolling.
-           */
-          animation-timeline: scroll(root block);
-
-          /*
-           * Make sure the browser treats this as a
-           * compositor-friendly transform.
-           */
-          will-change: transform;
-        }
-
-        @keyframes mangaScrollParallax {
-          from {
-            transform:
-              translate3d(0, 0, 0)
-              scale(1.12);
-          }
-
-          to {
-            transform:
-              translate3d(0, -8vh, 0)
-              scale(1.12);
-          }
-        }
-
-        /*
-         * Fallback for browsers that don't support
-         * scroll-driven animations.
-         *
-         * The background simply stays still rather
-         * than using the old jittery JavaScript system.
-         */
-        @supports not (
-          animation-timeline: scroll(root block)
-        ) {
-          .manga-mobile-scroll {
-            animation: none;
-            transform: scale(1.12);
-          }
-        }
-      `}</style>
     </div>
   );
-    }
+      }
