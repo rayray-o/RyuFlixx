@@ -10,6 +10,7 @@ import Sidebar from "@/components/ui/layout/Sidebar";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/utils/helpers";
+import MangaParallaxBackground from "@/components/ui/background/MangaParallaxBackground";
 import { IS_PRODUCTION, SpacingClasses } from "@/utils/constants";
 import dynamic from "next/dynamic";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
@@ -60,15 +61,24 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Suspense>
           <NuqsAdapter>
             <Providers>
-              {IS_PRODUCTION && <Disclaimer />}
-              <TopNavbar />
-              <Sidebar>
-                <main className={cn("container mx-auto max-w-full", SpacingClasses.main)}>
-                  {children}
-                </main>
-              </Sidebar>
-              <BottomNavbar />
-            </Providers>
+  <MangaParallaxBackground />
+
+  {IS_PRODUCTION && <Disclaimer />}
+  <TopNavbar />
+
+  <Sidebar>
+    <main
+      className={cn(
+        "relative z-10 container mx-auto max-w-full",
+        SpacingClasses.main
+      )}
+    >
+      {children}
+    </main>
+  </Sidebar>
+
+  <BottomNavbar />
+</Providers>
           </NuqsAdapter>
         </Suspense>
         <SpeedInsights debug={false} />
