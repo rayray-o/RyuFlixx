@@ -77,7 +77,7 @@ const MangaParallaxBackground = () => {
         }}
       >
         <img
-          src="/images/ryuflixx-manga-bg.jpg"
+          src="/ryuflixx-manga-bg.jpeg"
           alt=""
           draggable={false}
           className="h-full w-full select-none object-cover object-center grayscale"
