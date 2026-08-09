@@ -63,28 +63,30 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Suspense>
           <NuqsAdapter>
             <Providers>
-  <MangaParallaxBackground />
-  <RyuFlixxIntro /> 
-              
-  <RyuFlixxShell>
-  {IS_PRODUCTION && <Disclaimer />}
-  <TopNavbar />
+              <MangaParallaxBackground />
+              <RyuFlixxIntro />
 
-  <Sidebar>
-    <main
-      className={cn(
-        "relative z-10 container mx-auto max-w-full",
-        SpacingClasses.main
-      )}
-    >
-      {children}
-    </main>
-  </Sidebar>
+              <RyuFlixxShell>
+                {IS_PRODUCTION && <Disclaimer />}
+                <TopNavbar />
 
-  <BottomNavbar />
-</Providers>
+                <Sidebar>
+                  <main
+                    className={cn(
+                      "relative z-10 container mx-auto max-w-full",
+                      SpacingClasses.main
+                    )}
+                  >
+                    {children}
+                  </main>
+                </Sidebar>
+
+                <BottomNavbar />
+              </RyuFlixxShell>
+            </Providers>
           </NuqsAdapter>
         </Suspense>
+
         <SpeedInsights debug={false} />
         <Analytics debug={false} />
       </body>
