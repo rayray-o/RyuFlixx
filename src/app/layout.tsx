@@ -63,6 +63,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <NuqsAdapter>
             <Providers>
   <MangaParallaxBackground />
+  <RyuFlixxIntro />            
 
   {IS_PRODUCTION && <Disclaimer />}
   <TopNavbar />
