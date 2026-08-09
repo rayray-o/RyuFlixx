@@ -3,20 +3,21 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-const CROSSFADE_TIME = 0.65;
+const CROSSFADE_TIME = 0.7;
 
 function VideoPair({
   src,
   className,
 }: {
   src: string;
-  className: string;
+  className?: string;
 }) {
   const videoA = useRef<HTMLVideoElement>(null);
   const videoB = useRef<HTMLVideoElement>(null);
 
-  const active = useRef<"a" | "b">("a");
+  const activeVideo = useRef<"a" | "b">("a");
   const transitioning = useRef(false);
+  const transitionTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const a = videoA.current;
@@ -24,8 +25,13 @@ function VideoPair({
 
     if (!a || !b) return;
 
-    let destroyed = false;
-    let transitionTimer: number | null = null;
+    let disposed = false;
+
+    /*
+     * -------------------------------------------------------
+     * INITIAL STATE
+     * -------------------------------------------------------
+     */
 
     a.currentTime = 0;
     b.currentTime = 0;
@@ -33,27 +39,46 @@ function VideoPair({
     a.style.opacity = "1";
     b.style.opacity = "0";
 
-    const startCurrentVideo = () => {
-      const current = active.current === "a" ? a : b;
+    a.style.transition = "none";
+    b.style.transition = "none";
 
-      current.play().catch(() => {});
+    /*
+     * -------------------------------------------------------
+     * PLAYBACK
+     * -------------------------------------------------------
+     */
+
+    const playActiveVideo = () => {
+      const active =
+        activeVideo.current === "a" ? a : b;
+
+      active.play().catch(() => {});
     };
 
-    startCurrentVideo();
+    playActiveVideo();
 
-    const startNext = async () => {
-      if (destroyed || transitioning.current) {
+    /*
+     * -------------------------------------------------------
+     * SEAMLESS CROSSFADE LOOP
+     * -------------------------------------------------------
+     */
+
+    const crossfadeToNext = async () => {
+      if (disposed || transitioning.current) {
         return;
       }
 
       const current =
-        active.current === "a" ? a : b;
+        activeVideo.current === "a" ? a : b;
 
       const next =
-        active.current === "a" ? b : a;
+        activeVideo.current === "a" ? b : a;
 
       transitioning.current = true;
 
+      /*
+       * Prepare the next copy at frame 0.
+       */
       next.pause();
       next.currentTime = 0;
 
@@ -64,6 +89,9 @@ function VideoPair({
         return;
       }
 
+      /*
+       * Fade the new copy in over the old copy.
+       */
       next.style.transition =
         `opacity ${CROSSFADE_TIME}s linear`;
 
@@ -73,54 +101,64 @@ function VideoPair({
       next.style.opacity = "1";
       current.style.opacity = "0";
 
-      transitionTimer = window.setTimeout(() => {
-        if (destroyed) {
-          return;
-        }
+      transitionTimer.current =
+        window.setTimeout(() => {
+          if (disposed) return;
 
-        current.pause();
-        current.currentTime = 0;
+          /*
+           * Reset the old copy while it is invisible.
+           */
+          current.pause();
+          current.currentTime = 0;
 
-        active.current =
-          active.current === "a" ? "b" : "a";
+          activeVideo.current =
+            activeVideo.current === "a"
+              ? "b"
+              : "a";
 
-        transitioning.current = false;
-      }, CROSSFADE_TIME * 1000);
+          transitioning.current = false;
+        }, CROSSFADE_TIME * 1000);
     };
 
-    const handleTimeUpdate = (
-      event: Event
-    ) => {
-      const current =
+    /*
+     * Start the crossfade slightly before the end.
+     */
+    const handleTimeUpdate = (event: Event) => {
+      const video =
         event.currentTarget as HTMLVideoElement;
 
-      if (!Number.isFinite(current.duration)) {
+      if (!Number.isFinite(video.duration)) {
         return;
       }
 
       const remaining =
-        current.duration - current.currentTime;
+        video.duration - video.currentTime;
 
       if (
         remaining <= CROSSFADE_TIME &&
         remaining > 0
       ) {
-        startNext();
+        crossfadeToNext();
       }
     };
 
+    /*
+     * Emergency fallback in case the browser reaches
+     * the end before timeupdate catches it.
+     */
     const handleEnded = () => {
-      if (!transitioning.current) {
-        startNext();
-      }
+      crossfadeToNext();
     };
 
+    /*
+     * Resume only when the page becomes visible again.
+     */
     const handleVisibilityChange = () => {
-      if (document.visibilityState !== "visible") {
-        return;
+      if (
+        document.visibilityState === "visible"
+      ) {
+        playActiveVideo();
       }
-
-      startCurrentVideo();
     };
 
     a.addEventListener(
@@ -148,11 +186,19 @@ function VideoPair({
       handleVisibilityChange
     );
 
-    return () => {
-      destroyed = true;
+    /*
+     * -------------------------------------------------------
+     * CLEANUP
+     * -------------------------------------------------------
+     */
 
-      if (transitionTimer !== null) {
-        window.clearTimeout(transitionTimer);
+    return () => {
+      disposed = true;
+
+      if (transitionTimer.current !== null) {
+        window.clearTimeout(
+          transitionTimer.current
+        );
       }
 
       a.pause();
@@ -187,36 +233,40 @@ function VideoPair({
 
   return (
     <div
-      className={`absolute inset-0 overflow-hidden ${className}`}
+      className={`absolute left-0 top-0 h-full w-full ${className ?? ""}`}
       style={{
-        contain: "strict",
+        overflow: "hidden",
       }}
     >
+      {/* Video A */}
       <video
         ref={videoA}
         src={src}
         muted
         playsInline
         preload="auto"
-        className="absolute inset-0 h-full w-full object-cover"
+        className="absolute left-0 top-0 h-full w-full object-cover"
         style={{
           opacity: 1,
-          willChange: "opacity",
           pointerEvents: "none",
+          userSelect: "none",
+          WebkitUserSelect: "none",
         }}
       />
 
+      {/* Video B */}
       <video
         ref={videoB}
         src={src}
         muted
         playsInline
         preload="auto"
-        className="absolute inset-0 h-full w-full object-cover"
+        className="absolute left-0 top-0 h-full w-full object-cover"
         style={{
           opacity: 0,
-          willChange: "opacity",
           pointerEvents: "none",
+          userSelect: "none",
+          WebkitUserSelect: "none",
         }}
       />
     </div>
@@ -237,33 +287,92 @@ export default function MangaParallaxBackground() {
   return createPortal(
     <div
       aria-hidden="true"
-      className="pointer-events-none fixed left-0 top-0 z-0 h-[100dvh] w-[100vw] overflow-hidden bg-black"
+      className="pointer-events-none fixed left-0 top-0 z-0 overflow-hidden bg-black"
       style={{
+        /*
+         * ===================================================
+         * ABSOLUTELY FIXED VIEWPORT LOCK
+         * ===================================================
+         *
+         * No transform.
+         * No scale.
+         * No scroll calculations.
+         * No dynamic viewport height.
+         */
+
         position: "fixed",
-        inset: "0",
+
+        top: 0,
+        left: 0,
+
         width: "100vw",
-        height: "100dvh",
-        transform: "translate3d(0, 0, 0)",
+
+        /*
+         * svh is deliberately used instead of dvh.
+         *
+         * svh stays stable when the mobile browser's
+         * address/navigation bars expand or collapse.
+         */
+        height: "100svh",
+
+        maxHeight: "100svh",
+
+        /*
+         * Explicitly prevent any transform-based movement.
+         */
+        transform: "none",
+
+        /*
+         * Keep the layer completely independent.
+         */
+        margin: 0,
+        padding: 0,
+
+        /*
+         * Don't let this element become a new transformed
+         * containing block for anything else.
+         */
+        isolation: "isolate",
+
+        /*
+         * Don't participate in pointer interaction.
+         */
+        pointerEvents: "none",
+
+        /*
+         * Prevent the browser from trying to optimize this
+         * as a scroll-linked element.
+         */
+        touchAction: "none",
+
         backfaceVisibility: "hidden",
         WebkitBackfaceVisibility: "hidden",
-        isolation: "isolate",
       }}
     >
-      {/* Desktop wallpaper */}
+      {/* =====================================================
+          DESKTOP WALLPAPER
+          ===================================================== */}
+
       <VideoPair
         src="/Desktop-RyuFlix.mp4"
         className="hidden md:block"
       />
 
-      {/* Mobile wallpaper */}
+      {/* =====================================================
+          MOBILE WALLPAPER
+          ===================================================== */}
+
       <VideoPair
         src="/Phone-RyuFlix.mp4"
         className="block md:hidden"
       />
 
-      {/* Main cinematic darkness */}
+      {/* =====================================================
+          CINEMATIC DARKNESS
+          ===================================================== */}
+
       <div
-        className="absolute inset-0"
+        className="absolute left-0 top-0 h-full w-full"
         style={{
           background: `
             linear-gradient(
@@ -277,9 +386,12 @@ export default function MangaParallaxBackground() {
         }}
       />
 
-      {/* Vignette */}
+      {/* =====================================================
+          VIGNETTE
+          ===================================================== */}
+
       <div
-        className="absolute inset-0"
+        className="absolute left-0 top-0 h-full w-full"
         style={{
           background: `
             radial-gradient(
@@ -291,18 +403,24 @@ export default function MangaParallaxBackground() {
         }}
       />
 
-      {/* Top cinematic fade */}
+      {/* =====================================================
+          TOP FADE
+          ===================================================== */}
+
       <div
-        className="absolute inset-x-0 top-0 h-44"
+        className="absolute left-0 top-0 h-44 w-full"
         style={{
           background:
             "linear-gradient(to bottom, rgba(0,0,0,0.9), transparent)",
         }}
       />
 
-      {/* Bottom cinematic fade */}
+      {/* =====================================================
+          BOTTOM FADE
+          ===================================================== */}
+
       <div
-        className="absolute inset-x-0 bottom-0 h-80"
+        className="absolute bottom-0 left-0 h-80 w-full"
         style={{
           background:
             "linear-gradient(to top, rgba(0,0,0,0.98), transparent)",
@@ -311,4 +429,4 @@ export default function MangaParallaxBackground() {
     </div>,
     document.body
   );
-    }
+}
