@@ -22,7 +22,7 @@ const DISCLAIMER_CONTENT = {
     {
       id: "welcome",
       content:
-        "Welcome to RyuFlix - a free movie streaming website. Please read this disclaimer carefully before using this website.",
+        "Welcome to RyuFlix - a free movie streaming website. RyuFlix does not store any files on our server's. our media is sourced from third-party websites whose content availability and legality are beyond our control of the site. Please read this disclaimer carefully before using this website.",
     
     },
   ],
