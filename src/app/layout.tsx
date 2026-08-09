@@ -12,6 +12,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/utils/helpers";
 import MangaParallaxBackground from "@/components/ui/background/MangaParallaxBackground";
 import RyuFlixxIntro from "@/components/ui/RyuFlixxIntro";
+import RyuFlixxShell from "@/components/ui/RyuFlixxShell";
 import { IS_PRODUCTION, SpacingClasses } from "@/utils/constants";
 import dynamic from "next/dynamic";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
@@ -63,8 +64,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <NuqsAdapter>
             <Providers>
   <MangaParallaxBackground />
-  <RyuFlixxIntro />            
-
+  <RyuFlixxIntro /> 
+              
+  <RyuFlixxShell>
   {IS_PRODUCTION && <Disclaimer />}
   <TopNavbar />
 
