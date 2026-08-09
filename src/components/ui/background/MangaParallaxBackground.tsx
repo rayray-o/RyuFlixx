@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 const CROSSFADE_TIME = 0.65;
@@ -25,6 +25,7 @@ function VideoPair({
     if (!a || !b) return;
 
     let destroyed = false;
+    let transitionTimer: number | null = null;
 
     a.currentTime = 0;
     b.currentTime = 0;
@@ -32,10 +33,18 @@ function VideoPair({
     a.style.opacity = "1";
     b.style.opacity = "0";
 
-    a.play().catch(() => {});
+    const startCurrentVideo = () => {
+      const current = active.current === "a" ? a : b;
+
+      current.play().catch(() => {});
+    };
+
+    startCurrentVideo();
 
     const startNext = async () => {
-      if (destroyed || transitioning.current) return;
+      if (destroyed || transitioning.current) {
+        return;
+      }
 
       const current =
         active.current === "a" ? a : b;
@@ -43,15 +52,8 @@ function VideoPair({
       const next =
         active.current === "a" ? b : a;
 
-      /*
-       * Don't let multiple timeupdate events trigger
-       * multiple transitions.
-       */
       transitioning.current = true;
 
-      /*
-       * Prepare the next copy at the beginning.
-       */
       next.pause();
       next.currentTime = 0;
 
@@ -62,12 +64,6 @@ function VideoPair({
         return;
       }
 
-      /*
-       * Crossfade.
-       *
-       * The old video is still playing underneath while
-       * the new copy fades in.
-       */
       next.style.transition =
         `opacity ${CROSSFADE_TIME}s linear`;
 
@@ -77,12 +73,10 @@ function VideoPair({
       next.style.opacity = "1";
       current.style.opacity = "0";
 
-      /*
-       * After the crossfade, reset the old video so it is
-       * ready for the next cycle.
-       */
-      window.setTimeout(() => {
-        if (destroyed) return;
+      transitionTimer = window.setTimeout(() => {
+        if (destroyed) {
+          return;
+        }
 
         current.pause();
         current.currentTime = 0;
@@ -115,27 +109,30 @@ function VideoPair({
       }
     };
 
-    a.addEventListener(
-      "timeupdate",
-      handleTimeUpdate
-    );
-
-    b.addEventListener(
-      "timeupdate",
-      handleTimeUpdate
-    );
-
-    /*
-     * If the browser somehow reaches the exact end
-     * before timeupdate catches the transition, restart
-     * the inactive copy immediately.
-     */
     const handleEnded = () => {
       if (!transitioning.current) {
         startNext();
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      startCurrentVideo();
+    };
+
+    a.addEventListener(
+      "timeupdate",
+      handleTimeUpdate
+    );
+
+    b.addEventListener(
+      "timeupdate",
+      handleTimeUpdate
+    );
+
     a.addEventListener(
       "ended",
       handleEnded
@@ -146,27 +143,17 @@ function VideoPair({
       handleEnded
     );
 
-    /*
-     * Resume playback when the tab becomes visible.
-     */
-    const handleVisibility = () => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
-
-      const current =
-        active.current === "a" ? a : b;
-
-      current.play().catch(() => {});
-    };
-
     document.addEventListener(
       "visibilitychange",
-      handleVisibility
+      handleVisibilityChange
     );
 
     return () => {
       destroyed = true;
+
+      if (transitionTimer !== null) {
+        window.clearTimeout(transitionTimer);
+      }
 
       a.pause();
       b.pause();
@@ -193,7 +180,7 @@ function VideoPair({
 
       document.removeEventListener(
         "visibilitychange",
-        handleVisibility
+        handleVisibilityChange
       );
     };
   }, []);
@@ -202,10 +189,6 @@ function VideoPair({
     <div
       className={`absolute inset-0 overflow-hidden ${className}`}
       style={{
-        /*
-         * This layer itself never participates in page
-         * scrolling.
-         */
         contain: "strict",
       }}
     >
@@ -256,46 +239,29 @@ export default function MangaParallaxBackground() {
       aria-hidden="true"
       className="pointer-events-none fixed left-0 top-0 z-0 h-[100dvh] w-[100vw] overflow-hidden bg-black"
       style={{
-        /*
-         * Explicitly lock this element to the viewport.
-         */
         position: "fixed",
         inset: "0",
         width: "100vw",
         height: "100dvh",
-
-        /*
-         * Keep it completely independent from the page
-         * content's scrolling/compositing.
-         */
         transform: "translate3d(0, 0, 0)",
         backfaceVisibility: "hidden",
         WebkitBackfaceVisibility: "hidden",
         isolation: "isolate",
       }}
     >
-      {/* =====================================================
-          DESKTOP WALLPAPER
-          ===================================================== */}
-
+      {/* Desktop wallpaper */}
       <VideoPair
         src="/Desktop-RyuFlix.mp4"
         className="hidden md:block"
       />
 
-      {/* =====================================================
-          MOBILE WALLPAPER
-          ===================================================== */}
-
+      {/* Mobile wallpaper */}
       <VideoPair
         src="/Phone-RyuFlix.mp4"
         className="block md:hidden"
       />
 
-      {/* =====================================================
-          CINEMATIC DARKNESS
-          ===================================================== */}
-
+      {/* Main cinematic darkness */}
       <div
         className="absolute inset-0"
         style={{
@@ -311,10 +277,7 @@ export default function MangaParallaxBackground() {
         }}
       />
 
-      {/* =====================================================
-          VIGNETTE
-          ===================================================== */}
-
+      {/* Vignette */}
       <div
         className="absolute inset-0"
         style={{
@@ -328,10 +291,7 @@ export default function MangaParallaxBackground() {
         }}
       />
 
-      {/* =====================================================
-          TOP FADE
-          ===================================================== */}
-
+      {/* Top cinematic fade */}
       <div
         className="absolute inset-x-0 top-0 h-44"
         style={{
@@ -340,10 +300,7 @@ export default function MangaParallaxBackground() {
         }}
       />
 
-      {/* =====================================================
-          BOTTOM FADE
-          ===================================================== */}
-
+      {/* Bottom cinematic fade */}
       <div
         className="absolute inset-x-0 bottom-0 h-80"
         style={{
@@ -354,4 +311,4 @@ export default function MangaParallaxBackground() {
     </div>,
     document.body
   );
-      }
+    }
