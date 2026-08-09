@@ -66,7 +66,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   <MangaParallaxBackground />
   <RyuFlixxIntro /> 
               
-  <RyuFlixxShell>
+  <RyuFlixxShell></RyuFlixxShell>
   {IS_PRODUCTION && <Disclaimer />}
   <TopNavbar />
 
