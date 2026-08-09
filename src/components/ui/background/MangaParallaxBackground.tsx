@@ -1,89 +1,301 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
-export default function MangaParallaxBackground() {
-  const desktopVideoRef = useRef<HTMLVideoElement>(null);
-  const mobileVideoRef = useRef<HTMLVideoElement>(null);
+const CROSSFADE_TIME = 0.65;
+
+function VideoPair({
+  src,
+  className,
+}: {
+  src: string;
+  className: string;
+}) {
+  const videoA = useRef<HTMLVideoElement>(null);
+  const videoB = useRef<HTMLVideoElement>(null);
+
+  const active = useRef<"a" | "b">("a");
+  const transitioning = useRef(false);
 
   useEffect(() => {
-    const desktopVideo = desktopVideoRef.current;
-    const mobileVideo = mobileVideoRef.current;
+    const a = videoA.current;
+    const b = videoB.current;
 
-    if (!desktopVideo || !mobileVideo) return;
+    if (!a || !b) return;
 
-    const startVideos = () => {
-      desktopVideo.play().catch(() => {});
-      mobileVideo.play().catch(() => {});
+    let destroyed = false;
+
+    a.currentTime = 0;
+    b.currentTime = 0;
+
+    a.style.opacity = "1";
+    b.style.opacity = "0";
+
+    a.play().catch(() => {});
+
+    const startNext = async () => {
+      if (destroyed || transitioning.current) return;
+
+      const current =
+        active.current === "a" ? a : b;
+
+      const next =
+        active.current === "a" ? b : a;
+
+      /*
+       * Don't let multiple timeupdate events trigger
+       * multiple transitions.
+       */
+      transitioning.current = true;
+
+      /*
+       * Prepare the next copy at the beginning.
+       */
+      next.pause();
+      next.currentTime = 0;
+
+      try {
+        await next.play();
+      } catch {
+        transitioning.current = false;
+        return;
+      }
+
+      /*
+       * Crossfade.
+       *
+       * The old video is still playing underneath while
+       * the new copy fades in.
+       */
+      next.style.transition =
+        `opacity ${CROSSFADE_TIME}s linear`;
+
+      current.style.transition =
+        `opacity ${CROSSFADE_TIME}s linear`;
+
+      next.style.opacity = "1";
+      current.style.opacity = "0";
+
+      /*
+       * After the crossfade, reset the old video so it is
+       * ready for the next cycle.
+       */
+      window.setTimeout(() => {
+        if (destroyed) return;
+
+        current.pause();
+        current.currentTime = 0;
+
+        active.current =
+          active.current === "a" ? "b" : "a";
+
+        transitioning.current = false;
+      }, CROSSFADE_TIME * 1000);
     };
 
-    startVideos();
+    const handleTimeUpdate = (
+      event: Event
+    ) => {
+      const current =
+        event.currentTarget as HTMLVideoElement;
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        startVideos();
+      if (!Number.isFinite(current.duration)) {
+        return;
       }
+
+      const remaining =
+        current.duration - current.currentTime;
+
+      if (
+        remaining <= CROSSFADE_TIME &&
+        remaining > 0
+      ) {
+        startNext();
+      }
+    };
+
+    a.addEventListener(
+      "timeupdate",
+      handleTimeUpdate
+    );
+
+    b.addEventListener(
+      "timeupdate",
+      handleTimeUpdate
+    );
+
+    /*
+     * If the browser somehow reaches the exact end
+     * before timeupdate catches the transition, restart
+     * the inactive copy immediately.
+     */
+    const handleEnded = () => {
+      if (!transitioning.current) {
+        startNext();
+      }
+    };
+
+    a.addEventListener(
+      "ended",
+      handleEnded
+    );
+
+    b.addEventListener(
+      "ended",
+      handleEnded
+    );
+
+    /*
+     * Resume playback when the tab becomes visible.
+     */
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      const current =
+        active.current === "a" ? a : b;
+
+      current.play().catch(() => {});
     };
 
     document.addEventListener(
       "visibilitychange",
-      handleVisibilityChange
+      handleVisibility
     );
 
     return () => {
+      destroyed = true;
+
+      a.pause();
+      b.pause();
+
+      a.removeEventListener(
+        "timeupdate",
+        handleTimeUpdate
+      );
+
+      b.removeEventListener(
+        "timeupdate",
+        handleTimeUpdate
+      );
+
+      a.removeEventListener(
+        "ended",
+        handleEnded
+      );
+
+      b.removeEventListener(
+        "ended",
+        handleEnded
+      );
+
       document.removeEventListener(
         "visibilitychange",
-        handleVisibilityChange
+        handleVisibility
       );
     };
   }, []);
 
   return (
     <div
-      aria-hidden="true"
-      className="pointer-events-none fixed inset-0 z-0 overflow-hidden bg-black"
+      className={`absolute inset-0 overflow-hidden ${className}`}
+      style={{
+        /*
+         * This layer itself never participates in page
+         * scrolling.
+         */
+        contain: "strict",
+      }}
     >
-      {/* Desktop animated wallpaper */}
       <video
-        ref={desktopVideoRef}
-        className="
-          absolute
-          inset-0
-          hidden
-          h-full
-          w-full
-          object-cover
-          md:block
-        "
+        ref={videoA}
+        src={src}
+        muted
+        playsInline
+        preload="auto"
+        className="absolute inset-0 h-full w-full object-cover"
+        style={{
+          opacity: 1,
+          willChange: "opacity",
+          pointerEvents: "none",
+        }}
+      />
+
+      <video
+        ref={videoB}
+        src={src}
+        muted
+        playsInline
+        preload="auto"
+        className="absolute inset-0 h-full w-full object-cover"
+        style={{
+          opacity: 0,
+          willChange: "opacity",
+          pointerEvents: "none",
+        }}
+      />
+    </div>
+  );
+}
+
+export default function MangaParallaxBackground() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed left-0 top-0 z-0 h-[100dvh] w-[100vw] overflow-hidden bg-black"
+      style={{
+        /*
+         * Explicitly lock this element to the viewport.
+         */
+        position: "fixed",
+        inset: "0",
+        width: "100vw",
+        height: "100dvh",
+
+        /*
+         * Keep it completely independent from the page
+         * content's scrolling/compositing.
+         */
+        transform: "translate3d(0, 0, 0)",
+        backfaceVisibility: "hidden",
+        WebkitBackfaceVisibility: "hidden",
+        isolation: "isolate",
+      }}
+    >
+      {/* =====================================================
+          DESKTOP WALLPAPER
+          ===================================================== */}
+
+      <VideoPair
         src="/Desktop-RyuFlix.mp4"
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="auto"
+        className="hidden md:block"
       />
 
-      {/* Mobile animated wallpaper */}
-      <video
-        ref={mobileVideoRef}
-        className="
-          absolute
-          inset-0
-          block
-          h-full
-          w-full
-          object-cover
-          md:hidden
-        "
+      {/* =====================================================
+          MOBILE WALLPAPER
+          ===================================================== */}
+
+      <VideoPair
         src="/Phone-RyuFlix.mp4"
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="auto"
+        className="block md:hidden"
       />
 
-      {/* Main cinematic darkness */}
+      {/* =====================================================
+          CINEMATIC DARKNESS
+          ===================================================== */}
+
       <div
         className="absolute inset-0"
         style={{
@@ -99,7 +311,10 @@ export default function MangaParallaxBackground() {
         }}
       />
 
-      {/* Vignette */}
+      {/* =====================================================
+          VIGNETTE
+          ===================================================== */}
+
       <div
         className="absolute inset-0"
         style={{
@@ -113,7 +328,10 @@ export default function MangaParallaxBackground() {
         }}
       />
 
-      {/* Top cinematic fade */}
+      {/* =====================================================
+          TOP FADE
+          ===================================================== */}
+
       <div
         className="absolute inset-x-0 top-0 h-44"
         style={{
@@ -122,7 +340,10 @@ export default function MangaParallaxBackground() {
         }}
       />
 
-      {/* Bottom cinematic fade */}
+      {/* =====================================================
+          BOTTOM FADE
+          ===================================================== */}
+
       <div
         className="absolute inset-x-0 bottom-0 h-80"
         style={{
@@ -130,6 +351,7 @@ export default function MangaParallaxBackground() {
             "linear-gradient(to top, rgba(0,0,0,0.98), transparent)",
         }}
       />
-    </div>
+    </div>,
+    document.body
   );
-        }
+      }
