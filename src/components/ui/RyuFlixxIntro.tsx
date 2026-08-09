@@ -11,7 +11,6 @@ export default function RyuFlixxIntro() {
   const [revealing, setRevealing] = useState(false);
 
   useEffect(() => {
-    // Only play once per browser session.
     try {
       if (sessionStorage.getItem(INTRO_KEY)) {
         return;
@@ -19,27 +18,27 @@ export default function RyuFlixxIntro() {
 
       sessionStorage.setItem(INTRO_KEY, "true");
     } catch {
-      // If sessionStorage is unavailable, still allow the intro.
+      // Continue normally if sessionStorage is unavailable.
     }
 
     setVisible(true);
 
-    // Give the wallpaper a moment to establish itself first.
+    // Let the wallpaper establish itself before revealing the title.
     const logoIn = window.setTimeout(() => {
       setLogoVisible(true);
     }, 800);
 
-    // Start fading the logo after it has held for roughly 3 seconds.
+    // Hold RYUFLIXX for roughly 3 seconds.
     const logoOut = window.setTimeout(() => {
       setLogoFading(true);
     }, 5200);
 
-    // Remove the intro veil and reveal the actual site.
+    // Begin revealing the actual website.
     const reveal = window.setTimeout(() => {
       setRevealing(true);
     }, 6500);
 
-    // Completely remove the overlay.
+    // Remove the intro completely.
     const finish = window.setTimeout(() => {
       setVisible(false);
     }, 8200);
@@ -59,33 +58,31 @@ export default function RyuFlixxIntro() {
   return (
     <div
       aria-hidden="true"
-      className={`fixed inset-0 z-[9999] pointer-events-none overflow-hidden ${
-        revealing ? "intro-revealing" : ""
-      }`}
+      className="fixed inset-0 z-[9999] pointer-events-none overflow-hidden"
       style={{
         background: "transparent",
       }}
     >
       {/* Cinematic veil.
-          This starts completely opaque, then slowly disappears,
-          revealing the already-playing wallpaper underneath. */}
+          The wallpaper remains visible underneath instead of being
+          completely covered by an opaque black screen. */}
       <div
-        className="absolute inset-0 bg-black"
+        className="absolute inset-0"
         style={{
+          background:
+            "radial-gradient(circle at center, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.72) 100%)",
           opacity: revealing ? 0 : 1,
           transition:
             "opacity 1.7s cubic-bezier(0.22, 1, 0.36, 1)",
         }}
       />
 
-      {/* RyuFlixx title */}
+      {/* RYUFLIXX title */}
       <div
         className="absolute inset-0 flex items-center justify-center"
         style={{
           opacity:
-            logoVisible && !logoFading
-              ? 1
-              : 0,
+            logoVisible && !logoFading ? 1 : 0,
 
           transform:
             logoVisible && !logoFading
@@ -103,8 +100,7 @@ export default function RyuFlixxIntro() {
           <div
             className="font-sans font-semibold tracking-[0.38em] text-white"
             style={{
-              fontSize:
-                "clamp(2.2rem, 7vw, 6rem)",
+              fontSize: "clamp(2.2rem, 7vw, 6rem)",
               paddingLeft: "0.38em",
               lineHeight: 1,
               textShadow:
@@ -114,7 +110,7 @@ export default function RyuFlixxIntro() {
             RYUFLIXX
           </div>
 
-          {/* Tiny cinematic line underneath */}
+          {/* Minimal cinematic line */}
           <div
             className="mt-5 h-px bg-white/70"
             style={{
@@ -124,16 +120,6 @@ export default function RyuFlixxIntro() {
           />
         </div>
       </div>
-
-      {/* Subtle final black fade at the very end.
-          Prevents the overlay from feeling like it simply disappears. */}
-      <div
-        className="absolute inset-0 bg-black"
-        style={{
-          opacity: revealing ? 0 : 0,
-          transition: "opacity 0.8s ease",
-        }}
-      />
     </div>
   );
-            }
+}
