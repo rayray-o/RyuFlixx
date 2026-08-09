@@ -11,6 +11,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/utils/helpers";
 import MangaParallaxBackground from "@/components/ui/background/MangaParallaxBackground";
+import RyuFlixxIntro from "@/components/ui/RyuFlixxIntro";
 import { IS_PRODUCTION, SpacingClasses } from "@/utils/constants";
 import dynamic from "next/dynamic";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
