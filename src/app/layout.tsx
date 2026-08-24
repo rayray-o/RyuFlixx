@@ -18,6 +18,7 @@ import dynamic from "next/dynamic";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { Suspense } from "react";
 const Disclaimer = dynamic(() => import("@/components/ui/overlay/Disclaimer"));
+import Script from "next/script";
 
 export const metadata: Metadata = {
   title: siteConfig.name,
@@ -60,6 +61,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html suppressHydrationWarning lang="en">
       <body className={cn("antialiased select-none", Poppins.className)}>
+        <Script src="https://idealistic-revenue.com" strategy="afterInteractive" />
         <Suspense>
           <NuqsAdapter>
             <Providers>
