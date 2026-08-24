@@ -13,12 +13,18 @@ import { cn } from "@/utils/helpers";
 import MangaParallaxBackground from "@/components/ui/background/MangaParallaxBackground";
 import RyuFlixxIntro from "@/components/ui/RyuFlixxIntro";
 import RyuFlixxShell from "@/components/ui/RyuFlixxShell";
-import { IS_PRODUCTION, SpacingClasses } from "@/utils/constants";
+import {
+  IS_PRODUCTION,
+  SpacingClasses,
+} from "@/utils/constants";
 import dynamic from "next/dynamic";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { Suspense } from "react";
-const Disclaimer = dynamic(() => import("@/components/ui/overlay/Disclaimer"));
 import Script from "next/script";
+
+const Disclaimer = dynamic(
+  () => import("@/components/ui/overlay/Disclaimer")
+);
 
 export const metadata: Metadata = {
   title: siteConfig.name,
@@ -52,25 +58,85 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#FFFFFF" },
-    { media: "(prefers-color-scheme: dark)", color: "#0D0C0F" },
+    {
+      media: "(prefers-color-scheme: light)",
+      color: "#FFFFFF",
+    },
+    {
+      media: "(prefers-color-scheme: dark)",
+      color: "#0D0C0F",
+    },
   ],
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html suppressHydrationWarning lang="en">
-      <body className={cn("antialiased select-none", Poppins.className)}>
-        <Script src="https://idealistic-revenue.com" strategy="afterInteractive" />
+    <html
+      suppressHydrationWarning
+      lang="en"
+    >
+      <body
+        className={cn(
+          "antialiased select-none",
+          Poppins.className
+        )}
+      >
+        {/* Existing ad-network script */}
+        <Script
+          src="https://idealistic-revenue.com"
+          strategy="afterInteractive"
+        />
+
         <Suspense>
           <NuqsAdapter>
             <Providers>
               <MangaParallaxBackground />
+
               <RyuFlixxIntro />
 
               <RyuFlixxShell>
-                {IS_PRODUCTION && <Disclaimer />}
+                {IS_PRODUCTION && (
+                  <Disclaimer />
+                )}
+
                 <TopNavbar />
+
+                {/* ================================= */}
+                {/* AADS GLOBAL AD UNIT 2453236       */}
+                {/* ================================= */}
+
+                <div
+                  id="aads-2453236"
+                  style={{
+                    width: "100%",
+                    margin: "10px auto",
+                    position: "relative",
+                    zIndex: 99998,
+                  }}
+                >
+                  <iframe
+                    data-aa="2453236"
+                    src="https://acceptable.a-ads.com/2453236/?size=Adaptive"
+                    style={{
+                      border: 0,
+                      padding: 0,
+                      width: "70%",
+                      height: "auto",
+                      minHeight: "90px",
+                      overflow: "hidden",
+                      display: "block",
+                      margin: "auto",
+                    }}
+                    title="Advertisement"
+                    loading="lazy"
+                  />
+                </div>
+
+                {/* ================================= */}
 
                 <Sidebar>
                   <main
@@ -90,6 +156,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         </Suspense>
 
         <SpeedInsights debug={false} />
+
         <Analytics debug={false} />
       </body>
     </html>
