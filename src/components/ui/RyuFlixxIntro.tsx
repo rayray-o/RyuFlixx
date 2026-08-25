@@ -77,7 +77,7 @@ export default function RyuFlixxIntro() {
         }}
       />
 
-      {/* RYUFLIXX title */}
+      {/* RYUFLIX title */}
       <div
         className="absolute inset-0 flex items-center justify-center"
         style={{
@@ -107,7 +107,7 @@ export default function RyuFlixxIntro() {
                 "0 2px 30px rgba(0,0,0,0.65)",
             }}
           >
-            RYUFLIXX
+            RYUFLIX
           </div>
 
           {/* Minimal cinematic line */}
