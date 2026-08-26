@@ -1,11 +1,11 @@
-import { ADS_WARNING_STORAGE_KEY, SpacingClasses } from "@/utils/constants";
+import { SpacingClasses } from "@/utils/constants";
 import { siteConfig } from "@/config/site";
 import useBreakpoints from "@/hooks/useBreakpoints";
 import { cn } from "@/utils/helpers";
 import { mutateMovieTitle } from "@/utils/movies";
 import { getMoviePlayers } from "@/utils/players";
 import { Card, Skeleton } from "@heroui/react";
-import { useDisclosure, useDocumentTitle, useIdle, useLocalStorage } from "@mantine/hooks";
+import { useDisclosure, useDocumentTitle, useIdle } from "@mantine/hooks";
 import dynamic from "next/dynamic";
 import { parseAsInteger, useQueryState } from "nuqs";
 import { useMemo } from "react";
@@ -20,10 +20,7 @@ interface MoviePlayerProps {
 }
 
 const MoviePlayer: React.FC<MoviePlayerProps> = ({ movie, startAt }) => {
-  const [seen] = useLocalStorage<boolean>({
-    key: ADS_WARNING_STORAGE_KEY,
-    getInitialValueInEffect: false,
-  });
+  
 
   const players = getMoviePlayers(movie.id, startAt);
   const title = mutateMovieTitle(movie);
@@ -53,7 +50,6 @@ const MoviePlayer: React.FC<MoviePlayerProps> = ({ movie, startAt }) => {
         />
         <Card shadow="md" radius="none" className="relative h-screen">
           <Skeleton className="absolute h-full w-full" />
-          {seen && (
             <iframe
               allowFullScreen
               key={PLAYER.title}
