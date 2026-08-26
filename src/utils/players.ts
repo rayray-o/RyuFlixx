@@ -32,7 +32,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
       // NOTE: VidKing has a known issue with the `progress` query parameter where it stuck at that timestamp.
       // Currently, this player can save playback progress but cannot resume from a specific timestamp.
       // The `progress` parameter is commented out in the source URL until this is resolved.
-      source: `https://www.vidking.net/embed/movie/${id}?color=006fee&autoplay=false`, //&progress=${startAt || ""}`,
+      source: `https://embed.filmu.in/movie/${id}`, //&progress=${startAt || ""}`,
       recommended: true,
       fast: true,
       resumable: true,
@@ -138,7 +138,7 @@ export const getTvShowPlayers = (
       // NOTE: VidKing has a known issue with the `progress` query parameter where it stuck at that timestamp.
       // Currently, this player can save playback progress but cannot resume from a specific timestamp.
       // The `progress` parameter is commented out in the source URL until this is resolved.
-      source: `https://www.vidking.net/embed/tv/${id}/${season}/${episode}?color=f5a524&autoplay=false`, //&progress=${startAt || ""}`,
+      source: `https://embed.filmu.in/tv/${id}/${season}/${episode}`, //&progress=${startAt || ""}`,
       recommended: true,
       fast: true,
       resumable: true,
