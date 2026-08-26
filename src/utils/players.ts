@@ -44,7 +44,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
     },
     {
       title: "RyuFlix Embed 2",
-      source: `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1`,
+      source: `https://multiembed.mov/?video_id=${id}&tmdb=1`,
       fast: true,
       ads: true,
     },
