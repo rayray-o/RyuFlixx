@@ -39,7 +39,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
     },
     {
       title: "<RyuFlix Embed>",
-      source: `https://embed.su/embed/movie/${id}`,
+      source: `https://www.2embed.cc/embed/${id}`,
       ads: true,
     },
     {
@@ -60,7 +60,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
     },
     {
       title: "RyuFlix 6",
-      source: `https://autoembed.co/movie/tmdb/${id}`,
+      source: `https://vidcore.org/embed/movie/${id}?autoplay=true`,
       fast: true,
       ads: true,
     },
@@ -76,7 +76,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
     },
     {
       title: "RyuFlix 9",
-      source: `https://vidsrc.xyz/embed/movie/${id}`,
+      source: `https://vidsrcme.ru/embed/movie/${id}`,
       ads: true,
     },
     {
