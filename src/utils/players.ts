@@ -145,7 +145,7 @@ export const getTvShowPlayers = (
     },
     {
       title: "<RyuFlix Embed>",
-      source: `https://embed.su/embed/tv/${id}/${season}/${episode}`,
+      source: `https://www.embed.cc/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
@@ -166,49 +166,44 @@ export const getTvShowPlayers = (
     },
     {
       title: "RyuFlix 5",
-      source: `https://autoembed.co/tv/tmdb/${id}-${season}-${episode}`,
+      source: `https://vidcore.org/embed/tv/${id}/${season}/${episode}`,
       fast: true,
       ads: true,
     },
     {
       title: "RyuFlix 6",
-      source: `https://player.autoembed.cc/embed/tv/${id}/${season}/${episode}`,
-      ads: true,
-    },
-    {
-      title: "RyuFlix 7",
       source: `https://www.2embed.cc/embedtv/${id}&s=${season}&e=${episode}`,
       ads: true,
     },
     {
+      title: "RyuFlix 7",
+      source: `https://vidsrc.ru/embed/tv/${id}/${season}/${episode}`,
+      ads: true,
+    },
+    {
       title: "RyuFlix 8",
-      source: `https://vidsrc.xyz/embed/tv/${id}/${season}/${episode}`,
+      source: `https://vidsrc.ir/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
       title: "RyuFlix 9",
-      source: `https://vidsrc.to/embed/tv/${id}/${season}/${episode}`,
+      source: `https://vidsrc.su/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
       title: "RyuFlix 10",
-      source: `https://vidsrc.icu/embed/tv/${id}/${season}/${episode}`,
+      source: `https://vidsrc-me.ir/embed/tv/${id}/${season}/${episode}?autoPlay=false`,
       ads: true,
     },
     {
       title: "RyuFlix 11",
-      source: `https://vidsrc.cc/v2/embed/tv/${id}/${season}/${episode}?autoPlay=false`,
-      ads: true,
-    },
-    {
-      title: "RyuFlix 12",
-      source: `https://vidsrc.cc/v3/embed/tv/${id}/${season}/${episode}?autoPlay=false`,
+      source: `https://vsembed.ru/embed/tv/${id}/${season}/${episode}?autoPlay=false`,
       recommended: true,
       fast: true,
       ads: true,
     },
     {
-      title: "RyuFlix 13",
+      title: "RyuFlix 12",
       source: `https://moviesapi.club/tv/${id}-${season}-${episode}`,
       ads: true,
     },
