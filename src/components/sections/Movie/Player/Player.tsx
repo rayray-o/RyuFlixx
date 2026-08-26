@@ -56,7 +56,6 @@ const MoviePlayer: React.FC<MoviePlayerProps> = ({ movie, startAt }) => {
               src={PLAYER.source}
               className={cn("z-10 h-full", { "pointer-events-none": idle && !mobile })}
             />
-          )}
         </Card>
       </div>
 
