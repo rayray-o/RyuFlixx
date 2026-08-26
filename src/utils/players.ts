@@ -12,7 +12,7 @@ import { PlayersProps } from "@/types";
 export const getMoviePlayers = (id: string | number, startAt?: number): PlayersProps[] => {
   return [
     {
-      title: "VidLink",
+      title: "RyuFlix 1",
       source: `https://vidlink.pro/movie/${id}?player=jw&primaryColor=006fee&secondaryColor=a2a2a2&iconColor=eefdec&autoplay=false&startAt=${startAt || ""}`,
       recommended: true,
       fast: true,
