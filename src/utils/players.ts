@@ -20,7 +20,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
       resumable: true,
     },
     {
-      title: "VidLink 2",
+      title: "RyuFlix 2",
       source: `https://vidlink.pro/movie/${id}?primaryColor=006fee&autoplay=false&startAt=${startAt}`,
       recommended: true,
       fast: true,
@@ -28,7 +28,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
       resumable: true,
     },
     {
-      title: "VidKing",
+      title: "RyuFlix 3",
       // NOTE: VidKing has a known issue with the `progress` query parameter where it stuck at that timestamp.
       // Currently, this player can save playback progress but cannot resume from a specific timestamp.
       // The `progress` parameter is commented out in the source URL until this is resolved.
@@ -38,71 +38,71 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
       resumable: true,
     },
     {
-      title: "<Embed>",
+      title: "<RyuFlix Embed>",
       source: `https://embed.su/embed/movie/${id}`,
       ads: true,
     },
     {
-      title: "SuperEmbed",
+      title: "RyuFlix Embed 2",
       source: `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1`,
       fast: true,
       ads: true,
     },
     {
-      title: "FilmKu",
+      title: "RyuFlix 4",
       source: `https://filmku.stream/embed/${id}`,
       ads: true,
     },
     {
-      title: "NontonGo",
+      title: "RyuFlix 5",
       source: `https://www.nontongo.win/embed/movie/${id}`,
       ads: true,
     },
     {
-      title: "AutoEmbed 1",
+      title: "RyuFlix 6",
       source: `https://autoembed.co/movie/tmdb/${id}`,
       fast: true,
       ads: true,
     },
     {
-      title: "AutoEmbed 2",
+      title: "RyuFlix 7",
       source: `https://player.autoembed.cc/embed/movie/${id}`,
       ads: true,
     },
     {
-      title: "2Embed",
+      title: "Ryuzflix 8",
       source: `https://www.2embed.cc/embed/${id}`,
       ads: true,
     },
     {
-      title: "VidSrc 1",
+      title: "RyuFlix 9",
       source: `https://vidsrc.xyz/embed/movie/${id}`,
       ads: true,
     },
     {
-      title: "VidSrc 2",
+      title: "RyuFlix 10",
       source: `https://vidsrc.to/embed/movie/${id}`,
       ads: true,
     },
     {
-      title: "VidSrc 3",
+      title: "RyuFlix 11",
       source: `https://vidsrc.icu/embed/movie/${id}`,
       ads: true,
     },
     {
-      title: "VidSrc 4",
+      title: "RyuFlix 12",
       source: `https://vidsrc.cc/v2/embed/movie/${id}?autoPlay=false`,
       ads: true,
     },
     {
-      title: "VidSrc 5",
+      title: "RyuFlix 13",
       source: `https://vidsrc.cc/v3/embed/movie/${id}?autoPlay=false`,
       recommended: true,
       fast: true,
       ads: true,
     },
     {
-      title: "MoviesAPI",
+      title: "RyuFlix 14",
       source: `https://moviesapi.club/movie/${id}`,
       ads: true,
     },
@@ -128,7 +128,7 @@ export const getTvShowPlayers = (
 ): PlayersProps[] => {
   return [
     {
-      title: "VidLink",
+      title: "RyuFlix 1",
       source: `https://vidlink.pro/tv/${id}/${season}/${episode}?player=jw&primaryColor=f5a524&secondaryColor=a2a2a2&iconColor=eefdec&autoplay=false&startAt=${startAt || ""}`,
       recommended: true,
       fast: true,
@@ -136,7 +136,7 @@ export const getTvShowPlayers = (
       resumable: true,
     },
     {
-      title: "VidLink 2",
+      title: "RyuFlix 2",
       source: `https://vidlink.pro/tv/${id}/${season}/${episode}?primaryColor=f5a524&autoplay=false&startAt=${startAt}`,
       recommended: true,
       fast: true,
@@ -144,7 +144,7 @@ export const getTvShowPlayers = (
       resumable: true,
     },
     {
-      title: "VidKing",
+      title: "RyuFlix 3",
       // NOTE: VidKing has a known issue with the `progress` query parameter where it stuck at that timestamp.
       // Currently, this player can save playback progress but cannot resume from a specific timestamp.
       // The `progress` parameter is commented out in the source URL until this is resolved.
@@ -154,71 +154,71 @@ export const getTvShowPlayers = (
       resumable: true,
     },
     {
-      title: "<Embed>",
+      title: "<RyuFlix Embed>",
       source: `https://embed.su/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
-      title: "SuperEmbed",
+      title: "RyuFlix Embed 2",
       source: `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&s=${season}&e=${episode}`,
       fast: true,
       ads: true,
     },
     {
-      title: "FilmKu",
+      title: "RyuFlix 3",
       source: `https://filmku.stream/embed/series?tmdb=${id}&sea=${season}&epi=${episode}`,
       ads: true,
     },
     {
-      title: "NontonGo",
+      title: "RyuFlix 4",
       source: `https://www.NontonGo.win/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
-      title: "AutoEmbed 1",
+      title: "RyuFlix 5",
       source: `https://autoembed.co/tv/tmdb/${id}-${season}-${episode}`,
       fast: true,
       ads: true,
     },
     {
-      title: "AutoEmbed 2",
+      title: "RyuFlix 6",
       source: `https://player.autoembed.cc/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
-      title: "2Embed",
+      title: "RyuFlix 7",
       source: `https://www.2embed.cc/embedtv/${id}&s=${season}&e=${episode}`,
       ads: true,
     },
     {
-      title: "VidSrc 1",
+      title: "RyuFlix 8",
       source: `https://vidsrc.xyz/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
-      title: "VidSrc 2",
+      title: "RyuFlix 9",
       source: `https://vidsrc.to/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
-      title: "VidSrc 3",
+      title: "RyuFlix 10",
       source: `https://vidsrc.icu/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
-      title: "VidSrc 4",
+      title: "RyuFlix 11",
       source: `https://vidsrc.cc/v2/embed/tv/${id}/${season}/${episode}?autoPlay=false`,
       ads: true,
     },
     {
-      title: "VidSrc 5",
+      title: "RyuFlix 12",
       source: `https://vidsrc.cc/v3/embed/tv/${id}/${season}/${episode}?autoPlay=false`,
       recommended: true,
       fast: true,
       ads: true,
     },
     {
-      title: "MoviesAPI",
+      title: "RyuFlix 13",
       source: `https://moviesapi.club/tv/${id}-${season}-${episode}`,
       ads: true,
     },
