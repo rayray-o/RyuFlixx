@@ -29,6 +29,11 @@ export const metadata: Metadata = {
   title: siteConfig.name,
   applicationName: siteConfig.name,
   description: siteConfig.description,
+
+  other: {
+    "ppck-ver": "613a3e2816304fb4feddee393bc97d67",
+  },
+
   manifest: "/manifest.json",
   icons: {
     icon: siteConfig.favicon,
