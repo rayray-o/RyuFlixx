@@ -13,14 +13,6 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
   return [
     {
       title: "RyuFlix 1",
-      source: `https://vidlink.pro/movie/${id}?player=jw&primaryColor=006fee&secondaryColor=a2a2a2&iconColor=eefdec&autoplay=false&startAt=${startAt || ""}`,
-      recommended: true,
-      fast: true,
-      ads: true,
-      resumable: true,
-    },
-    {
-      title: "RyuFlix 2",
       source: `https://vidlink.pro/movie/${id}?primaryColor=006fee&autoplay=false&startAt=${startAt}`,
       recommended: true,
       fast: true,
@@ -28,10 +20,15 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
       resumable: true,
     },
     {
+      title: "RyuFlix 2",
+      source: `https://vidlink.pro/movie/${id}?player=jw&primaryColor=006fee&secondaryColor=a2a2a2&iconColor=eefdec&autoplay=false&startAt=${startAt || ""}`,
+      recommended: true,
+      fast: true,
+      ads: true,
+      resumable: true,
+    },
+    {
       title: "RyuFlix 3",
-      // NOTE: VidKing has a known issue with the `progress` query parameter where it stuck at that timestamp.
-      // Currently, this player can save playback progress but cannot resume from a specific timestamp.
-      // The `progress` parameter is commented out in the source URL until this is resolved.
       source: `https://embed.filmu.in/movie/${id}`, //&progress=${startAt || ""}`,
       recommended: true,
       fast: true,
