@@ -53,7 +53,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
             key={currentServer.title}
             src={currentServer.source}
             title={`${title} — ${currentServer.title}`}
-            className={`absolute inset-0 z-10 h-full w-full border-0"
+            className="absolute inset-0 z-10 h-full w-full border-0"
             allowFullScreen
             loading="eager"
             referrerPolicy="strict-origin-when-cross-origin"
@@ -61,7 +61,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
           />
 
           {loading && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/45 backdrop-blur-md">
+            <div className="absolute inset-0 z-10 h-full w-full border-0"
               <div className="flex flex-col items-center gap-3">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
                 <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/80">
