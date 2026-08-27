@@ -60,7 +60,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
             }`}
             allowFullScreen
             loading="eager"
-            sandbox="allow-scripts allow-same-origin allow-forms"
             referrerPolicy="strict-origin-when-cross-origin"
             onLoad={() => setLoading(false)}
           />
