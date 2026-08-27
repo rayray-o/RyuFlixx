@@ -53,11 +53,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
             key={currentServer.title}
             src={currentServer.source}
             title={`${title} — ${currentServer.title}`}
-            className={`absolute inset-0 z-10 h-full w-full border-0 ${
-              disableInteractionWhenIdle
-                ? "pointer-events-none"
-                : "pointer-events-auto"
-            }`}
+            className={`absolute inset-0 z-10 h-full w-full border-0"
             allowFullScreen
             loading="eager"
             referrerPolicy="strict-origin-when-cross-origin"
