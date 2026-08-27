@@ -5,7 +5,12 @@ import { useDocumentVisibility } from "@mantine/hooks";
 import { useEffect, useRef, useState } from "react";
 import useSupabaseUser from "./useSupabaseUser";
 
-export type PlayerEventType = "play" | "pause" | "seeked" | "ended" | "timeupdate";
+export type PlayerEventType =
+  | "play"
+  | "pause"
+  | "seeked"
+  | "ended"
+  | "timeupdate";
 
 export interface BasePlayerEventEnvelope<T> {
   type: "PLAYER_EVENT" | "MEDIA_DATA";
@@ -22,7 +27,8 @@ export interface VidlinkEventData {
   episode?: number;
 }
 
-export type VidlinkPlayerMessage = BasePlayerEventEnvelope<VidlinkEventData>;
+export type VidlinkPlayerMessage =
+  BasePlayerEventEnvelope<VidlinkEventData>;
 
 export interface VidkingEventData {
   event: PlayerEventType;
@@ -35,7 +41,8 @@ export interface VidkingEventData {
   progress?: number;
 }
 
-export type VidkingPlayerMessage = BasePlayerEventEnvelope<VidkingEventData>;
+export type VidkingPlayerMessage =
+  BasePlayerEventEnvelope<VidkingEventData>;
 
 export interface UnifiedPlayerEventData {
   event: PlayerEventType;
@@ -48,10 +55,10 @@ export interface UnifiedPlayerEventData {
   progress?: number;
 }
 
-export interface PlayerAdapter<RawMessage extends BasePlayerEventEnvelope<any>> {
-  /** Domain origin for identifying source */
+export interface PlayerAdapter<
+  RawMessage extends BasePlayerEventEnvelope<any>,
+> {
   origin: `https://${string}`;
-  /** Converts raw → unified structure */
   parse: (raw: RawMessage) => UnifiedPlayerEventData | null;
 }
 
@@ -60,9 +67,12 @@ export type AdapterMap = Record<string, PlayerAdapter<any>>;
 export const playerAdapters = {
   vidlink: {
     origin: "https://vidlink.pro",
+
     parse: (raw) => {
       if (raw.type !== "PLAYER_EVENT") return null;
+
       const d = raw.data;
+
       return {
         ...d,
         mediaId: d.mtmdbId,
@@ -72,9 +82,12 @@ export const playerAdapters = {
 
   vidking: {
     origin: "https://www.vidking.net",
+
     parse: (raw) => {
       if (raw.type !== "PLAYER_EVENT") return null;
+
       const d = raw.data;
+
       return {
         ...d,
         mediaId: d.id,
@@ -84,8 +97,13 @@ export const playerAdapters = {
 } as const satisfies AdapterMap;
 
 export interface UsePlayerEventsOptions {
-  metadata?: { season?: number; episode?: number };
+  metadata?: {
+    season?: number;
+    episode?: number;
+  };
+
   saveHistory?: boolean;
+
   onPlay?: (data: UnifiedPlayerEventData) => void;
   onPause?: (data: UnifiedPlayerEventData) => void;
   onSeeked?: (data: UnifiedPlayerEventData) => void;
@@ -93,108 +111,337 @@ export interface UsePlayerEventsOptions {
   onTimeUpdate?: (data: UnifiedPlayerEventData) => void;
 }
 
-export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
+export function usePlayerEvents(
+  options: UsePlayerEventsOptions = {},
+) {
   const { data: user } = useSupabaseUser();
   const documentState = useDocumentVisibility();
 
-  const { metadata, saveHistory, onPlay, onPause, onSeeked, onEnded, onTimeUpdate } = options;
+  const {
+    metadata,
+    saveHistory,
+    onPlay,
+    onPause,
+    onSeeked,
+    onEnded,
+    onTimeUpdate,
+  } = options;
+
+  /*
+   * IMPORTANT:
+   * Fast player events should NOT constantly update React state.
+   *
+   * timeupdate can fire many times while a video is playing.
+   * Keeping rapidly-changing values in refs prevents unnecessary
+   * re-renders of the movie/player page.
+   */
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [lastEvent, setLastEvent] = useState<PlayerEventType | null>(null);
-  const [lastCurrentTime, setLastCurrentTime] = useState(0);
+  const [lastEvent, setLastEvent] =
+    useState<PlayerEventType | null>(null);
 
-  const eventDataRef = useRef<UnifiedPlayerEventData | null>(null);
+  const eventDataRef =
+    useRef<UnifiedPlayerEventData | null>(null);
 
-  const syncToServer = async (data: UnifiedPlayerEventData, completed?: boolean) => {
-    if (!saveHistory || !user) return;
-    if (diff(data.currentTime, lastCurrentTime) <= 5) return; // prevent spam
+  const lastCurrentTimeRef = useRef(0);
+
+  const metadataRef = useRef(metadata);
+  const saveHistoryRef = useRef(saveHistory);
+  const userRef = useRef(user);
+
+  const callbacksRef = useRef({
+    onPlay,
+    onPause,
+    onSeeked,
+    onEnded,
+    onTimeUpdate,
+  });
+
+  /*
+   * Keep refs synchronized without recreating the window
+   * message listener every render.
+   */
+
+  useEffect(() => {
+    metadataRef.current = metadata;
+  }, [metadata]);
+
+  useEffect(() => {
+    saveHistoryRef.current = saveHistory;
+  }, [saveHistory]);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  useEffect(() => {
+    callbacksRef.current = {
+      onPlay,
+      onPause,
+      onSeeked,
+      onEnded,
+      onTimeUpdate,
+    };
+  }, [
+    onPlay,
+    onPause,
+    onSeeked,
+    onEnded,
+    onTimeUpdate,
+  ]);
+
+  const syncToServer = async (
+    data: UnifiedPlayerEventData,
+    completed = false,
+  ) => {
+    const currentUser = userRef.current;
+
+    if (!saveHistoryRef.current || !currentUser) {
+      return;
+    }
+
+    /*
+     * Use the ref rather than React state so this value is
+     * always current inside async/event callbacks.
+     */
+
+    if (
+      diff(
+        data.currentTime,
+        lastCurrentTimeRef.current,
+      ) <= 5 &&
+      !completed
+    ) {
+      return;
+    }
+
+    const currentMetadata = metadataRef.current;
 
     const payload: UnifiedPlayerEventData = {
       ...data,
-      season: data.season || metadata?.season || 0,
-      episode: data.episode || metadata?.episode || 0,
+      season:
+        data.season ??
+        currentMetadata?.season ??
+        0,
+      episode:
+        data.episode ??
+        currentMetadata?.episode ??
+        0,
     };
 
-    const { success, message } = await syncHistory(payload, completed);
-    if (success) setLastCurrentTime(data.currentTime);
-    else console.error("Save history failed:", message);
+    const { success, message } =
+      await syncHistory(payload, completed);
+
+    if (success) {
+      lastCurrentTimeRef.current =
+        data.currentTime;
+    } else {
+      console.error(
+        "Save history failed:",
+        message,
+      );
+    }
   };
 
+  /*
+   * Save progress when the document becomes hidden.
+   */
+
   useEffect(() => {
-    if (!saveHistory || !user) return;
+    if (!saveHistoryRef.current) return;
     if (documentState === "visible") return;
-    if (!eventDataRef.current) return;
-    syncToServer(eventDataRef.current);
-  }, [documentState, lastCurrentTime]);
+
+    const latestEvent = eventDataRef.current;
+
+    if (!latestEvent) return;
+
+    void syncToServer(latestEvent);
+  }, [documentState]);
+
+  /*
+   * Listen for player events.
+   *
+   * The listener is installed ONCE.
+   * Rapid timeupdate events no longer cause a cascade
+   * of React renders.
+   */
 
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (!saveHistory || !user) return;
-      if (!eventDataRef.current) return;
+      if (
+        !saveHistoryRef.current ||
+        !userRef.current
+      ) {
+        return;
+      }
+
+      const latestEvent = eventDataRef.current;
+
+      if (!latestEvent) return;
 
       const payload = {
-        ...eventDataRef.current,
-        completed: eventDataRef.current.event === "ended",
+        ...latestEvent,
+        completed:
+          latestEvent.event === "ended",
       };
-      navigator.sendBeacon("/api/player/save-history", JSON.stringify(payload));
+
+      navigator.sendBeacon(
+        "/api/player/save-history",
+        JSON.stringify(payload),
+      );
     };
 
     const handleMessage = (event: MessageEvent) => {
-      const adapter = Object.values(playerAdapters).find((a) => a.origin === event.origin);
+      const adapter = Object.values(
+        playerAdapters,
+      ).find(
+        (candidate) =>
+          candidate.origin === event.origin,
+      );
+
       if (!adapter) return;
 
       let rawData: any;
+
       try {
-        rawData = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-      } catch (err) {
-        console.warn("Invalid JSON from player:", err);
+        rawData =
+          typeof event.data === "string"
+            ? JSON.parse(event.data)
+            : event.data;
+      } catch {
+        console.warn(
+          "Invalid JSON from player:",
+          event.data,
+        );
+
         return;
       }
 
       const parsed = adapter.parse(rawData);
+
       if (!parsed) return;
 
+      /*
+       * Always keep the newest player event in a ref.
+       * This does not trigger a React render.
+       */
+
       eventDataRef.current = parsed;
-      setLastEvent(parsed.event);
 
       switch (parsed.event) {
-        case "play":
+        case "play": {
           setIsPlaying(true);
-          onPlay?.(parsed);
+          setLastEvent("play");
+
+          callbacksRef.current.onPlay?.(
+            parsed,
+          );
+
           break;
-        case "pause":
+        }
+
+        case "pause": {
           setIsPlaying(false);
-          onPause?.(parsed);
+          setLastEvent("pause");
+
+          callbacksRef.current.onPause?.(
+            parsed,
+          );
+
           break;
-        case "ended":
+        }
+
+        case "seeked": {
+          setCurrentTime(
+            parsed.currentTime,
+          );
+
+          setDuration(parsed.duration);
+          setLastEvent("seeked");
+
+          callbacksRef.current.onSeeked?.(
+            parsed,
+          );
+
+          break;
+        }
+
+        case "timeupdate": {
+          /*
+           * Keep these updates lightweight.
+           *
+           * The event is still exposed to consumers,
+           * but history syncing is NOT performed on
+           * every timeupdate.
+           */
+
+          setCurrentTime(
+            parsed.currentTime,
+          );
+
+          setDuration(parsed.duration);
+          setLastEvent("timeupdate");
+
+          callbacksRef.current.onTimeUpdate?.(
+            parsed,
+          );
+
+          break;
+        }
+
+        case "ended": {
           setIsPlaying(false);
-          syncToServer(parsed, true);
-          onEnded?.(parsed);
+          setLastEvent("ended");
+
+          void syncToServer(
+            parsed,
+            true,
+          );
+
+          callbacksRef.current.onEnded?.(
+            parsed,
+          );
+
           break;
-        case "seeked":
-          setCurrentTime(parsed.currentTime);
-          setDuration(parsed.duration);
-          onSeeked?.(parsed);
-          break;
-        case "timeupdate":
-          setCurrentTime(parsed.currentTime);
-          setDuration(parsed.duration);
-          onTimeUpdate?.(parsed);
-          break;
+        }
       }
     };
 
-    window.addEventListener("message", handleMessage);
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener(
+      "message",
+      handleMessage,
+    );
+
+    window.addEventListener(
+      "beforeunload",
+      handleBeforeUnload,
+    );
 
     return () => {
-      if (eventDataRef.current) handleBeforeUnload();
-      window.removeEventListener("message", handleMessage);
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      /*
+       * Save the latest state one final time.
+       */
+
+      handleBeforeUnload();
+
+      window.removeEventListener(
+        "message",
+        handleMessage,
+      );
+
+      window.removeEventListener(
+        "beforeunload",
+        handleBeforeUnload,
+      );
     };
   }, []);
 
-  return { isPlaying, currentTime, duration, lastEvent };
-}
+  return {
+    isPlaying,
+    currentTime,
+    duration,
+    lastEvent,
+  };
+    }
