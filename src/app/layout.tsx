@@ -20,7 +20,6 @@ import {
 import dynamic from "next/dynamic";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { Suspense } from "react";
-import Script from "next/script";
 
 const Disclaimer = dynamic(
   () => import("@/components/ui/overlay/Disclaimer")
@@ -85,12 +84,6 @@ export default function RootLayout({
           Poppins.className
         )}
       >
-        {/* Existing ad-network script */}
-        <Script
-          src="https://idealistic-revenue.com"
-          strategy="afterInteractive"
-        />
-
         <Suspense>
           <NuqsAdapter>
             <Providers>
