@@ -61,7 +61,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
           />
 
           {loading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 backdrop blur-md">
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 backdrop-blur-md">
               <div className="flex flex-col items-center gap-3">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
                 <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/80">
@@ -73,8 +73,8 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
               </div>
             </div>
           )}
-        
-      
+        </div>
+      </div>
 
       {/* Unified RyuFlix server controls. */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
