@@ -54,8 +54,7 @@ const MoviePlayer: React.FC<MoviePlayerProps> = ({ movie, startAt }) => {
           title={title}
           servers={players}
           selectedServer={safeSelectedSource}
-          onServerChange={setSelectedSource}
-          disableInteractionWhenIdle={idle && !mobile}
+          onServerChange={setSelectedSource} 
         />
       </div>
 
