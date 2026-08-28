@@ -44,42 +44,39 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
 
   return (
     <section className="w-full">
-      {/* VIDEO */}
-      <div className="w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
+      {/* PLAYER CANVAS */}
+      <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
         <iframe
           key={`${currentServer.title}-${currentServer.source}`}
           src={currentServer.source}
           title={`${title} — ${currentServer.title}`}
-          className="block aspect-video w-full border-0"
-          style={{
-            pointerEvents: "auto",
-            touchAction: "manipulation",
-          }}
+          className="absolute inset-0 block h-full w-full border-0"
           allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
           allowFullScreen
           loading="eager"
           referrerPolicy="strict-origin-when-cross-origin"
           onLoad={() => setLoading(false)}
         />
+
+        {loading && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-md">
+            <div className="flex flex-col items-center gap-3">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+
+              <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/70">
+                Connecting
+              </span>
+
+              <span className="text-xs text-white/40">
+                {currentServer.title}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* LOADING STATUS — NOT OVER THE IFRAME */}
-      {loading && (
-        <div className="mt-2 flex items-center justify-center gap-2 text-xs text-white/40">
-          <div className="h-3 w-3 animate-spin rounded-full border border-white/20 border-t-white/70" />
-          <span>
-            Connecting to {currentServer.title}
-          </span>
-        </div>
-      )}
-
       {/* SERVER CONTROLS */}
-      <div
-        className="mt-4 flex flex-wrap items-center gap-2"
-        style={{
-          touchAction: "manipulation",
-        }}
-      >
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         <span className="mr-1 text-xs font-medium uppercase tracking-widest text-white/40">
           Server
         </span>
@@ -102,7 +99,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
                 "rounded-xl border px-4 py-2 text-sm font-medium",
                 "transition-colors duration-150",
                 "focus:outline-none focus:ring-2 focus:ring-white/30",
-                "touch-manipulation",
                 active
                   ? "border-white/30 bg-white/15 text-white shadow-lg"
                   : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
