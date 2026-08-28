@@ -20,6 +20,7 @@ import {
 import dynamic from "next/dynamic";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { Suspense } from "react";
+import Script from "next/script";
 
 const Disclaimer = dynamic(
   () => import("@/components/ui/overlay/Disclaimer")
@@ -30,14 +31,17 @@ export const metadata: Metadata = {
   applicationName: siteConfig.name,
   description: siteConfig.description,
 
+  // PopCash website verification
   other: {
     "ppck-ver": "613a3e2816304fb4feddee393bc97d67",
   },
 
   manifest: "/manifest.json",
+
   icons: {
     icon: siteConfig.favicon,
   },
+
   twitter: {
     card: "summary",
     title: {
@@ -46,6 +50,7 @@ export const metadata: Metadata = {
     },
     description: siteConfig.description,
   },
+
   openGraph: {
     type: "website",
     siteName: siteConfig.name,
@@ -55,6 +60,7 @@ export const metadata: Metadata = {
     },
     description: siteConfig.description,
   },
+
   formatDetection: {
     telephone: false,
   },
@@ -89,6 +95,30 @@ export default function RootLayout({
           Poppins.className
         )}
       >
+        {/* ================================= */}
+        {/* POPCASH GLOBAL POPUNDER           */}
+        {/* ================================= */}
+
+        <Script
+          id="popcash-ad-script"
+          strategy="afterInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `
+              var uid = '504751';
+              var wid = '757325';
+              var pop_tag = document.createElement('script');
+              pop_tag.src = '//cdn.popcash.net/show.js';
+              document.body.appendChild(pop_tag);
+
+              pop_tag.onerror = function() {
+                pop_tag = document.createElement('script');
+                pop_tag.src = '//cdn2.popcash.net/show.js';
+                document.body.appendChild(pop_tag);
+              };
+            `,
+          }}
+        />
+
         <Suspense>
           <NuqsAdapter>
             <Providers>
@@ -159,4 +189,4 @@ export default function RootLayout({
       </body>
     </html>
   );
-}
+  }
