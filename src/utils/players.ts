@@ -13,7 +13,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
   return [
     {
       title: "RyuFlix 1",
-      source: `https://cinesrc.st/embed/movie/${id}`,
+      source: `https://vidlink.pro/movie/${id}?primaryColor=006fee&autoplay=false&startAt=${startAt}`,
       recommended: true,
       fast: true,
       ads: true,
