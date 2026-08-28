@@ -2,7 +2,7 @@ import { syncHistory } from "@/actions/histories";
 import { ContentType } from "@/types";
 import { diff } from "@/utils/helpers";
 import { useDocumentVisibility } from "@mantine/hooks";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import useSupabaseUser from "./useSupabaseUser";
 
 export type PlayerEventType =
@@ -59,17 +59,22 @@ export interface PlayerAdapter<
   RawMessage extends BasePlayerEventEnvelope<any>,
 > {
   origin: `https://${string}`;
-  parse: (raw: RawMessage) => UnifiedPlayerEventData | null;
+  parse: (
+    raw: RawMessage,
+  ) => UnifiedPlayerEventData | null;
 }
 
-export type AdapterMap = Record<string, PlayerAdapter<any>>;
+export type AdapterMap =
+  Record<string, PlayerAdapter<any>>;
 
 export const playerAdapters = {
   vidlink: {
     origin: "https://vidlink.pro",
 
     parse: (raw) => {
-      if (raw.type !== "PLAYER_EVENT") return null;
+      if (raw.type !== "PLAYER_EVENT") {
+        return null;
+      }
 
       const d = raw.data;
 
@@ -84,7 +89,9 @@ export const playerAdapters = {
     origin: "https://www.vidking.net",
 
     parse: (raw) => {
-      if (raw.type !== "PLAYER_EVENT") return null;
+      if (raw.type !== "PLAYER_EVENT") {
+        return null;
+      }
 
       const d = raw.data;
 
@@ -104,11 +111,25 @@ export interface UsePlayerEventsOptions {
 
   saveHistory?: boolean;
 
-  onPlay?: (data: UnifiedPlayerEventData) => void;
-  onPause?: (data: UnifiedPlayerEventData) => void;
-  onSeeked?: (data: UnifiedPlayerEventData) => void;
-  onEnded?: (data: UnifiedPlayerEventData) => void;
-  onTimeUpdate?: (data: UnifiedPlayerEventData) => void;
+  onPlay?: (
+    data: UnifiedPlayerEventData,
+  ) => void;
+
+  onPause?: (
+    data: UnifiedPlayerEventData,
+  ) => void;
+
+  onSeeked?: (
+    data: UnifiedPlayerEventData,
+  ) => void;
+
+  onEnded?: (
+    data: UnifiedPlayerEventData,
+  ) => void;
+
+  onTimeUpdate?: (
+    data: UnifiedPlayerEventData,
+  ) => void;
 }
 
 export function usePlayerEvents(
@@ -129,18 +150,13 @@ export function usePlayerEvents(
 
   /*
    * IMPORTANT:
-   * Fast player events should NOT constantly update React state.
    *
-   * timeupdate can fire many times while a video is playing.
-   * Keeping rapidly-changing values in refs prevents unnecessary
-   * re-renders of the movie/player page.
+   * This hook intentionally keeps player state in refs.
+   *
+   * MoviePlayer does not consume the returned state, so
+   * using useState here would cause unnecessary React
+   * renders whenever the embedded player sends events.
    */
-
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [lastEvent, setLastEvent] =
-    useState<PlayerEventType | null>(null);
 
   const eventDataRef =
     useRef<UnifiedPlayerEventData | null>(null);
@@ -158,11 +174,6 @@ export function usePlayerEvents(
     onEnded,
     onTimeUpdate,
   });
-
-  /*
-   * Keep refs synchronized without recreating the window
-   * message listener every render.
-   */
 
   useEffect(() => {
     metadataRef.current = metadata;
@@ -198,14 +209,12 @@ export function usePlayerEvents(
   ) => {
     const currentUser = userRef.current;
 
-    if (!saveHistoryRef.current || !currentUser) {
+    if (
+      !saveHistoryRef.current ||
+      !currentUser
+    ) {
       return;
     }
-
-    /*
-     * Use the ref rather than React state so this value is
-     * always current inside async/event callbacks.
-     */
 
     if (
       diff(
@@ -217,14 +226,17 @@ export function usePlayerEvents(
       return;
     }
 
-    const currentMetadata = metadataRef.current;
+    const currentMetadata =
+      metadataRef.current;
 
     const payload: UnifiedPlayerEventData = {
       ...data,
+
       season:
         data.season ??
         currentMetadata?.season ??
         0,
+
       episode:
         data.episode ??
         currentMetadata?.episode ??
@@ -232,7 +244,10 @@ export function usePlayerEvents(
     };
 
     const { success, message } =
-      await syncHistory(payload, completed);
+      await syncHistory(
+        payload,
+        completed,
+      );
 
     if (success) {
       lastCurrentTimeRef.current =
@@ -250,22 +265,33 @@ export function usePlayerEvents(
    */
 
   useEffect(() => {
-    if (!saveHistoryRef.current) return;
-    if (documentState === "visible") return;
+    if (!saveHistoryRef.current) {
+      return;
+    }
 
-    const latestEvent = eventDataRef.current;
+    if (documentState === "visible") {
+      return;
+    }
 
-    if (!latestEvent) return;
+    const latestEvent =
+      eventDataRef.current;
+
+    if (!latestEvent) {
+      return;
+    }
 
     void syncToServer(latestEvent);
   }, [documentState]);
 
   /*
-   * Listen for player events.
+   * Listen for messages from supported players.
    *
-   * The listener is installed ONCE.
-   * Rapid timeupdate events no longer cause a cascade
-   * of React renders.
+   * IMPORTANT:
+   * No player event updates React state.
+   *
+   * The latest event is stored in a ref instead,
+   * which means timeupdate messages cannot cause
+   * MoviePlayer to re-render.
    */
 
   useEffect(() => {
@@ -277,9 +303,12 @@ export function usePlayerEvents(
         return;
       }
 
-      const latestEvent = eventDataRef.current;
+      const latestEvent =
+        eventDataRef.current;
 
-      if (!latestEvent) return;
+      if (!latestEvent) {
+        return;
+      }
 
       const payload = {
         ...latestEvent,
@@ -293,15 +322,20 @@ export function usePlayerEvents(
       );
     };
 
-    const handleMessage = (event: MessageEvent) => {
+    const handleMessage = (
+      event: MessageEvent,
+    ) => {
       const adapter = Object.values(
         playerAdapters,
       ).find(
         (candidate) =>
-          candidate.origin === event.origin,
+          candidate.origin ===
+          event.origin,
       );
 
-      if (!adapter) return;
+      if (!adapter) {
+        return;
+      }
 
       let rawData: any;
 
@@ -319,22 +353,22 @@ export function usePlayerEvents(
         return;
       }
 
-      const parsed = adapter.parse(rawData);
+      const parsed =
+        adapter.parse(rawData);
 
-      if (!parsed) return;
+      if (!parsed) {
+        return;
+      }
 
       /*
-       * Always keep the newest player event in a ref.
-       * This does not trigger a React render.
+       * Store the latest player state without
+       * triggering React rendering.
        */
 
       eventDataRef.current = parsed;
 
       switch (parsed.event) {
         case "play": {
-          setIsPlaying(true);
-          setLastEvent("play");
-
           callbacksRef.current.onPlay?.(
             parsed,
           );
@@ -343,9 +377,6 @@ export function usePlayerEvents(
         }
 
         case "pause": {
-          setIsPlaying(false);
-          setLastEvent("pause");
-
           callbacksRef.current.onPause?.(
             parsed,
           );
@@ -354,35 +385,27 @@ export function usePlayerEvents(
         }
 
         case "seeked": {
-          setCurrentTime(
-            parsed.currentTime,
-          );
-
-          setDuration(parsed.duration);
-          setLastEvent("seeked");
-
           callbacksRef.current.onSeeked?.(
             parsed,
           );
+
+          /*
+           * A seek is an important history point,
+           * so sync it immediately.
+           */
+
+          void syncToServer(parsed);
 
           break;
         }
 
         case "timeupdate": {
           /*
-           * Keep these updates lightweight.
+           * DO NOT call setState here.
            *
-           * The event is still exposed to consumers,
-           * but history syncing is NOT performed on
-           * every timeupdate.
+           * timeupdate can fire repeatedly while
+           * the movie is playing.
            */
-
-          setCurrentTime(
-            parsed.currentTime,
-          );
-
-          setDuration(parsed.duration);
-          setLastEvent("timeupdate");
 
           callbacksRef.current.onTimeUpdate?.(
             parsed,
@@ -392,9 +415,6 @@ export function usePlayerEvents(
         }
 
         case "ended": {
-          setIsPlaying(false);
-          setLastEvent("ended");
-
           void syncToServer(
             parsed,
             true,
@@ -420,10 +440,6 @@ export function usePlayerEvents(
     );
 
     return () => {
-      /*
-       * Save the latest state one final time.
-       */
-
       handleBeforeUnload();
 
       window.removeEventListener(
@@ -438,10 +454,17 @@ export function usePlayerEvents(
     };
   }, []);
 
+  /*
+   * Keep the same public API shape, but the values
+   * are no longer React state.
+   *
+   * MoviePlayer currently ignores this return value.
+   */
+
   return {
-    isPlaying,
-    currentTime,
-    duration,
-    lastEvent,
+    isPlaying: false,
+    currentTime: 0,
+    duration: 0,
+    lastEvent: null as PlayerEventType | null,
   };
-    }
+      }
