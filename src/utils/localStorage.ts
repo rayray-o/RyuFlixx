@@ -1,112 +1,113 @@
 "use client";
 
-import type { ContentType } from "@/types";
+import { ContentType } from "@/types";
 
 export interface LocalWatchHistory {
   key: string;
-
   media_id: number;
   type: ContentType;
 
-  season: number;
-  episode: number;
-
   title: string;
-
-  backdrop_path: string | null;
-  poster_path: string | null;
-
+  backdrop_path: string;
+  poster_path?: string;
   release_date: string;
   vote_average: number;
-  adult: boolean;
 
-  duration: number;
+  season?: number;
+  episode?: number;
+
   last_position: number;
-
+  duration: number;
   completed: boolean;
-
   updated_at: string;
 }
 
 export interface LocalWatchlistItem {
   id: number;
   type: ContentType;
-
   adult: boolean;
-
   backdrop_path: string;
-  poster_path: string | null;
-
+  poster_path?: string;
   release_date: string;
   title: string;
   vote_average: number;
-
-  created_at: string;
+  saved_date: string;
 }
 
-const HISTORY_KEY = "ryuflix_watch_history_v1";
+export interface WatchProgressMetadata {
+  mediaId: number;
+  mediaType: ContentType;
+
+  title: string;
+  backdrop_path: string;
+  poster_path?: string;
+  release_date: string;
+  vote_average: number;
+
+  season?: number;
+  episode?: number;
+}
+
+const WATCH_HISTORY_KEY = "ryuflix_watch_history_v1";
 const WATCHLIST_KEY = "ryuflix_watchlist_v1";
 
 const MAX_HISTORY_ITEMS = 20;
 
-function readStorage<T>(
-  key: string,
-  fallback: T,
-): T {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
+const HISTORY_EVENT = "ryuflix-history-updated";
+const WATCHLIST_EVENT = "ryuflix-watchlist-updated";
+
+function isBrowser() {
+  return typeof window !== "undefined";
+}
+
+function emit(name: string) {
+  if (!isBrowser()) return;
+
+  window.dispatchEvent(new CustomEvent(name));
+}
+
+function safelyParse<T>(value: string | null, fallback: T): T {
+  if (!value) return fallback;
 
   try {
-    const raw = window.localStorage.getItem(key);
-
-    if (!raw) {
-      return fallback;
-    }
-
-    return JSON.parse(raw) as T;
+    return JSON.parse(value) as T;
   } catch {
     return fallback;
   }
 }
 
-function writeStorage<T>(
-  key: string,
-  value: T,
-): void {
-  if (typeof window === "undefined") {
-    return;
+/* =========================================================
+   WATCH HISTORY
+   ========================================================= */
+
+export function getHistoryKey(
+  mediaId: number,
+  mediaType: ContentType,
+  season?: number,
+  episode?: number,
+) {
+  if (mediaType === "tv") {
+    return `tv-${mediaId}-s${season ?? 0}-e${episode ?? 0}`;
   }
 
-  try {
-    window.localStorage.setItem(
-      key,
-      JSON.stringify(value),
-    );
-  } catch {
-    // Storage can fail if the browser is full
-    // or storage access is unavailable.
-  }
+  return `movie-${mediaId}`;
 }
-
-/* -------------------------------------------------------------------------- */
-/*                              WATCH HISTORY                                 */
-/* -------------------------------------------------------------------------- */
 
 export function getWatchHistory(): LocalWatchHistory[] {
-  const history = readStorage<LocalWatchHistory[]>(
-    HISTORY_KEY,
+  if (!isBrowser()) return [];
+
+  const history = safelyParse<LocalWatchHistory[]>(
+    window.localStorage.getItem(WATCH_HISTORY_KEY),
     [],
   );
 
-  if (!Array.isArray(history)) {
-    return [];
-  }
+  if (!Array.isArray(history)) return [];
 
   return history
     .filter(
       (item) =>
         item &&
+        typeof item.key === "string" &&
         typeof item.media_id === "number" &&
         (item.type === "movie" || item.type === "tv"),
     )
@@ -117,32 +118,16 @@ export function getWatchHistory(): LocalWatchHistory[] {
     );
 }
 
-export function getHistoryKey(
-  mediaId: number,
-  type: ContentType,
-  season = 0,
-  episode = 0,
-): string {
-  return `${type}:${mediaId}:${season}:${episode}`;
-}
-
-export function getMovieLastPosition(
-  mediaId: number,
-): number {
-  const key = getHistoryKey(
-    mediaId,
-    "movie",
-    0,
-    0,
-  );
+export function getMovieLastPosition(mediaId: number): number {
+  const key = getHistoryKey(mediaId, "movie");
 
   const item = getWatchHistory().find(
-    (history) => history.key === key,
+    (entry) => entry.key === key,
   );
 
-  return item?.completed
-    ? 0
-    : item?.last_position || 0;
+  if (!item || item.completed) return 0;
+
+  return Math.max(0, item.last_position);
 }
 
 export function getTvShowLastPosition(
@@ -158,122 +143,124 @@ export function getTvShowLastPosition(
   );
 
   const item = getWatchHistory().find(
-    (history) => history.key === key,
+    (entry) => entry.key === key,
   );
 
-  return item?.completed
-    ? 0
-    : item?.last_position || 0;
+  if (!item || item.completed) return 0;
+
+  return Math.max(0, item.last_position);
 }
 
 export function saveWatchProgress(
-  data: Omit<
-    LocalWatchHistory,
-    "key" | "updated_at"
-  >,
-): void {
-  if (
-    !data.media_id ||
-    !data.duration ||
-    data.last_position < 0
-  ) {
+  metadata: WatchProgressMetadata,
+  currentTime: number,
+  duration: number,
+  completed = false,
+) {
+  if (!isBrowser()) return;
+
+  if (!Number.isFinite(currentTime)) return;
+
+  const safeCurrentTime = Math.max(0, currentTime);
+  const safeDuration =
+    Number.isFinite(duration) && duration > 0
+      ? duration
+      : 0;
+
+  if (safeCurrentTime <= 0 && !completed) {
     return;
   }
 
   const key = getHistoryKey(
-    data.media_id,
-    data.type,
-    data.season,
-    data.episode,
+    metadata.mediaId,
+    metadata.mediaType,
+    metadata.season,
+    metadata.episode,
+  );
+
+  const history = getWatchHistory();
+
+  const existingIndex = history.findIndex(
+    (item) => item.key === key,
   );
 
   const now = new Date().toISOString();
 
-  const history = getWatchHistory();
-
-  const entry: LocalWatchHistory = {
-    ...data,
+  const item: LocalWatchHistory = {
     key,
+
+    media_id: metadata.mediaId,
+    type: metadata.mediaType,
+
+    title: metadata.title,
+    backdrop_path: metadata.backdrop_path,
+    poster_path: metadata.poster_path,
+    release_date: metadata.release_date,
+    vote_average: metadata.vote_average,
+
+    season: metadata.season,
+    episode: metadata.episode,
+
+    last_position: completed
+      ? safeDuration || safeCurrentTime
+      : safeCurrentTime,
+
+    duration: safeDuration,
+
+    completed,
+
     updated_at: now,
   };
 
-  const existingIndex = history.findIndex(
-    (item) => item.key === key,
-  );
-
   if (existingIndex >= 0) {
-    history[existingIndex] = entry;
-  } else {
-    history.unshift(entry);
+    history.splice(existingIndex, 1);
   }
 
-  /*
-   * Keep the most recently updated items only.
-   * This prevents the browser's local storage from
-   * growing indefinitely.
-   */
-  history.sort(
-    (a, b) =>
-      new Date(b.updated_at).getTime() -
-      new Date(a.updated_at).getTime(),
+  history.unshift(item);
+
+  const trimmed = history.slice(
+    0,
+    MAX_HISTORY_ITEMS,
   );
 
-  writeStorage(
-    HISTORY_KEY,
-    history.slice(0, MAX_HISTORY_ITEMS),
-  );
+  try {
+    window.localStorage.setItem(
+      WATCH_HISTORY_KEY,
+      JSON.stringify(trimmed),
+    );
 
-  window.dispatchEvent(
-    new CustomEvent("ryuflix-history-updated"),
-  );
+    emit(HISTORY_EVENT);
+  } catch (error) {
+    console.error(
+      "RyuFlixx: failed to save watch history",
+      error,
+    );
+  }
 }
 
 export function markWatchCompleted(
-  mediaId: number,
-  type: ContentType,
-  season = 0,
-  episode = 0,
-): void {
-  const key = getHistoryKey(
-    mediaId,
-    type,
-    season,
-    episode,
-  );
-
-  const history = getWatchHistory();
-
-  const existingIndex = history.findIndex(
-    (item) => item.key === key,
-  );
-
-  if (existingIndex < 0) {
-    return;
-  }
-
-  history[existingIndex] = {
-    ...history[existingIndex],
-    completed: true,
-    last_position: history[existingIndex].duration,
-    updated_at: new Date().toISOString(),
-  };
-
-  writeStorage(HISTORY_KEY, history);
-
-  window.dispatchEvent(
-    new CustomEvent("ryuflix-history-updated"),
+  metadata: WatchProgressMetadata,
+  duration: number,
+) {
+  saveWatchProgress(
+    metadata,
+    duration,
+    duration,
+    true,
   );
 }
 
 export function removeWatchHistory(
   mediaId: number,
-  type: ContentType,
-  season = 0,
-  episode = 0,
-): void {
+  mediaType: ContentType,
+  season?: number,
+  episode?: number,
+) {
+  if (!isBrowser()) return;
+
   const key = getHistoryKey(
     mediaId,
-    type,
+    mediaType,
     season,
     episode,
   );
@@ -282,53 +269,45 @@ export function removeWatchHistory(
     (item) => item.key !== key,
   );
 
-  writeStorage(HISTORY_KEY, history);
-
-  window.dispatchEvent(
-    new CustomEvent("ryuflix-history-updated"),
+  window.localStorage.setItem(
+    WATCH_HISTORY_KEY,
+    JSON.stringify(history),
   );
+
+  emit(HISTORY_EVENT);
 }
 
-export function clearWatchHistory(): void {
-  if (typeof window === "undefined") {
-    return;
-  }
+export function clearWatchHistory() {
+  if (!isBrowser()) return;
 
-  try {
-    window.localStorage.removeItem(HISTORY_KEY);
-  } catch {
-    // Ignore storage errors.
-  }
-
-  window.dispatchEvent(
-    new CustomEvent("ryuflix-history-updated"),
+  window.localStorage.removeItem(
+    WATCH_HISTORY_KEY,
   );
+
+  emit(HISTORY_EVENT);
 }
 
-/* -------------------------------------------------------------------------- */
-/*                                WATCHLIST                                   */
-/* -------------------------------------------------------------------------- */
+/* =========================================================
+   WATCHLIST
+   ========================================================= */
 
 export function getLocalWatchlist(): LocalWatchlistItem[] {
-  const watchlist = readStorage<
-    LocalWatchlistItem[]
-  >(WATCHLIST_KEY, []);
+  if (!isBrowser()) return [];
 
-  if (!Array.isArray(watchlist)) {
-    return [];
-  }
-
-  return watchlist.sort(
-    (a, b) =>
-      new Date(b.created_at).getTime() -
-      new Date(a.created_at).getTime(),
+  const list = safelyParse<LocalWatchlistItem[]>(
+    window.localStorage.getItem(WATCHLIST_KEY),
+    [],
   );
+
+  if (!Array.isArray(list)) return [];
+
+  return list;
 }
 
 export function isInLocalWatchlist(
   id: number,
   type: ContentType,
-): boolean {
+) {
   return getLocalWatchlist().some(
     (item) =>
       item.id === id &&
@@ -339,47 +318,41 @@ export function isInLocalWatchlist(
 export function addToLocalWatchlist(
   item: Omit<
     LocalWatchlistItem,
-    "created_at"
+    "saved_date"
   >,
-): boolean {
-  const watchlist =
-    getLocalWatchlist();
+) {
+  if (!isBrowser()) return;
 
-  const exists = watchlist.some(
+  const list = getLocalWatchlist();
+
+  const exists = list.some(
     (entry) =>
       entry.id === item.id &&
       entry.type === item.type,
   );
 
-  if (exists) {
-    return false;
-  }
+  if (exists) return;
 
-  watchlist.unshift({
+  list.unshift({
     ...item,
-    created_at: new Date().toISOString(),
+    saved_date: new Date().toISOString(),
   });
 
-  writeStorage(
+  window.localStorage.setItem(
     WATCHLIST_KEY,
-    watchlist,
+    JSON.stringify(list),
   );
 
-  window.dispatchEvent(
-    new CustomEvent("ryuflix-watchlist-updated"),
-  );
-
-  return true;
+  emit(WATCHLIST_EVENT);
 }
 
 export function removeFromLocalWatchlist(
   id: number,
   type: ContentType,
-): boolean {
-  const watchlist =
-    getLocalWatchlist();
+) {
+  if (!isBrowser()) return;
 
-  const next = watchlist.filter(
+  const list = getLocalWatchlist().filter(
     (item) =>
       !(
         item.id === id &&
@@ -387,45 +360,33 @@ export function removeFromLocalWatchlist(
       ),
   );
 
-  if (next.length === watchlist.length) {
-    return false;
-  }
-
-  writeStorage(
+  window.localStorage.setItem(
     WATCHLIST_KEY,
-    next,
+    JSON.stringify(list),
   );
 
-  window.dispatchEvent(
-    new CustomEvent("ryuflix-watchlist-updated"),
-  );
-
-  return true;
+  emit(WATCHLIST_EVENT);
 }
 
 export function clearLocalWatchlist(
   type?: ContentType,
-): number {
-  const watchlist =
-    getLocalWatchlist();
+) {
+  if (!isBrowser()) return;
 
-  const next = type
-    ? watchlist.filter(
-        (item) => item.type !== type,
-      )
-    : [];
+  if (!type) {
+    window.localStorage.removeItem(
+      WATCHLIST_KEY,
+    );
+  } else {
+    const filtered = getLocalWatchlist().filter(
+      (item) => item.type !== type,
+    );
 
-  const removed =
-    watchlist.length - next.length;
+    window.localStorage.setItem(
+      WATCHLIST_KEY,
+      JSON.stringify(filtered),
+    );
+  }
 
-  writeStorage(
-    WATCHLIST_KEY,
-    next,
-  );
-
-  window.dispatchEvent(
-    new CustomEvent("ryuflix-watchlist-updated"),
-  );
-
-  return removed;
-}
+  emit(WATCHLIST_EVENT);
+    }
