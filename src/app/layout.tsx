@@ -20,7 +20,6 @@ import {
 import dynamic from "next/dynamic";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { Suspense } from "react";
-import Script from "next/script";
 
 const Disclaimer = dynamic(
   () => import("@/components/ui/overlay/Disclaimer")
@@ -30,11 +29,6 @@ export const metadata: Metadata = {
   title: siteConfig.name,
   applicationName: siteConfig.name,
   description: siteConfig.description,
-
-  // PopCash website verification
-  other: {
-    "ppck-ver": "613a3e2816304fb4feddee393bc97d67",
-  },
 
   manifest: "/manifest.json",
 
@@ -95,30 +89,6 @@ export default function RootLayout({
           Poppins.className
         )}
       >
-        {/* ================================= */}
-        {/* POPCASH GLOBAL POPUNDER           */}
-        {/* ================================= */}
-
-        <Script
-          id="popcash-ad-script"
-          strategy="afterInteractive"
-          dangerouslySetInnerHTML={{
-            __html: `
-              var uid = '504751';
-              var wid = '757325';
-              var pop_tag = document.createElement('script');
-              pop_tag.src = '//cdn.popcash.net/show.js';
-              document.body.appendChild(pop_tag);
-
-              pop_tag.onerror = function() {
-                pop_tag = document.createElement('script');
-                pop_tag.src = '//cdn2.popcash.net/show.js';
-                document.body.appendChild(pop_tag);
-              };
-            `,
-          }}
-        />
-
         <Suspense>
           <NuqsAdapter>
             <Providers>
@@ -132,39 +102,6 @@ export default function RootLayout({
                 )}
 
                 <TopNavbar />
-
-                {/* ================================= */}
-                {/* AADS GLOBAL AD UNIT 2453236       */}
-                {/* ================================= */}
-
-                <div
-                  id="aads-2453236"
-                  style={{
-                    width: "100%",
-                    margin: "10px auto",
-                    position: "relative",
-                    zIndex: 99998,
-                  }}
-                >
-                  <iframe
-                    data-aa="2453236"
-                    src="https://acceptable.a-ads.com/2453236/?size=Adaptive"
-                    style={{
-                      border: 0,
-                      padding: 0,
-                      width: "70%",
-                      height: "auto",
-                      minHeight: "90px",
-                      overflow: "hidden",
-                      display: "block",
-                      margin: "auto",
-                    }}
-                    title="Advertisement"
-                    loading="lazy"
-                  />
-                </div>
-
-                {/* ================================= */}
 
                 <Sidebar>
                   <main
@@ -189,4 +126,4 @@ export default function RootLayout({
       </body>
     </html>
   );
-  }
+}
