@@ -1,9 +1,9 @@
-import { syncHistory } from "@/actions/histories";
 import { ContentType } from "@/types";
-import { diff } from "@/utils/helpers";
-import { useDocumentVisibility } from "@mantine/hooks";
+import {
+  getHistoryKey,
+  saveWatchProgress,
+} from "@/utils/localStorage";
 import { useEffect, useRef } from "react";
-import useSupabaseUser from "./useSupabaseUser";
 
 export type PlayerEventType =
   | "play"
@@ -59,6 +59,7 @@ export interface PlayerAdapter<
   RawMessage extends BasePlayerEventEnvelope<any>,
 > {
   origin: `https://${string}`;
+
   parse: (
     raw: RawMessage,
   ) => UnifiedPlayerEventData | null;
@@ -76,11 +77,11 @@ export const playerAdapters = {
         return null;
       }
 
-      const d = raw.data;
+      const data = raw.data;
 
       return {
-        ...d,
-        mediaId: d.mtmdbId,
+        ...data,
+        mediaId: data.mtmdbId,
       };
     },
   } satisfies PlayerAdapter<VidlinkPlayerMessage>,
@@ -93,18 +94,41 @@ export const playerAdapters = {
         return null;
       }
 
-      const d = raw.data;
+      const data = raw.data;
 
       return {
-        ...d,
-        mediaId: d.id,
+        ...data,
+        mediaId: data.id,
       };
     },
   } satisfies PlayerAdapter<VidkingPlayerMessage>,
 } as const satisfies AdapterMap;
 
+export interface PlayerMediaMetadata {
+  mediaId: number;
+  mediaType: ContentType;
+
+  title: string;
+  backdrop_path: string;
+  poster_path?: string;
+  release_date: string;
+  vote_average: number;
+
+  season?: number;
+  episode?: number;
+}
+
 export interface UsePlayerEventsOptions {
   metadata?: {
+    mediaId?: number;
+    mediaType?: ContentType;
+
+    title?: string;
+    backdrop_path?: string;
+    poster_path?: string;
+    release_date?: string;
+    vote_average?: number;
+
     season?: number;
     episode?: number;
   };
@@ -135,12 +159,10 @@ export interface UsePlayerEventsOptions {
 export function usePlayerEvents(
   options: UsePlayerEventsOptions = {},
 ) {
-  const { data: user } = useSupabaseUser();
-  const documentState = useDocumentVisibility();
-
   const {
     metadata,
-    saveHistory,
+    saveHistory = false,
+
     onPlay,
     onPause,
     onSeeked,
@@ -148,24 +170,14 @@ export function usePlayerEvents(
     onTimeUpdate,
   } = options;
 
-  /*
-   * IMPORTANT:
-   *
-   * This hook intentionally keeps player state in refs.
-   *
-   * MoviePlayer does not consume the returned state, so
-   * using useState here would cause unnecessary React
-   * renders whenever the embedded player sends events.
-   */
-
   const eventDataRef =
     useRef<UnifiedPlayerEventData | null>(null);
 
-  const lastCurrentTimeRef = useRef(0);
+  const metadataRef =
+    useRef(metadata);
 
-  const metadataRef = useRef(metadata);
-  const saveHistoryRef = useRef(saveHistory);
-  const userRef = useRef(user);
+  const saveHistoryRef =
+    useRef(saveHistory);
 
   const callbacksRef = useRef({
     onPlay,
@@ -175,6 +187,9 @@ export function usePlayerEvents(
     onTimeUpdate,
   });
 
+  const lastSavedPositionRef =
+    useRef(0);
+
   useEffect(() => {
     metadataRef.current = metadata;
   }, [metadata]);
@@ -182,10 +197,6 @@ export function usePlayerEvents(
   useEffect(() => {
     saveHistoryRef.current = saveHistory;
   }, [saveHistory]);
-
-  useEffect(() => {
-    userRef.current = user;
-  }, [user]);
 
   useEffect(() => {
     callbacksRef.current = {
@@ -203,135 +214,181 @@ export function usePlayerEvents(
     onTimeUpdate,
   ]);
 
-  const syncToServer = async (
+  const saveLocalProgress = (
     data: UnifiedPlayerEventData,
     completed = false,
   ) => {
-    const currentUser = userRef.current;
-
-    if (
-      !saveHistoryRef.current ||
-      !currentUser
-    ) {
-      return;
-    }
-
-    if (
-      diff(
-        data.currentTime,
-        lastCurrentTimeRef.current,
-      ) <= 5 &&
-      !completed
-    ) {
+    if (!saveHistoryRef.current) {
       return;
     }
 
     const currentMetadata =
       metadataRef.current;
 
-    const payload: UnifiedPlayerEventData = {
-      ...data,
+    const mediaId =
+      Number(data.mediaId);
 
-      season:
-        data.season ??
-        currentMetadata?.season ??
-        0,
-
-      episode:
-        data.episode ??
-        currentMetadata?.episode ??
-        0,
-    };
-
-    const { success, message } =
-      await syncHistory(
-        payload,
-        completed,
-      );
-
-    if (success) {
-      lastCurrentTimeRef.current =
-        data.currentTime;
-    } else {
-      console.error(
-        "Save history failed:",
-        message,
-      );
+    if (
+      !Number.isFinite(mediaId) ||
+      mediaId <= 0
+    ) {
+      return;
     }
+
+    const title =
+      currentMetadata?.title;
+
+    const backdropPath =
+      currentMetadata?.backdrop_path;
+
+    const releaseDate =
+      currentMetadata?.release_date;
+
+    const voteAverage =
+      currentMetadata?.vote_average;
+
+    if (
+      !title ||
+      backdropPath === undefined ||
+      releaseDate === undefined ||
+      voteAverage === undefined
+    ) {
+      return;
+    }
+
+    const season =
+      data.season ??
+      currentMetadata?.season;
+
+    const episode =
+      data.episode ??
+      currentMetadata?.episode;
+
+    saveWatchProgress(
+      {
+        mediaId,
+        mediaType:
+          currentMetadata?.mediaType ??
+          data.mediaType,
+
+        title,
+
+        backdrop_path:
+          backdropPath,
+
+        poster_path:
+          currentMetadata?.poster_path,
+
+        release_date:
+          releaseDate,
+
+        vote_average:
+          voteAverage,
+
+        season,
+        episode,
+      },
+      data.currentTime,
+      data.duration,
+      completed,
+    );
+
+    lastSavedPositionRef.current =
+      data.currentTime;
   };
 
-  /*
-   * Save progress when the document becomes hidden.
-   */
-
-  useEffect(() => {
+  const maybeSaveProgress = (
+    data: UnifiedPlayerEventData,
+    force = false,
+  ) => {
     if (!saveHistoryRef.current) {
       return;
     }
 
-    if (documentState === "visible") {
+    if (
+      !force &&
+      Math.abs(
+        data.currentTime -
+          lastSavedPositionRef.current,
+      ) < 5
+    ) {
       return;
     }
 
-    const latestEvent =
-      eventDataRef.current;
-
-    if (!latestEvent) {
-      return;
-    }
-
-    void syncToServer(latestEvent);
-  }, [documentState]);
-
-  /*
-   * Listen for messages from supported players.
-   *
-   * IMPORTANT:
-   * No player event updates React state.
-   *
-   * The latest event is stored in a ref instead,
-   * which means timeupdate messages cannot cause
-   * MoviePlayer to re-render.
-   */
+    saveLocalProgress(data);
+  };
 
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (
-        !saveHistoryRef.current ||
-        !userRef.current
-      ) {
-        return;
-      }
-
+    const saveLatestProgress = () => {
       const latestEvent =
         eventDataRef.current;
 
-      if (!latestEvent) {
+      if (!latestEvent) return;
+
+      if (
+        latestEvent.event === "ended"
+      ) {
+        saveLocalProgress(
+          latestEvent,
+          true,
+        );
+
         return;
       }
 
-      const payload = {
-        ...latestEvent,
-        completed:
-          latestEvent.event === "ended",
-      };
-
-      navigator.sendBeacon(
-        "/api/player/save-history",
-        JSON.stringify(payload),
-      );
+      saveLocalProgress(latestEvent);
     };
 
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState ===
+        "hidden"
+      ) {
+        saveLatestProgress();
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      saveLatestProgress();
+    };
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange,
+    );
+
+    window.addEventListener(
+      "beforeunload",
+      handleBeforeUnload,
+    );
+
+    return () => {
+      saveLatestProgress();
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange,
+      );
+
+      window.removeEventListener(
+        "beforeunload",
+        handleBeforeUnload,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
     const handleMessage = (
       event: MessageEvent,
     ) => {
-      const adapter = Object.values(
-        playerAdapters,
-      ).find(
-        (candidate) =>
-          candidate.origin ===
-          event.origin,
-      );
+      const adapter =
+        Object.values(
+          playerAdapters,
+        ).find(
+          (candidate) =>
+            candidate.origin ===
+            event.origin,
+        );
 
       if (!adapter) {
         return;
@@ -341,15 +398,18 @@ export function usePlayerEvents(
 
       try {
         rawData =
-          typeof event.data === "string"
+          typeof event.data ===
+          "string"
             ? JSON.parse(event.data)
             : event.data;
       } catch {
-        console.warn(
-          "Invalid JSON from player:",
-          event.data,
-        );
+        return;
+      }
 
+      if (
+        !rawData ||
+        typeof rawData !== "object"
+      ) {
         return;
       }
 
@@ -360,62 +420,51 @@ export function usePlayerEvents(
         return;
       }
 
-      /*
-       * Store the latest player state without
-       * triggering React rendering.
-       */
-
-      eventDataRef.current = parsed;
+      eventDataRef.current =
+        parsed;
 
       switch (parsed.event) {
-        case "play": {
+        case "play":
           callbacksRef.current.onPlay?.(
             parsed,
           );
-
           break;
-        }
 
-        case "pause": {
+        case "pause":
           callbacksRef.current.onPause?.(
             parsed,
           );
 
-          break;
-        }
+          maybeSaveProgress(
+            parsed,
+            true,
+          );
 
-        case "seeked": {
+          break;
+
+        case "seeked":
           callbacksRef.current.onSeeked?.(
             parsed,
           );
 
-          /*
-           * A seek is an important history point,
-           * so sync it immediately.
-           */
-
-          void syncToServer(parsed);
+          maybeSaveProgress(
+            parsed,
+            true,
+          );
 
           break;
-        }
 
-        case "timeupdate": {
-          /*
-           * DO NOT call setState here.
-           *
-           * timeupdate can fire repeatedly while
-           * the movie is playing.
-           */
-
+        case "timeupdate":
           callbacksRef.current.onTimeUpdate?.(
             parsed,
           );
 
-          break;
-        }
+          maybeSaveProgress(parsed);
 
-        case "ended": {
-          void syncToServer(
+          break;
+
+        case "ended":
+          saveLocalProgress(
             parsed,
             true,
           );
@@ -425,7 +474,6 @@ export function usePlayerEvents(
           );
 
           break;
-        }
       }
     };
 
@@ -434,37 +482,19 @@ export function usePlayerEvents(
       handleMessage,
     );
 
-    window.addEventListener(
-      "beforeunload",
-      handleBeforeUnload,
-    );
-
     return () => {
-      handleBeforeUnload();
-
       window.removeEventListener(
         "message",
         handleMessage,
       );
-
-      window.removeEventListener(
-        "beforeunload",
-        handleBeforeUnload,
-      );
     };
   }, []);
-
-  /*
-   * Keep the same public API shape, but the values
-   * are no longer React state.
-   *
-   * MoviePlayer currently ignores this return value.
-   */
 
   return {
     isPlaying: false,
     currentTime: 0,
     duration: 0,
-    lastEvent: null as PlayerEventType | null,
+    lastEvent:
+      null as PlayerEventType | null,
   };
-      }
+        }
