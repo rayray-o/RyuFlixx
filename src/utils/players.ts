@@ -132,17 +132,14 @@ export const getTvShowPlayers = (
     },
     {
       title: "RyuFlix 3",
-      // NOTE: VidKing has a known issue with the `progress` query parameter where it stuck at that timestamp.
-      // Currently, this player can save playback progress but cannot resume from a specific timestamp.
-      // The `progress` parameter is commented out in the source URL until this is resolved.
-      source: `https://embed.filmu.in/tv/${id}/${season}/${episode}`, //&progress=${startAt || ""}`,
+      source: `https://embed.filmu.in/tv/${id}/${season}/${episode}`,
       recommended: true,
       fast: true,
       resumable: true,
     },
     {
       title: "<RyuFlix Embed>",
-      source: `https://www.embed.cc/embed/tv/${id}/${season}/${episode}`,
+      source: `https://2embed.cc/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
@@ -158,7 +155,7 @@ export const getTvShowPlayers = (
     },
     {
       title: "RyuFlix 4",
-      source: `https://www.NontonGo.win/embed/tv/${id}/${season}/${episode}`,
+      source: `https://www.nontongo.win/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
