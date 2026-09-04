@@ -20,6 +20,7 @@ import {
 import dynamic from "next/dynamic";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { Suspense } from "react";
+import Script from "next/script";
 
 const Disclaimer = dynamic(
   () => import("@/components/ui/overlay/Disclaimer")
@@ -89,6 +90,22 @@ export default function RootLayout({
           Poppins.className
         )}
       >
+        {/* ================================= */}
+        {/* POPADS GLOBAL POPUNDER             */}
+        {/* ================================= */}
+
+        <Script
+          id="popads-global"
+          strategy="afterInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `
+              /*<![CDATA[/* */
+              (function(){var w=window,m="b94baacd0f42e920a031d6b4501ecd21",a=[["siteId",387+502-463+660+5317271],["minBid",0],["popundersPerIP","0"],["delayBetween",0],["default",false],["defaultPerDay",0],["topmostLayer","auto"]],b=["d3d3LnByZW1pdW12ZXJ0aXNpbmcuY29tL3hiaWcubWluLmNzcw==","ZDJqMDQyY2oxNDIxd2kuY2xvdWRmcm9udC5uZXQveHJ3V0hrL21hamF4Lm1pbi5qcw=="],l=-1,p,c,f=function(){clearTimeout(c);l++;if(b[l]&&!(1814467990000<(new Date).getTime()&&1<l)){p=w.document.createElement("script");p.type="text/javascript";p.async=!0;var t=w.document.getElementsByTagName("script")[0];p.src="https://"+atob(b[l]);p.crossOrigin="anonymous";p.onerror=f;p.onload=function(){clearTimeout(c);w[m.slice(0,16)+m.slice(0,16)]||f()};c=setTimeout(f,5E3);t.parentNode.insertBefore(p,t)}};if(!w[m]){try{Object.freeze(w[m]=a)}catch(e){}f()}})();
+              /*]]>/* */
+            `,
+          }}
+        />
+
         <Suspense>
           <NuqsAdapter>
             <Providers>
