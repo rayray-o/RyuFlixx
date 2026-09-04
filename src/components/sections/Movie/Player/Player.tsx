@@ -11,50 +11,113 @@ import { MovieDetails } from "tmdb-ts/dist/types/movies";
 import { usePlayerEvents } from "@/hooks/usePlayerEvents";
 import WatchPlayer from "@/components/WatchPlayer";
 
-const MoviePlayerHeader = dynamic(() => import("./Header"));
-const MoviePlayerSourceSelection = dynamic(() => import("./SourceSelection"));
+const MoviePlayerHeader = dynamic(
+  () => import("./Header"),
+);
+
+const MoviePlayerSourceSelection = dynamic(
+  () => import("./SourceSelection"),
+);
 
 interface MoviePlayerProps {
   movie: MovieDetails;
   startAt?: number;
 }
 
-const MoviePlayer: React.FC<MoviePlayerProps> = ({ movie, startAt }) => {
-  const players = getMoviePlayers(movie.id, startAt);
-  const title = mutateMovieTitle(movie);
+const MoviePlayer: React.FC<MoviePlayerProps> = ({
+  movie,
+  startAt,
+}) => {
+  const players = getMoviePlayers(
+    movie.id,
+    startAt,
+  );
+
+  const title =
+    mutateMovieTitle(movie);
 
   const idle = useIdle(3000);
-  const { mobile } = useBreakpoints();
-  const [opened, handlers] = useDisclosure(false);
 
-  const [selectedSource, setSelectedSource] = useQueryState<number>(
+  const { mobile } =
+    useBreakpoints();
+
+  const [opened, handlers] =
+    useDisclosure(false);
+
+  const [
+    selectedSource,
+    setSelectedSource,
+  ] = useQueryState<number>(
     "src",
     parseAsInteger.withDefault(0),
   );
 
-  usePlayerEvents({ saveHistory: true });
-  useDocumentTitle(`Play ${title} | ${siteConfig.name}`);
+  usePlayerEvents({
+    saveHistory: true,
+
+    metadata: {
+      mediaId: movie.id,
+      mediaType: "movie",
+
+      title,
+
+      backdrop_path:
+        movie.backdrop_path ?? "",
+
+      poster_path:
+        movie.poster_path ?? undefined,
+
+      release_date:
+        movie.release_date ?? "",
+
+      vote_average:
+        movie.vote_average ?? 0,
+    },
+  });
+
+  useDocumentTitle(
+    `Play ${title} | ${siteConfig.name}`,
+  );
 
   const safeSelectedSource =
     players.length > 0
-      ? Math.min(Math.max(selectedSource, 0), players.length - 1)
+      ? Math.min(
+          Math.max(
+            selectedSource,
+            0,
+          ),
+          players.length - 1,
+        )
       : 0;
 
   return (
     <>
-      <div className={cn("relative", SpacingClasses.reset)}>
+      <div
+        className={cn(
+          "relative",
+          SpacingClasses.reset,
+        )}
+      >
         <MoviePlayerHeader
           id={movie.id}
           movieName={title}
-          onOpenSource={handlers.open}
-          hidden={idle && !mobile}
+          onOpenSource={
+            handlers.open
+          }
+          hidden={
+            idle && !mobile
+          }
         />
 
         <WatchPlayer
           title={title}
           servers={players}
-          selectedServer={safeSelectedSource}
-          onServerChange={setSelectedSource} 
+          selectedServer={
+            safeSelectedSource
+          }
+          onServerChange={
+            setSelectedSource
+          }
         />
       </div>
 
@@ -62,13 +125,18 @@ const MoviePlayer: React.FC<MoviePlayerProps> = ({ movie, startAt }) => {
         opened={opened}
         onClose={handlers.close}
         players={players}
-        selectedSource={safeSelectedSource}
-        setSelectedSource={setSelectedSource}
+        selectedSource={
+          safeSelectedSource
+        }
+        setSelectedSource={
+          setSelectedSource
+        }
       />
     </>
   );
 };
 
-MoviePlayer.displayName = "MoviePlayer";
+MoviePlayer.displayName =
+  "MoviePlayer";
 
 export default MoviePlayer;
