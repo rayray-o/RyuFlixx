@@ -1,17 +1,33 @@
 "use client";
 
-import { tmdb } from "@/api/tmdb";
-import MoviePlayer from "@/components/sections/Movie/Player/Player";
-import { Params } from "@/types";
-import { getMovieLastPosition } from "@/utils/localStorage";
-import { isEmpty } from "@/utils/helpers";
-import { Spinner } from "@heroui/react";
+import { Suspense, use } from "react";
+import { Spinner } from "@heroui/spinner";
 import { useQuery } from "@tanstack/react-query";
-import { NextPage } from "next";
+import { tmdb } from "@/api/tmdb";
+import { Cast } from "tmdb-ts/dist/types/credits";
 import { notFound } from "next/navigation";
-import { use, useEffect, useState } from "react";
+import { Image } from "tmdb-ts";
+import dynamic from "next/dynamic";
+import { Params } from "@/types";
+import { NextPage } from "next";
 
-const MoviePlayerPage: NextPage<
+const PhotosSection = dynamic(
+  () => import("@/components/ui/other/PhotosSection"),
+);
+const BackdropSection = dynamic(
+  () => import("@/components/sections/Movie/Detail/Backdrop"),
+);
+const OverviewSection = dynamic(
+  () => import("@/components/sections/Movie/Detail/Overview"),
+);
+const CastsSection = dynamic(
+  () => import("@/components/sections/Movie/Detail/Casts"),
+);
+const RelatedSection = dynamic(
+  () => import("@/components/sections/Movie/Detail/Related"),
+);
+
+const MovieDetailPage: NextPage<
   Params<{ id: number }>
 > = ({ params }) => {
   const { id } = use(params);
@@ -22,22 +38,18 @@ const MoviePlayerPage: NextPage<
     error,
   } = useQuery({
     queryFn: () =>
-      tmdb.movies.details(id),
-
-    queryKey: [
-      "movie-player-detail",
-      id,
-    ],
+      tmdb.movies.details(id, [
+        "images",
+        "videos",
+        "credits",
+        "keywords",
+        "recommendations",
+        "similar",
+        "reviews",
+        "watch/providers",
+      ]),
+    queryKey: ["movie-detail", id],
   });
-
-  const [startAt, setStartAt] =
-    useState(0);
-
-  useEffect(() => {
-    setStartAt(
-      getMovieLastPosition(id),
-    );
-  }, [id]);
 
   if (isPending) {
     return (
@@ -49,19 +61,33 @@ const MoviePlayerPage: NextPage<
     );
   }
 
-  if (
-    error ||
-    isEmpty(movie)
-  ) {
-    return notFound();
-  }
+  if (error) notFound();
 
   return (
-    <MoviePlayer
-      movie={movie}
-      startAt={startAt}
-    />
+    <div className="mx-auto max-w-5xl">
+      <Suspense
+        fallback={
+          <Spinner
+            size="lg"
+            className="absolute-center"
+            variant="simple"
+          />
+        }
+      >
+        <div className="flex flex-col gap-10">
+          <BackdropSection movie={movie} />
+          <OverviewSection movie={movie} />
+          <CastsSection
+            casts={movie.credits.cast as Cast[]}
+          />
+          <PhotosSection
+            images={movie.images.backdrops as Image[]}
+          />
+          <RelatedSection movie={movie} />
+        </div>
+      </Suspense>
+    </div>
   );
 };
 
-export default MoviePlayerPage;
+export default MovieDetailPage;
