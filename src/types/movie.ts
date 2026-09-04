@@ -1,18 +1,45 @@
-import { Database } from "@/utils/supabase/types";
 import { ContentType } from ".";
 
-export type HistoryDetail = Database["public"]["Tables"]["histories"]["Row"];
+export type HistoryDetail = {
+  key: string;
+
+  media_id: number;
+  type: ContentType;
+
+  title: string;
+  backdrop_path: string;
+  poster_path?: string;
+
+  release_date: string;
+  vote_average: number;
+
+  season?: number;
+  episode?: number;
+
+  last_position: number;
+  duration: number;
+  completed: boolean;
+
+  updated_at: string;
+};
 
 export type SavedMovieDetails = {
   adult: boolean;
   type: ContentType;
+
   backdrop_path: string;
+
   id: number;
+
   poster_path?: string;
+
   release_date: string;
+
   title: string;
+
   vote_average: number;
-  saved_date: string;
+
+  saved_date?: string;
 };
 
 export const DISCOVER_MOVIES_VALID_QUERY_TYPES = [
@@ -25,7 +52,8 @@ export const DISCOVER_MOVIES_VALID_QUERY_TYPES = [
   "topRated",
 ] as const;
 
-export type DiscoverMoviesFetchQueryType = (typeof DISCOVER_MOVIES_VALID_QUERY_TYPES)[number];
+export type DiscoverMoviesFetchQueryType =
+  (typeof DISCOVER_MOVIES_VALID_QUERY_TYPES)[number];
 
 export const DISCOVER_TVS_VALID_QUERY_TYPES = [
   "discover",
@@ -36,4 +64,5 @@ export const DISCOVER_TVS_VALID_QUERY_TYPES = [
   "topRated",
 ] as const;
 
-export type DiscoverTvShowsFetchQueryType = (typeof DISCOVER_TVS_VALID_QUERY_TYPES)[number];
+export type DiscoverTvShowsFetchQueryType =
+  (typeof DISCOVER_TVS_VALID_QUERY_TYPES)[number];
