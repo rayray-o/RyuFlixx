@@ -80,7 +80,7 @@ const ContinueWatching: React.FC =
                 : "warning"
             }
           >
-            Continue Your Journey
+            Continue Watching
           </SectionTitle>
 
           <Carousel>
