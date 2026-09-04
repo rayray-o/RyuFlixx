@@ -6,10 +6,8 @@ const CROSSFADE_TIME = 0.7;
 
 function VideoPair({
   src,
-  className = "",
 }: {
   src: string;
-  className?: string;
 }) {
   const videoA = useRef<HTMLVideoElement>(null);
   const videoB = useRef<HTMLVideoElement>(null);
@@ -17,6 +15,10 @@ function VideoPair({
   const activeVideo = useRef<"a" | "b">("a");
   const transitioning = useRef(false);
   const timer = useRef<number | null>(null);
+
+  // When true, the wallpaper is frozen in-place.
+  // We deliberately DO NOT reset currentTime or hide the videos.
+  const fullscreenPaused = useRef(false);
 
   useEffect(() => {
     const a = videoA.current;
@@ -33,16 +35,60 @@ function VideoPair({
     b.style.opacity = "0";
 
     const playActive = () => {
+      if (destroyed || fullscreenPaused.current) {
+        return;
+      }
+
       const active =
         activeVideo.current === "a" ? a : b;
 
       active.play().catch(() => {});
     };
 
-    playActive();
+    const pauseWallpaper = () => {
+      if (destroyed) return;
+
+      fullscreenPaused.current = true;
+
+      // Freeze exactly on the current frame.
+      // Do NOT reset currentTime.
+      a.pause();
+      b.pause();
+
+      // Cancel any pending crossfade completion.
+      if (timer.current !== null) {
+        window.clearTimeout(timer.current);
+        timer.current = null;
+      }
+
+      transitioning.current = false;
+    };
+
+    const resumeWallpaper = () => {
+      if (destroyed) return;
+
+      fullscreenPaused.current = false;
+
+      // Resume whichever video was visually active.
+      // Since currentTime was never reset, it continues from
+      // exactly the frame the user saw before fullscreen.
+      playActive();
+    };
+
+    const handleFullscreenChange = () => {
+      if (document.fullscreenElement) {
+        pauseWallpaper();
+      } else {
+        resumeWallpaper();
+      }
+    };
 
     const crossfade = async () => {
-      if (destroyed || transitioning.current) {
+      if (
+        destroyed ||
+        fullscreenPaused.current ||
+        transitioning.current
+      ) {
         return;
       }
 
@@ -64,6 +110,16 @@ function VideoPair({
         return;
       }
 
+      // Fullscreen could have started while play() was resolving.
+      if (
+        destroyed ||
+        fullscreenPaused.current
+      ) {
+        next.pause();
+        transitioning.current = false;
+        return;
+      }
+
       next.style.transition =
         `opacity ${CROSSFADE_TIME}s linear`;
 
@@ -74,7 +130,12 @@ function VideoPair({
       current.style.opacity = "0";
 
       timer.current = window.setTimeout(() => {
-        if (destroyed) return;
+        if (
+          destroyed ||
+          fullscreenPaused.current
+        ) {
+          return;
+        }
 
         current.pause();
         current.currentTime = 0;
@@ -83,10 +144,19 @@ function VideoPair({
           activeVideo.current === "a" ? "b" : "a";
 
         transitioning.current = false;
+        timer.current = null;
       }, CROSSFADE_TIME * 1000);
     };
 
     const handleTimeUpdate = (event: Event) => {
+      if (
+        destroyed ||
+        fullscreenPaused.current ||
+        transitioning.current
+      ) {
+        return;
+      }
+
       const video =
         event.currentTarget as HTMLVideoElement;
 
@@ -106,20 +176,49 @@ function VideoPair({
     };
 
     const handleEnded = () => {
+      if (
+        destroyed ||
+        fullscreenPaused.current
+      ) {
+        return;
+      }
+
       crossfade();
     };
 
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
+      if (
+        document.visibilityState === "visible" &&
+        !fullscreenPaused.current
+      ) {
         playActive();
       }
     };
 
-    a.addEventListener("timeupdate", handleTimeUpdate);
-    b.addEventListener("timeupdate", handleTimeUpdate);
+    a.addEventListener(
+      "timeupdate",
+      handleTimeUpdate
+    );
 
-    a.addEventListener("ended", handleEnded);
-    b.addEventListener("ended", handleEnded);
+    b.addEventListener(
+      "timeupdate",
+      handleTimeUpdate
+    );
+
+    a.addEventListener(
+      "ended",
+      handleEnded
+    );
+
+    b.addEventListener(
+      "ended",
+      handleEnded
+    );
+
+    document.addEventListener(
+      "fullscreenchange",
+      handleFullscreenChange
+    );
 
     document.addEventListener(
       "visibilitychange",
@@ -131,6 +230,7 @@ function VideoPair({
 
       if (timer.current !== null) {
         window.clearTimeout(timer.current);
+        timer.current = null;
       }
 
       a.pause();
@@ -146,8 +246,20 @@ function VideoPair({
         handleTimeUpdate
       );
 
-      a.removeEventListener("ended", handleEnded);
-      b.removeEventListener("ended", handleEnded);
+      a.removeEventListener(
+        "ended",
+        handleEnded
+      );
+
+      b.removeEventListener(
+        "ended",
+        handleEnded
+      );
+
+      document.removeEventListener(
+        "fullscreenchange",
+        handleFullscreenChange
+      );
 
       document.removeEventListener(
         "visibilitychange",
@@ -157,9 +269,7 @@ function VideoPair({
   }, []);
 
   return (
-    <div
-      className={`absolute inset-0 overflow-hidden ${className}`}
-    >
+    <div className="absolute inset-0 overflow-hidden">
       <video
         ref={videoA}
         src={src}
@@ -199,12 +309,35 @@ function VideoPair({
 
 export default function MangaParallaxBackground() {
   const [mounted, setMounted] = useState(false);
+  const [isDesktop, setIsDesktop] = useState<boolean | null>(null);
 
   useEffect(() => {
     setMounted(true);
+
+    const mediaQuery = window.matchMedia(
+      "(min-width: 768px)"
+    );
+
+    const updateMedia = () => {
+      setIsDesktop(mediaQuery.matches);
+    };
+
+    updateMedia();
+
+    mediaQuery.addEventListener?.(
+      "change",
+      updateMedia
+    );
+
+    return () => {
+      mediaQuery.removeEventListener?.(
+        "change",
+        updateMedia
+      );
+    };
   }, []);
 
-  if (!mounted) {
+  if (!mounted || isDesktop === null) {
     return null;
   }
 
@@ -235,16 +368,15 @@ export default function MangaParallaxBackground() {
         WebkitBackfaceVisibility: "hidden",
       }}
     >
-      {/* Desktop */}
+      {/* Only load/play the wallpaper that matches the device.
+          The old version mounted BOTH videos and merely hid one
+          with CSS, meaning both could still run in the background. */}
       <VideoPair
-        src="/Desktop-RyuFlix.mp4"
-        className="hidden md:block"
-      />
-
-      {/* Mobile */}
-      <VideoPair
-        src="/Phone-RyuFlix.mp4"
-        className="block md:hidden"
+        src={
+          isDesktop
+            ? "/Desktop-RyuFlix.mp4"
+            : "/Phone-RyuFlix.mp4"
+        }
       />
 
       {/* Main darkness */}
@@ -296,4 +428,4 @@ export default function MangaParallaxBackground() {
       />
     </div>
   );
-            }
+      }
