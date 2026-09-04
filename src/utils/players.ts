@@ -90,7 +90,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
     },
     {
       title: "RyuFlix 12",
-      source: `https://moviesapi.club/movie/${id}`,
+      source: `https://player.videasy.to/movie/${id}`,
       ads: true,
     },
   ];
@@ -198,7 +198,7 @@ export const getTvShowPlayers = (
     },
     {
       title: "RyuFlix 12",
-      source: `https://moviesapi.club/tv/${id}-${season}-${episode}`,
+      source: `https://player.videasy.to/tv/${id}/${season}/${episode}`,
       ads: true,
     },
   ];
