@@ -51,7 +51,13 @@ export interface WatchProgressMetadata {
 const WATCH_HISTORY_KEY = "ryuflix_watch_history_v1";
 const WATCHLIST_KEY = "ryuflix_watchlist_v1";
 
-const MAX_HISTORY_ITEMS = 20;
+/*
+ * Keep plenty of history locally.
+ *
+ * TV episodes use separate history keys, so a small limit like 20
+ * gets consumed extremely quickly by a few shows.
+ */
+const MAX_HISTORY_ITEMS = 100;
 
 const HISTORY_EVENT = "ryuflix-history-updated";
 const WATCHLIST_EVENT = "ryuflix-watchlist-updated";
@@ -109,8 +115,19 @@ export function getWatchHistory(): LocalWatchHistory[] {
         item &&
         typeof item.key === "string" &&
         typeof item.media_id === "number" &&
-        (item.type === "movie" || item.type === "tv"),
+        (item.type === "movie" || item.type === "tv") &&
+        typeof item.last_position === "number" &&
+        Number.isFinite(item.last_position) &&
+        typeof item.duration === "number" &&
+        Number.isFinite(item.duration) &&
+        typeof item.updated_at === "string",
     )
+    .map((item) => ({
+      ...item,
+      last_position: Math.max(0, item.last_position),
+      duration: Math.max(0, item.duration),
+      completed: Boolean(item.completed),
+    }))
     .sort(
       (a, b) =>
         new Date(b.updated_at).getTime() -
@@ -126,6 +143,13 @@ export function getMovieLastPosition(mediaId: number): number {
   );
 
   if (!item || item.completed) return 0;
+
+  if (
+    item.duration > 0 &&
+    item.last_position >= item.duration
+  ) {
+    return 0;
+  }
 
   return Math.max(0, item.last_position);
 }
@@ -148,6 +172,13 @@ export function getTvShowLastPosition(
 
   if (!item || item.completed) return 0;
 
+  if (
+    item.duration > 0 &&
+    item.last_position >= item.duration
+  ) {
+    return 0;
+  }
+
   return Math.max(0, item.last_position);
 }
 
@@ -162,14 +193,16 @@ export function saveWatchProgress(
   if (!Number.isFinite(currentTime)) return;
 
   const safeCurrentTime = Math.max(0, currentTime);
-  const safeDuration =
+
+  /*
+   * A provider may temporarily report duration = 0.
+   *
+   * NEVER let that erase a duration we already know.
+   */
+  const reportedDuration =
     Number.isFinite(duration) && duration > 0
       ? duration
       : 0;
-
-  if (safeCurrentTime <= 0 && !completed) {
-    return;
-  }
 
   const key = getHistoryKey(
     metadata.mediaId,
@@ -183,6 +216,45 @@ export function saveWatchProgress(
   const existingIndex = history.findIndex(
     (item) => item.key === key,
   );
+
+  const existing =
+    existingIndex >= 0
+      ? history[existingIndex]
+      : undefined;
+
+  const safeDuration =
+    reportedDuration > 0
+      ? reportedDuration
+      : existing?.duration && existing.duration > 0
+        ? existing.duration
+        : 0;
+
+  /*
+   * Don't create useless history records at 0 seconds.
+   */
+  if (
+    safeCurrentTime <= 0 &&
+    !completed &&
+    !existing
+  ) {
+    return;
+  }
+
+  /*
+   * If the provider reports a position slightly beyond the duration,
+   * keep the value sane.
+   */
+  const normalizedPosition =
+    safeDuration > 0
+      ? Math.min(
+          safeCurrentTime,
+          safeDuration,
+        )
+      : safeCurrentTime;
+
+  const finalPosition = completed
+    ? safeDuration || normalizedPosition
+    : normalizedPosition;
 
   const now = new Date().toISOString();
 
@@ -201,9 +273,7 @@ export function saveWatchProgress(
     season: metadata.season,
     episode: metadata.episode,
 
-    last_position: completed
-      ? safeDuration || safeCurrentTime
-      : safeCurrentTime,
+    last_position: finalPosition,
 
     duration: safeDuration,
 
@@ -378,9 +448,10 @@ export function clearLocalWatchlist(
       WATCHLIST_KEY,
     );
   } else {
-    const filtered = getLocalWatchlist().filter(
-      (item) => item.type !== type,
-    );
+    const filtered =
+      getLocalWatchlist().filter(
+        (item) => item.type !== type,
+      );
 
     window.localStorage.setItem(
       WATCHLIST_KEY,
@@ -389,4 +460,4 @@ export function clearLocalWatchlist(
   }
 
   emit(WATCHLIST_EVENT);
-    }
+}
