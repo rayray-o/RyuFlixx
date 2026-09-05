@@ -29,40 +29,18 @@ const BackdropSection: React.FC<{
   return (
     <section
       id="backdrop"
-      className="fixed inset-x-0 top-0 z-0 h-[65vh] pointer-events-none"
+      className="fixed inset-0 h-[70vh]"
     >
-      {/* Scroll fade */}
+      {/* Original scroll fade */}
       <div
-        className="absolute inset-0 z-30 bg-background"
+        className="absolute inset-0 z-10 bg-background"
         style={{ opacity }}
       />
 
-      {/* Actual backdrop image */}
-      <Image
-        radius="none"
-        alt={
-          movie?.original_language === "id"
-            ? movie?.original_title
-            : movie?.title
-        }
-        className="absolute left-0 top-0 z-0 h-[35vh] w-screen object-cover object-center md:h-[50vh] lg:h-[70vh]"
-        src={backdropImage}
-      />
+      {/* Original top fade */}
+      <div className="absolute inset-0 z-20 bg-linear-to-b from-background from-1% via-transparent via-30%" />
 
-      {/* Soft top cinematic fade */}
-      <div className="absolute inset-x-0 top-0 z-10 h-[18vh] bg-linear-to-b from-background/80 via-background/20 to-transparent" />
-
-      {/* Side vignette */}
-      <div className="absolute inset-x-0 top-0 z-10 h-[35vh] bg-[radial-gradient(ellipse_at_center,transparent_35%,hsl(var(--background)/0.35)_75%,hsl(var(--background)/0.8)_100%)] md:h-[50vh] lg:h-[70vh]" />
-
-      {/* THE IMPORTANT PART:
-          This gradient continues OUTSIDE the image itself. */}
-      <div className="absolute inset-x-0 top-[22vh] z-20 h-[43vh] bg-linear-to-b from-transparent via-background/65 via-45% to-background" />
-
-      {/* Extra-soft lower transition */}
-      <div className="absolute inset-x-0 top-[32vh] z-21 h-[33vh] bg-linear-to-b from-transparent via-background/55 to-background" />
-
-      {/* Movie title/logo */}
+      {/* Original image */}
       <Image
         isBlurred
         radius="none"
@@ -72,7 +50,85 @@ const BackdropSection: React.FC<{
             : movie?.title
         }
         classNames={{
-          wrapper: "absolute-center z-25 bg-transparent",
+          wrapper: "absolute-center z-1 bg-transparent",
+        }}
+        className="w-[25vh] max-w-80 drop-shadow-xl md:w-[60vh]"
+        src={titleImage}
+      />
+
+      <Image
+        radius="none"
+        alt={
+          movie?.original_language === "id"
+            ? movie?.original_title
+            : movie?.title
+        }
+        className="z-0 h-[35vh] w-screen object-cover object-center md:h-[50vh] lg:h-[70vh]"
+        src={backdropImage}
+      />
+
+      {/* =========================================================
+          CINEMATIC EDGE TREATMENT
+          These do NOT replace or darken the actual image.
+          They extend beyond the image and dissolve it into
+          the page background.
+         ========================================================= */}
+
+      {/* Soft side vignette */}
+      <div
+        className="
+          pointer-events-none
+          absolute
+          inset-0
+          z-30
+          bg-[radial-gradient(ellipse_at_center,transparent_45%,hsl(var(--background)/0.35)_78%,hsl(var(--background))_100%)]
+        "
+      />
+
+      {/* Bottom fade starts BEFORE the image ends */}
+      <div
+        className="
+          pointer-events-none
+          absolute
+          inset-x-0
+          top-[20vh]
+          z-30
+          h-[50vh]
+          bg-linear-to-b
+          from-transparent
+          via-background/45
+          via-[55%]
+          to-background
+        "
+      />
+
+      {/* Very soft final dissolve */}
+      <div
+        className="
+          pointer-events-none
+          absolute
+          inset-x-0
+          top-[38vh]
+          z-31
+          h-[32vh]
+          bg-linear-to-b
+          from-transparent
+          via-background/55
+          to-background
+        "
+      />
+
+      {/* Keep the logo above the cinematic treatment */}
+      <Image
+        isBlurred
+        radius="none"
+        alt={
+          movie?.original_language === "id"
+            ? movie?.original_title
+            : movie?.title
+        }
+        classNames={{
+          wrapper: "absolute-center z-40 bg-transparent",
         }}
         className="w-[25vh] max-w-80 drop-shadow-xl md:w-[60vh]"
         src={titleImage}
