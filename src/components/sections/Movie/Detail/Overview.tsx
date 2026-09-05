@@ -1,7 +1,11 @@
 "use client";
 
 import { Image, Chip, Button } from "@heroui/react";
-import { getImageUrl, movieDurationString, mutateMovieTitle } from "@/utils/movies";
+import {
+  getImageUrl,
+  movieDurationString,
+  mutateMovieTitle,
+} from "@/utils/movies";
 import BookmarkButton from "@/components/ui/button/BookmarkButton";
 import { MovieDetails } from "tmdb-ts/dist/types/movies";
 import Rating from "../../../ui/other/Rating";
@@ -18,14 +22,23 @@ import Link from "next/link";
 import { SavedMovieDetails } from "@/types/movie";
 
 interface OverviewSectionProps {
-  movie: AppendToResponse<MovieDetails, "videos"[], "movie">;
+  movie: AppendToResponse<
+    MovieDetails,
+    "videos"[],
+    "movie"
+  >;
 }
 
-const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
+const OverviewSection: React.FC<OverviewSectionProps> = ({
+  movie,
+}) => {
   const releaseYear = new Date(movie.release_date).getFullYear();
-  const posterImage = getImageUrl(movie.poster_path);
+
   const title = mutateMovieTitle(movie);
   const fullTitle = title;
+
+  const posterImage = getImageUrl(movie.poster_path);
+
   const bookmarkData: SavedMovieDetails = {
     type: "movie",
     adult: movie.adult,
@@ -41,76 +54,124 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
   useDocumentTitle(`${fullTitle} | ${siteConfig.name}`);
 
   return (
-    <section id="overview" className="relative z-3 flex flex-col gap-8 pt-[20vh] md:pt-[40vh]">
-      <div className="md:grid md:grid-cols-[auto_1fr] md:gap-6">
-        <Image
-          isBlurred
-          shadow="md"
-          alt={fullTitle}
-          classNames={{
-            wrapper: "w-52 max-h-min aspect-2/3 hidden md:block",
-          }}
-          className="object-cover object-center"
-          src={posterImage}
-        />
+    <section
+      id="overview"
+      className="relative z-10 flex flex-col gap-12 pt-[46vh] md:pt-[52vh]"
+    >
+      <div className="flex flex-col gap-10">
+        {/* Main cinematic information */}
+        <div className="relative">
+          {/* Desktop poster stays subtle instead of dominating the page */}
+          <div className="hidden md:block">
+            <Image
+              isBlurred
+              shadow="md"
+              alt={fullTitle}
+              classNames={{
+                wrapper:
+                  "absolute right-0 top-8 hidden w-44 aspect-2/3 opacity-20 xl:w-52 xl:opacity-30",
+              }}
+              className="object-cover object-center"
+              src={posterImage}
+            />
+          </div>
 
-        <div className="flex flex-col gap-8">
-          <div id="title" className="flex flex-col gap-1 md:gap-2">
-            <div className="flex gap-3">
+          <div className="relative flex max-w-3xl flex-col gap-6">
+            {/* Movie type */}
+            <div className="flex gap-2">
               <Chip
                 color="primary"
                 variant="faded"
-                className="md:text-md text-xs"
-                classNames={{ content: "font-bold" }}
+                className="text-xs md:text-sm"
+                classNames={{
+                  content: "font-bold",
+                }}
               >
                 Movie
               </Chip>
+
               {movie.adult && (
-                <Chip color="danger" variant="faded">
+                <Chip
+                  color="danger"
+                  variant="faded"
+                  className="text-xs md:text-sm"
+                >
                   18+
                 </Chip>
               )}
             </div>
-            <h2 className="text-2xl font-black md:text-4xl">{fullTitle}</h2>
-            <div className="md:text-md flex flex-wrap gap-1 text-xs md:gap-2">
-              <div className="flex items-center gap-1">
-                <Clock />
-                <span>{movieDurationString(movie?.runtime)}</span>
-              </div>
-              <p>&#8226;</p>
-              <div className="flex items-center gap-1">
-                <Calendar />
-                <span>{releaseYear}</span>
-              </div>
-              <p>&#8226;</p>
-              <Rating rate={movie?.vote_average || 0} />
-            </div>
-            <Genres genres={movie.genres} />
-          </div>
 
-          <div id="action" className="flex w-full flex-wrap justify-between gap-4 md:gap-0">
-            <div className="flex flex-wrap gap-2">
+            {/* Title */}
+            <div className="flex flex-col gap-3">
+              <h2 className="text-4xl font-black leading-none tracking-tight md:text-6xl lg:text-7xl">
+                {fullTitle}
+              </h2>
+
+              {/* Clean metadata row */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground/75 md:text-base">
+                <div className="flex items-center gap-1.5">
+                  <Clock />
+                  <span>
+                    {movieDurationString(movie.runtime)}
+                  </span>
+                </div>
+
+                <span className="text-foreground/40">·</span>
+
+                <div className="flex items-center gap-1.5">
+                  <Calendar />
+                  <span>{releaseYear}</span>
+                </div>
+
+                <span className="text-foreground/40">·</span>
+
+                <Rating rate={movie.vote_average || 0} />
+              </div>
+
+              {/* Genres */}
+              <div className="flex flex-wrap gap-2">
+                <Genres genres={movie.genres} />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-wrap items-center gap-3">
               <Button
                 as={Link}
                 href={`/movie/${movie.id}/player`}
                 color="primary"
                 variant="shadow"
-                startContent={<FaCirclePlay size={22} />}
+                size="lg"
+                className="font-semibold"
+                startContent={<FaCirclePlay size={21} />}
               >
                 Play Now
               </Button>
-              <Trailer videos={movie.videos.results} />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <ShareButton id={movie.id} title={title} />
-              <BookmarkButton data={bookmarkData} />
-            </div>
-          </div>
 
-          <div id="story" className="flex flex-col gap-2">
-            <SectionTitle>Story Line</SectionTitle>
-            <p className="text-sm">{movie.overview}</p>
+              <Trailer videos={movie.videos.results} />
+
+              <div className="flex gap-2">
+                <ShareButton
+                  id={movie.id}
+                  title={title}
+                />
+
+                <BookmarkButton data={bookmarkData} />
+              </div>
+            </div>
           </div>
+        </div>
+
+        {/* Story */}
+        <div
+          id="story"
+          className="flex max-w-3xl flex-col gap-4 pt-4 md:pt-8"
+        >
+          <SectionTitle>Story Line</SectionTitle>
+
+          <p className="text-base leading-7 text-foreground/85 md:text-lg md:leading-8">
+            {movie.overview}
+          </p>
         </div>
       </div>
     </section>
