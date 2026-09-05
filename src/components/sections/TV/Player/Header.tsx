@@ -3,7 +3,8 @@ import { ArrowLeft, List, Next, Prev, Server } from "@/utils/icons";
 import ActionButton from "./ActionButton";
 import { TvShowPlayerProps } from "./Player";
 
-interface TvShowPlayerHeaderProps extends Omit<TvShowPlayerProps, "episodes" | "tv" | "startAt"> {
+interface TvShowPlayerHeaderProps
+  extends Omit<TvShowPlayerProps, "episodes" | "tv" | "startAt"> {
   hidden?: boolean;
   selectedSource: number;
   onOpenSource: () => void;
@@ -18,50 +19,80 @@ const TvShowPlayerHeader: React.FC<TvShowPlayerHeaderProps> = ({
   hidden,
   selectedSource,
   nextEpisodeNumber,
+  nextEpisodeSeason,
   prevEpisodeNumber,
+  prevEpisodeSeason,
   onOpenSource,
   onOpenEpisode,
 }) => {
   return (
     <div
-      aria-hidden={hidden ? true : undefined}
       className={cn(
-        "absolute top-0 z-40 flex h-28 w-full items-start justify-between gap-4",
-        "bg-linear-to-b from-black/80 to-transparent p-2 text-white transition-opacity md:p-4",
-        { "opacity-0": hidden },
+        "absolute inset-x-0 top-0 z-40 flex h-28 w-full items-center justify-between px-4 transition-all duration-300 md:px-8",
+        hidden
+          ? "pointer-events-none opacity-0"
+          : "pointer-events-auto opacity-100",
       )}
     >
-      <ActionButton label="Back" href={`/tv/${id}`}>
-        <ArrowLeft size={42} />
-      </ActionButton>
-      <div className="absolute left-1/2 hidden -translate-x-1/2 flex-col justify-center text-center sm:flex">
-        <p className="text-sm text-white text-shadow-lg sm:text-lg lg:text-xl">{seriesName}</p>
-        <p className="text-xs text-gray-200 text-shadow-lg sm:text-sm lg:text-base">
-          {seasonName} - {episode.name}
-        </p>
+      {/* Left side */}
+      <div className="flex min-w-0 items-center gap-2 md:gap-4">
+        <ActionButton label="Back" href={`/tv/${id}`}>
+          <ArrowLeft size={42} />
+        </ActionButton>
+
+        <div className="hidden min-w-0 flex-col md:flex">
+          <span className="truncate text-lg font-bold">
+            {seriesName}
+          </span>
+
+          <span className="truncate text-sm opacity-70">
+            {seasonName} — {episode.name}
+          </span>
+        </div>
       </div>
-      <div className="flex items-center gap-4">
+
+      {/* Right side */}
+      <div className="flex items-center gap-1 md:gap-2">
         <ActionButton
-          disabled={!prevEpisodeNumber}
+          disabled={!prevEpisodeNumber || !prevEpisodeSeason}
           label="Previous Episode"
           tooltip="Previous Episode"
-          href={`/tv/${id}/${episode.season_number}/${prevEpisodeNumber}/player?src=${selectedSource}`}
+          href={
+            prevEpisodeNumber && prevEpisodeSeason
+              ? `/tv/${id}/${prevEpisodeSeason}/${prevEpisodeNumber}/player?src=${selectedSource}`
+              : undefined
+          }
         >
           <Prev size={42} />
         </ActionButton>
+
         <ActionButton
-          disabled={!nextEpisodeNumber}
+          disabled={!nextEpisodeNumber || !nextEpisodeSeason}
           label="Next Episode"
           tooltip="Next Episode"
-          href={`/tv/${id}/${episode.season_number}/${nextEpisodeNumber}/player?src=${selectedSource}`}
+          href={
+            nextEpisodeNumber && nextEpisodeSeason
+              ? `/tv/${id}/${nextEpisodeSeason}/${nextEpisodeNumber}/player?src=${selectedSource}`
+              : undefined
+          }
         >
           <Next size={42} />
         </ActionButton>
-        <ActionButton label="Sources" tooltip="Sources" onClick={onOpenSource}>
-          <Server size={34} />
+
+        <ActionButton
+          label="Episodes"
+          tooltip="Episodes"
+          onClick={onOpenEpisode}
+        >
+          <List size={42} />
         </ActionButton>
-        <ActionButton label="Episodes" tooltip="Episodes" onClick={onOpenEpisode}>
-          <List size={34} />
+
+        <ActionButton
+          label="Servers"
+          tooltip="Servers"
+          onClick={onOpenSource}
+        >
+          <Server size={42} />
         </ActionButton>
       </div>
     </div>
