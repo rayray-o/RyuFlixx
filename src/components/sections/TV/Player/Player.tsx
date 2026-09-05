@@ -4,6 +4,9 @@ import { siteConfig } from "@/config/site";
 import { cn } from "@/utils/helpers";
 import { getTvShowPlayers } from "@/utils/players";
 import {
+  setTvContinuation,
+} from "@/utils/localStorage";
+import {
   useDisclosure,
   useDocumentTitle,
   useIdle,
@@ -30,54 +33,28 @@ import {
 import { usePlayerEvents } from "@/hooks/usePlayerEvents";
 import WatchPlayer from "@/components/WatchPlayer";
 
-const AdsWarning =
-  dynamic(
-    () =>
-      import(
-        "@/components/ui/overlay/AdsWarning"
-      ),
-  );
-
-const TvShowPlayerHeader =
-  dynamic(
-    () => import("./Header"),
-  );
-
-const TvShowPlayerSourceSelection =
-  dynamic(
-    () => import("./SourceSelection"),
-  );
-
-const TvShowPlayerEpisodeSelection =
-  dynamic(
-    () => import("./EpisodeSelection"),
-  );
+const AdsWarning = dynamic(() => import("@/components/ui/overlay/AdsWarning"));
+const TvShowPlayerHeader = dynamic(() => import("./Header"));
+const TvShowPlayerSourceSelection = dynamic(
+  () => import("./SourceSelection"),
+);
+const TvShowPlayerEpisodeSelection = dynamic(
+  () => import("./EpisodeSelection"),
+);
 
 export interface TvShowPlayerProps {
   tv: TvShowDetails;
-
   id: number;
-
   seriesName: string;
   seasonName: string;
-
   episode: Episode;
   episodes: Episode[];
-
-  nextEpisodeNumber:
-    | number
-    | null;
-
-  prevEpisodeNumber:
-    | number
-    | null;
-
+  nextEpisodeNumber: number | null;
+  prevEpisodeNumber: number | null;
   startAt?: number;
 }
 
-const TvShowPlayer: React.FC<
-  TvShowPlayerProps
-> = ({
+const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
   tv,
   id,
   episode,
@@ -85,85 +62,69 @@ const TvShowPlayer: React.FC<
   startAt,
   ...props
 }) => {
-  const [seen] =
-    useLocalStorage<boolean>({
-      key: ADS_WARNING_STORAGE_KEY,
-      getInitialValueInEffect:
-        false,
-    });
+  const [seen] = useLocalStorage<boolean>({
+    key: ADS_WARNING_STORAGE_KEY,
+    getInitialValueInEffect: false,
+  });
 
-  const { mobile } =
-    useBreakpoints();
+  const { mobile } = useBreakpoints();
 
-  const players =
-    getTvShowPlayers(
-      id,
-      episode.season_number,
-      episode.episode_number,
-      startAt,
-    );
+  const players = getTvShowPlayers(
+    id,
+    episode.season_number,
+    episode.episode_number,
+    startAt,
+  );
 
-  const idle =
-    useIdle(3000);
+  const idle = useIdle(3000);
 
-  const [
-    sourceOpened,
-    sourceHandlers,
-  ] = useDisclosure(false);
+  const [sourceOpened, sourceHandlers] = useDisclosure(false);
+  const [episodeOpened, episodeHandlers] = useDisclosure(false);
 
-  const [
-    episodeOpened,
-    episodeHandlers,
-  ] = useDisclosure(false);
-
-  const [
-    selectedSource,
-    setSelectedSource,
-  ] = useQueryState<number>(
+  const [selectedSource, setSelectedSource] = useQueryState<number>(
     "src",
     parseAsInteger.withDefault(0),
   );
 
-  const playerFrameRef =
-    useRef<HTMLIFrameElement | null>(
-      null,
-    );
+  const playerFrameRef = useRef<HTMLIFrameElement | null>(null);
 
-  const {
-    getCurrentTime,
-    flushProgress,
-  } =
-    usePlayerEvents({
-      saveHistory: true,
+  const { getCurrentTime, flushProgress } = usePlayerEvents({
+    saveHistory: true,
+    metadata: {
+      mediaId: id,
+      mediaType: "tv",
+      title: tv.name,
+      backdrop_path: tv.backdrop_path ?? "",
+      poster_path: tv.poster_path ?? undefined,
+      release_date: tv.first_air_date ?? "",
+      vote_average: tv.vote_average ?? 0,
+      season: episode.season_number,
+      episode: episode.episode_number,
+    },
 
-      playerFrameRef,
+    onEnded: () => {
+      const nextEpisode = episodes.find(
+        (entry) =>
+          entry.season_number === episode.season_number &&
+          entry.episode_number ===
+            episode.episode_number + 1,
+      );
 
-      metadata: {
-        mediaId: id,
-        mediaType: "tv",
-
-        title: tv.name,
-
-        backdrop_path:
-          tv.backdrop_path ?? "",
-
-        poster_path:
-          tv.poster_path ??
-          undefined,
-
-        release_date:
-          tv.first_air_date ?? "",
-
-        vote_average:
-          tv.vote_average ?? 0,
-
-        season:
-          episode.season_number,
-
-        episode:
-          episode.episode_number,
-      },
-    });
+      if (nextEpisode) {
+        setTvContinuation({
+          mediaId: id,
+          season: nextEpisode.season_number,
+          episode: nextEpisode.episode_number,
+        });
+      } else {
+        setTvContinuation({
+          mediaId: id,
+          season: episode.season_number,
+          episode: episode.episode_number,
+        });
+      }
+    },
+  });
 
   useDocumentTitle(
     `Play ${props.seriesName} - ${props.seasonName} - ${episode.name} | ${siteConfig.name}`,
@@ -172,10 +133,7 @@ const TvShowPlayer: React.FC<
   const safeSelectedSource =
     players.length > 0
       ? Math.min(
-          Math.max(
-            selectedSource,
-            0,
-          ),
+          Math.max(selectedSource, 0),
           players.length - 1,
         )
       : 0;
@@ -193,18 +151,10 @@ const TvShowPlayer: React.FC<
         <TvShowPlayerHeader
           id={id}
           episode={episode}
-          hidden={
-            idle && !mobile
-          }
-          selectedSource={
-            safeSelectedSource
-          }
-          onOpenSource={
-            sourceHandlers.open
-          }
-          onOpenEpisode={
-            episodeHandlers.open
-          }
+          hidden={idle && !mobile}
+          selectedSource={safeSelectedSource}
+          onOpenSource={sourceHandlers.open}
+          onOpenEpisode={episodeHandlers.open}
           {...props}
         />
 
@@ -212,51 +162,31 @@ const TvShowPlayer: React.FC<
           <WatchPlayer
             title={`${props.seriesName} — ${props.seasonName} — ${episode.name}`}
             servers={players}
-            selectedServer={
-              safeSelectedSource
-            }
-            onServerChange={
-              setSelectedSource
-            }
-            getCurrentTime={
-              getCurrentTime
-            }
-            flushProgress={
-              flushProgress
-            }
-            iframeRef={
-              playerFrameRef
-            }
+            selectedServer={safeSelectedSource}
+            onServerChange={setSelectedSource}
+            getCurrentTime={getCurrentTime}
+            flushProgress={flushProgress}
+            iframeRef={playerFrameRef}
           />
         )}
       </div>
 
       <TvShowPlayerSourceSelection
         opened={sourceOpened}
-        onClose={
-          sourceHandlers.close
-        }
+        onClose={sourceHandlers.close}
         players={players}
-        selectedSource={
-          safeSelectedSource
-        }
-        setSelectedSource={
-          setSelectedSource
-        }
+        selectedSource={safeSelectedSource}
+        setSelectedSource={setSelectedSource}
       />
 
       <TvShowPlayerEpisodeSelection
         id={id}
         opened={episodeOpened}
-        onClose={
-          episodeHandlers.close
-        }
+        onClose={episodeHandlers.close}
         episodes={episodes}
       />
     </>
   );
 };
 
-export default memo(
-  TvShowPlayer,
-);
+export default memo(TvShowPlayer);
