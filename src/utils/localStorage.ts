@@ -48,19 +48,24 @@ export interface WatchProgressMetadata {
   episode?: number;
 }
 
+export interface TvShowContinuation {
+  mediaId: number;
+  season: number;
+  episode: number;
+}
+
 const WATCH_HISTORY_KEY = "ryuflix_watch_history_v1";
 const WATCHLIST_KEY = "ryuflix_watchlist_v1";
+const TV_CONTINUATION_KEY = "ryuflix_tv_continuation_v1";
 
 /*
- * Keep plenty of history locally.
- *
- * TV episodes use separate history keys, so a small limit like 20
- * gets consumed extremely quickly by a few shows.
+ * TV episodes use separate history keys, so keep plenty of entries.
  */
 const MAX_HISTORY_ITEMS = 100;
 
 const HISTORY_EVENT = "ryuflix-history-updated";
 const WATCHLIST_EVENT = "ryuflix-watchlist-updated";
+const TV_CONTINUATION_EVENT = "ryuflix-tv-continuation-updated";
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -72,7 +77,10 @@ function emit(name: string) {
   window.dispatchEvent(new CustomEvent(name));
 }
 
-function safelyParse<T>(value: string | null, fallback: T): T {
+function safelyParse<T>(
+  value: string | null,
+  fallback: T,
+): T {
   if (!value) return fallback;
 
   try {
@@ -135,7 +143,9 @@ export function getWatchHistory(): LocalWatchHistory[] {
     );
 }
 
-export function getMovieLastPosition(mediaId: number): number {
+export function getMovieLastPosition(
+  mediaId: number,
+): number {
   const key = getHistoryKey(mediaId, "movie");
 
   const item = getWatchHistory().find(
@@ -194,11 +204,6 @@ export function saveWatchProgress(
 
   const safeCurrentTime = Math.max(0, currentTime);
 
-  /*
-   * A provider may temporarily report duration = 0.
-   *
-   * NEVER let that erase a duration we already know.
-   */
   const reportedDuration =
     Number.isFinite(duration) && duration > 0
       ? duration
@@ -222,15 +227,20 @@ export function saveWatchProgress(
       ? history[existingIndex]
       : undefined;
 
+  /*
+   * Never allow a temporary duration=0 provider event
+   * to erase a duration we already know.
+   */
   const safeDuration =
     reportedDuration > 0
       ? reportedDuration
-      : existing?.duration && existing.duration > 0
+      : existing?.duration &&
+          existing.duration > 0
         ? existing.duration
         : 0;
 
   /*
-   * Don't create useless history records at 0 seconds.
+   * Don't create a useless history record at 0 seconds.
    */
   if (
     safeCurrentTime <= 0 &&
@@ -240,10 +250,6 @@ export function saveWatchProgress(
     return;
   }
 
-  /*
-   * If the provider reports a position slightly beyond the duration,
-   * keep the value sane.
-   */
   const normalizedPosition =
     safeDuration > 0
       ? Math.min(
@@ -274,7 +280,6 @@ export function saveWatchProgress(
     episode: metadata.episode,
 
     last_position: finalPosition,
-
     duration: safeDuration,
 
     completed,
@@ -355,6 +360,111 @@ export function clearWatchHistory() {
   );
 
   emit(HISTORY_EVENT);
+}
+
+/* =========================================================
+   TV SHOW CONTINUATION
+   ========================================================= */
+
+/*
+ * Stores the episode the user should continue from
+ * when opening a TV show from a show-level Continue Watching
+ * surface.
+ */
+export function getTvContinuation(
+  mediaId: number,
+): TvShowContinuation | null {
+  if (!isBrowser()) return null;
+
+  const all = safelyParse<
+    Record<string, TvShowContinuation>
+  >(
+    window.localStorage.getItem(
+      TV_CONTINUATION_KEY,
+    ),
+    {},
+  );
+
+  const continuation = all[String(mediaId)];
+
+  if (!continuation) return null;
+
+  if (
+    typeof continuation.mediaId !== "number" ||
+    typeof continuation.season !== "number" ||
+    typeof continuation.episode !== "number"
+  ) {
+    return null;
+  }
+
+  return continuation;
+}
+
+export function setTvContinuation(
+  continuation: TvShowContinuation,
+) {
+  if (!isBrowser()) return;
+
+  if (
+    !Number.isFinite(continuation.mediaId) ||
+    !Number.isFinite(continuation.season) ||
+    !Number.isFinite(continuation.episode)
+  ) {
+    return;
+  }
+
+  const all = safelyParse<
+    Record<string, TvShowContinuation>
+  >(
+    window.localStorage.getItem(
+      TV_CONTINUATION_KEY,
+    ),
+    {},
+  );
+
+  all[String(continuation.mediaId)] = {
+    mediaId: continuation.mediaId,
+    season: continuation.season,
+    episode: continuation.episode,
+  };
+
+  try {
+    window.localStorage.setItem(
+      TV_CONTINUATION_KEY,
+      JSON.stringify(all),
+    );
+
+    emit(TV_CONTINUATION_EVENT);
+  } catch (error) {
+    console.error(
+      "RyuFlixx: failed to save TV continuation",
+      error,
+    );
+  }
+}
+
+export function clearTvContinuation(
+  mediaId: number,
+) {
+  if (!isBrowser()) return;
+
+  const all = safelyParse<
+    Record<string, TvShowContinuation>
+  >(
+    window.localStorage.getItem(
+      TV_CONTINUATION_KEY,
+    ),
+    {},
+  );
+
+  delete all[String(mediaId)];
+
+  window.localStorage.setItem(
+    TV_CONTINUATION_KEY,
+    JSON.stringify(all),
+  );
+
+  emit(TV_CONTINUATION_EVENT);
 }
 
 /* =========================================================
@@ -460,4 +570,4 @@ export function clearLocalWatchlist(
   }
 
   emit(WATCHLIST_EVENT);
-}
+  }
