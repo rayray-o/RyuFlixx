@@ -29,31 +29,38 @@ const BackdropSection: React.FC<{
   return (
     <section
       id="backdrop"
-      className="fixed inset-0 z-0 h-[35vh] md:h-[50vh] lg:h-[70vh] pointer-events-none overflow-hidden"
+      className="fixed inset-x-0 top-0 z-0 h-[65vh] pointer-events-none"
     >
       {/* Scroll fade */}
       <div
-        className="absolute inset-0 z-20 bg-background"
+        className="absolute inset-0 z-30 bg-background"
         style={{ opacity }}
       />
 
-      {/* Top cinematic fade */}
-      <div className="absolute inset-x-0 top-0 z-10 h-[28%] bg-linear-to-b from-background via-background/50 to-transparent" />
+      {/* Actual backdrop image */}
+      <Image
+        radius="none"
+        alt={
+          movie?.original_language === "id"
+            ? movie?.original_title
+            : movie?.title
+        }
+        className="absolute left-0 top-0 z-0 h-[35vh] w-screen object-cover object-center md:h-[50vh] lg:h-[70vh]"
+        src={backdropImage}
+      />
 
-      {/* Main bottom cinematic fade */}
-      <div className="absolute inset-x-0 bottom-0 z-10 h-[55%] bg-linear-to-t from-background via-background/75 via-25% to-transparent" />
+      {/* Soft top cinematic fade */}
+      <div className="absolute inset-x-0 top-0 z-10 h-[18vh] bg-linear-to-b from-background/80 via-background/20 to-transparent" />
 
-      {/* Extra-long soft transition into the page */}
-      <div className="absolute inset-x-0 bottom-0 z-11 h-[30%] bg-linear-to-t from-background/95 via-background/45 to-transparent" />
+      {/* Side vignette */}
+      <div className="absolute inset-x-0 top-0 z-10 h-[35vh] bg-[radial-gradient(ellipse_at_center,transparent_35%,hsl(var(--background)/0.35)_75%,hsl(var(--background)/0.8)_100%)] md:h-[50vh] lg:h-[70vh]" />
 
-      {/* Cinematic side vignette */}
-      <div className="absolute inset-0 z-10 bg-[radial-gradient(ellipse_at_center,transparent_35%,hsl(var(--background)/0.18)_65%,hsl(var(--background)/0.75)_100%)]" />
+      {/* THE IMPORTANT PART:
+          This gradient continues OUTSIDE the image itself. */}
+      <div className="absolute inset-x-0 top-[22vh] z-20 h-[43vh] bg-linear-to-b from-transparent via-background/65 via-45% to-background" />
 
-      {/* Existing old top gradient */}
-      <div className="absolute inset-0 z-10 bg-linear-to-b from-background from-1% via-transparent via-30%" />
-
-      {/* Existing old bottom gradient */}
-      <div className="absolute inset-0 z-10 translate-y-px bg-linear-to-t from-background from-1% via-transparent via-55%" />
+      {/* Extra-soft lower transition */}
+      <div className="absolute inset-x-0 top-[32vh] z-21 h-[33vh] bg-linear-to-b from-transparent via-background/55 to-background" />
 
       {/* Movie title/logo */}
       <Image
@@ -65,22 +72,10 @@ const BackdropSection: React.FC<{
             : movie?.title
         }
         classNames={{
-          wrapper: "absolute-center z-15 bg-transparent",
+          wrapper: "absolute-center z-25 bg-transparent",
         }}
         className="w-[25vh] max-w-80 drop-shadow-xl md:w-[60vh]"
         src={titleImage}
-      />
-
-      {/* Backdrop */}
-      <Image
-        radius="none"
-        alt={
-          movie?.original_language === "id"
-            ? movie?.original_title
-            : movie?.title
-        }
-        className="z-0 h-[35vh] w-screen object-cover object-center md:h-[50vh] lg:h-[70vh]"
-        src={backdropImage}
       />
     </section>
   );
