@@ -1,7 +1,8 @@
+"use client";
+
 import { siteConfig } from "@/config/site";
 import { cn } from "@/utils/helpers";
 import { getTvShowPlayers } from "@/utils/players";
-import { Card, Skeleton } from "@heroui/react";
 import {
   useDisclosure,
   useDocumentTitle,
@@ -15,7 +16,7 @@ import {
 } from "nuqs";
 import {
   memo,
-  useMemo,
+  useRef,
 } from "react";
 import {
   Episode,
@@ -27,13 +28,15 @@ import {
   SpacingClasses,
 } from "@/utils/constants";
 import { usePlayerEvents } from "@/hooks/usePlayerEvents";
+import WatchPlayer from "@/components/WatchPlayer";
 
-const AdsWarning = dynamic(
-  () =>
-    import(
-      "@/components/ui/overlay/AdsWarning"
-    ),
-);
+const AdsWarning =
+  dynamic(
+    () =>
+      import(
+        "@/components/ui/overlay/AdsWarning"
+      ),
+  );
 
 const TvShowPlayerHeader =
   dynamic(
@@ -121,50 +124,61 @@ const TvShowPlayer: React.FC<
     parseAsInteger.withDefault(0),
   );
 
-  usePlayerEvents({
-    saveHistory: true,
+  const playerFrameRef =
+    useRef<HTMLIFrameElement | null>(
+      null,
+    );
 
-    metadata: {
-      mediaId: id,
-      mediaType: "tv",
+  const {
+    getCurrentTime,
+    flushProgress,
+  } =
+    usePlayerEvents({
+      saveHistory: true,
 
-      title: tv.name,
+      playerFrameRef,
 
-      backdrop_path:
-        tv.backdrop_path ?? "",
+      metadata: {
+        mediaId: id,
+        mediaType: "tv",
 
-      poster_path:
-        tv.poster_path ?? undefined,
+        title: tv.name,
 
-      release_date:
-        tv.first_air_date ?? "",
+        backdrop_path:
+          tv.backdrop_path ?? "",
 
-      vote_average:
-        tv.vote_average ?? 0,
+        poster_path:
+          tv.poster_path ??
+          undefined,
 
-      season:
-        episode.season_number,
+        release_date:
+          tv.first_air_date ?? "",
 
-      episode:
-        episode.episode_number,
-    },
-  });
+        vote_average:
+          tv.vote_average ?? 0,
+
+        season:
+          episode.season_number,
+
+        episode:
+          episode.episode_number,
+      },
+    });
 
   useDocumentTitle(
     `Play ${props.seriesName} - ${props.seasonName} - ${episode.name} | ${siteConfig.name}`,
   );
 
-  const PLAYER = useMemo(
-    () =>
-      players[
-        selectedSource
-      ] || players[0],
-
-    [
-      players,
-      selectedSource,
-    ],
-  );
+  const safeSelectedSource =
+    players.length > 0
+      ? Math.min(
+          Math.max(
+            selectedSource,
+            0,
+          ),
+          players.length - 1,
+        )
+      : 0;
 
   return (
     <>
@@ -183,7 +197,7 @@ const TvShowPlayer: React.FC<
             idle && !mobile
           }
           selectedSource={
-            selectedSource
+            safeSelectedSource
           }
           onOpenSource={
             sourceHandlers.open
@@ -194,29 +208,27 @@ const TvShowPlayer: React.FC<
           {...props}
         />
 
-        <Card
-          shadow="md"
-          radius="none"
-          className="relative h-screen"
-        >
-          <Skeleton className="absolute h-full w-full" />
-
-          {seen && PLAYER && (
-            <iframe
-              allowFullScreen
-              key={PLAYER.title}
-              src={PLAYER.source}
-              className={cn(
-                "z-10 h-full",
-                {
-                  "pointer-events-none":
-                    idle &&
-                    !mobile,
-                },
-              )}
-            />
-          )}
-        </Card>
+        {seen && (
+          <WatchPlayer
+            title={`${props.seriesName} — ${props.seasonName} — ${episode.name}`}
+            servers={players}
+            selectedServer={
+              safeSelectedSource
+            }
+            onServerChange={
+              setSelectedSource
+            }
+            getCurrentTime={
+              getCurrentTime
+            }
+            flushProgress={
+              flushProgress
+            }
+            iframeRef={
+              playerFrameRef
+            }
+          />
+        )}
       </div>
 
       <TvShowPlayerSourceSelection
@@ -226,7 +238,7 @@ const TvShowPlayer: React.FC<
         }
         players={players}
         selectedSource={
-          selectedSource
+          safeSelectedSource
         }
         setSelectedSource={
           setSelectedSource
