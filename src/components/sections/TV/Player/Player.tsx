@@ -3,9 +3,7 @@
 import { siteConfig } from "@/config/site";
 import { cn } from "@/utils/helpers";
 import { getTvShowPlayers } from "@/utils/players";
-import {
-  setTvContinuation,
-} from "@/utils/localStorage";
+import { setTvContinuation } from "@/utils/localStorage";
 import {
   useDisclosure,
   useDocumentTitle,
@@ -20,6 +18,7 @@ import {
 import {
   memo,
   useRef,
+  useCallback,
 } from "react";
 import {
   Episode,
@@ -30,32 +29,25 @@ import {
   ADS_WARNING_STORAGE_KEY,
   SpacingClasses,
 } from "@/utils/constants";
-import {
-  usePlayerEvents,
-} from "@/hooks/usePlayerEvents";
+import { usePlayerEvents } from "@/hooks/usePlayerEvents";
 import WatchPlayer from "@/components/WatchPlayer";
 import { useRouter } from "next/navigation";
 
 const AdsWarning = dynamic(
-  () =>
-    import(
-      "@/components/ui/overlay/AdsWarning"
-    ),
+  () => import("@/components/ui/overlay/AdsWarning"),
 );
 
 const TvShowPlayerHeader = dynamic(
   () => import("./Header"),
 );
 
-const TvShowPlayerSourceSelection =
-  dynamic(
-    () => import("./SourceSelection"),
-  );
+const TvShowPlayerSourceSelection = dynamic(
+  () => import("./SourceSelection"),
+);
 
-const TvShowPlayerEpisodeSelection =
-  dynamic(
-    () => import("./EpisodeSelection"),
-  );
+const TvShowPlayerEpisodeSelection = dynamic(
+  () => import("./EpisodeSelection"),
+);
 
 export interface TvShowPlayerProps {
   tv: TvShowDetails;
@@ -77,9 +69,7 @@ export interface TvShowPlayerProps {
   nextEpisode?: Episode | null;
 }
 
-const TvShowPlayer: React.FC<
-  TvShowPlayerProps
-> = ({
+const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
   tv,
   id,
   episode,
@@ -90,47 +80,42 @@ const TvShowPlayer: React.FC<
 }) => {
   const router = useRouter();
 
-  const [seen] =
-    useLocalStorage<boolean>({
-      key: ADS_WARNING_STORAGE_KEY,
-      getInitialValueInEffect: false,
-    });
+  const [seen] = useLocalStorage<boolean>({
+    key: ADS_WARNING_STORAGE_KEY,
+    getInitialValueInEffect: false,
+  });
 
-  const { mobile } =
-    useBreakpoints();
+  const { mobile } = useBreakpoints();
 
-  const players =
-    getTvShowPlayers(
-      id,
-      episode.season_number,
-      episode.episode_number,
-      startAt,
-    );
+  const players = getTvShowPlayers(
+    id,
+    episode.season_number,
+    episode.episode_number,
+    startAt,
+  );
 
   const idle = useIdle(3000);
 
-  const [
-    sourceOpened,
-    sourceHandlers,
-  ] = useDisclosure(false);
+  const [sourceOpened, sourceHandlers] =
+    useDisclosure(false);
 
-  const [
-    episodeOpened,
-    episodeHandlers,
-  ] = useDisclosure(false);
+  const [episodeOpened, episodeHandlers] =
+    useDisclosure(false);
 
-  const [
-    selectedSource,
-    setSelectedSource,
-  ] = useQueryState<number>(
-    "src",
-    parseAsInteger.withDefault(0),
-  );
+  const [selectedSource, setSelectedSource] =
+    useQueryState<number>(
+      "src",
+      parseAsInteger.withDefault(0),
+    );
 
   const playerFrameRef =
-    useRef<HTMLIFrameElement | null>(
-      null,
-    );
+    useRef<HTMLIFrameElement | null>(null);
+
+  /*
+   * Prevent multiple PLAYER_EVENT "ended"
+   * messages from navigating twice.
+   */
+  const transitioningRef = useRef(false);
 
   const {
     getCurrentTime,
@@ -145,8 +130,7 @@ const TvShowPlayer: React.FC<
       backdrop_path:
         tv.backdrop_path ?? "",
       poster_path:
-        tv.poster_path ??
-        undefined,
+        tv.poster_path ?? undefined,
       release_date:
         tv.first_air_date ?? "",
       vote_average:
@@ -157,37 +141,20 @@ const TvShowPlayer: React.FC<
         episode.episode_number,
     },
 
-    onEnded: () => {
-      if (nextEpisode) {
-        /*
-         * Save the next episode as
-         * the show's continuation.
-         */
-        setTvContinuation({
-          mediaId: id,
-          season:
-            nextEpisode.season_number,
-          episode:
-            nextEpisode.episode_number,
-        });
+    onEnded: useCallback(() => {
+      /*
+       * Some providers can emit ended more than once.
+       * Ignore duplicate events while navigation is happening.
+       */
+      if (transitioningRef.current) {
+        return;
+      }
 
-        /*
-         * Automatically move into
-         * the next episode.
-         *
-         * This also handles:
-         *
-         * S1E10 -> S2E1
-         */
-        router.push(
-          `/tv/${id}/${nextEpisode.season_number}/${nextEpisode.episode_number}/player?src=${selectedSource}`,
-        );
-      } else {
-        /*
-         * No released episode remains.
-         * Keep the current episode as the
-         * last known continuation.
-         */
+      /*
+       * No next released episode.
+       * Keep this episode as the latest continuation.
+       */
+      if (!nextEpisode) {
         setTvContinuation({
           mediaId: id,
           season:
@@ -195,8 +162,44 @@ const TvShowPlayer: React.FC<
           episode:
             episode.episode_number,
         });
+
+        return;
       }
-    },
+
+      transitioningRef.current = true;
+
+      /*
+       * Save the actual next episode before
+       * navigation so Continue Watching is
+       * immediately aware of the new position.
+       */
+      setTvContinuation({
+        mediaId: id,
+        season:
+          nextEpisode.season_number,
+        episode:
+          nextEpisode.episode_number,
+      });
+
+      /*
+       * Preserve the currently selected server.
+       *
+       * Example:
+       * S1E10 + Server 2
+       *        ↓
+       * S2E1  + Server 2
+       */
+      const nextUrl =
+        `/tv/${id}/${nextEpisode.season_number}/${nextEpisode.episode_number}/player?src=${selectedSource}`;
+
+      router.push(nextUrl);
+    }, [
+      id,
+      episode,
+      nextEpisode,
+      router,
+      selectedSource,
+    ]),
   });
 
   useDocumentTitle(
@@ -206,10 +209,7 @@ const TvShowPlayer: React.FC<
   const safeSelectedSource =
     players.length > 0
       ? Math.min(
-          Math.max(
-            selectedSource,
-            0,
-          ),
+          Math.max(selectedSource, 0),
           players.length - 1,
         )
       : 0;
@@ -291,6 +291,4 @@ const TvShowPlayer: React.FC<
   );
 };
 
-export default memo(
-  TvShowPlayer,
-);
+export default memo(TvShowPlayer);
