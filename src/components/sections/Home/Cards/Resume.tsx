@@ -3,6 +3,7 @@
 import Rating from "@/components/ui/other/Rating";
 import type {
   LocalWatchHistory,
+  TvShowContinuation,
 } from "@/utils/localStorage";
 import { cn } from "@/utils/helpers";
 import { PlayOutline } from "@/utils/icons";
@@ -21,15 +22,30 @@ import { useCallback } from "react";
 
 interface ResumeCardProps {
   media: LocalWatchHistory;
+  continuation?: TvShowContinuation | null;
 }
 
-const ResumeCard: React.FC<
-  ResumeCardProps
-> = ({ media }) => {
+const ResumeCard: React.FC<ResumeCardProps> = ({
+  media,
+  continuation = null,
+}) => {
   const releaseYear =
     new Date(
       media.release_date,
     ).getFullYear();
+
+  const isUpNext =
+    media.type === "tv" &&
+    media.completed &&
+    continuation !== null;
+
+  const season =
+    continuation?.season ??
+    media.season;
+
+  const episode =
+    continuation?.episode ??
+    media.episode;
 
   const posterImage =
     getImageUrl(
@@ -40,35 +56,35 @@ const ResumeCard: React.FC<
 
   const getRedirectLink =
     useCallback(() => {
-      if (
-        media.type === "movie"
-      ) {
+      if (media.type === "movie") {
         return `/movie/${media.media_id}/player`;
       }
 
-      if (
-        media.type === "tv"
-      ) {
-        return `/tv/${media.media_id}/${media.season}/${media.episode}/player`;
+      if (media.type === "tv") {
+        return `/tv/${media.media_id}/${season}/${episode}/player`;
       }
 
       return "/";
-    }, [media]);
+    }, [
+      media,
+      season,
+      episode,
+    ]);
 
   const progress =
-    media.duration > 0
-      ? Math.min(
-          100,
-          (media.last_position /
-            media.duration) *
+    isUpNext
+      ? 0
+      : media.duration > 0
+        ? Math.min(
             100,
-        )
-      : 0;
+            (media.last_position /
+              media.duration) *
+              100,
+          )
+        : 0;
 
   return (
-    <Link
-      href={getRedirectLink()}
-    >
+    <Link href={getRedirectLink()}>
       <div
         className={cn(
           "group motion-preset-focus relative aspect-video overflow-hidden rounded-lg text-white",
@@ -91,8 +107,7 @@ const ResumeCard: React.FC<
               content: "font-bold",
             }}
           >
-            S{media.season} E
-            {media.episode}
+            S{season} E{episode}
           </Chip>
         )}
 
@@ -102,16 +117,20 @@ const ResumeCard: React.FC<
           variant="faded"
           className="absolute left-2 top-2 z-20"
           color={
-            media.completed
-              ? "success"
-              : undefined
+            isUpNext
+              ? "warning"
+              : media.completed
+                ? "success"
+                : undefined
           }
         >
-          {media.completed
-            ? "Completed"
-            : formatDuration(
-                media.last_position,
-              )}
+          {isUpNext
+            ? "Up Next"
+            : media.completed
+              ? "Completed"
+              : formatDuration(
+                  media.last_position,
+                )}
         </Chip>
 
         <Progress
@@ -136,25 +155,19 @@ const ResumeCard: React.FC<
             </h6>
 
             <p className="truncate text-xs">
-              {timeAgo(
-                media.updated_at,
-              )}
+              {timeAgo(media.updated_at)}
             </p>
           </div>
 
           <div className="flex justify-between text-xs">
             <p>
-              {Number.isFinite(
-                releaseYear,
-              )
+              {Number.isFinite(releaseYear)
                 ? releaseYear
                 : ""}
             </p>
 
             <Rating
-              rate={
-                media.vote_average
-              }
+              rate={media.vote_average}
             />
           </div>
         </div>
