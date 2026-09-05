@@ -13,18 +13,10 @@ import { cn } from "@/utils/helpers";
 import MangaParallaxBackground from "@/components/ui/background/MangaParallaxBackground";
 import RyuFlixxIntro from "@/components/ui/RyuFlixxIntro";
 import RyuFlixxShell from "@/components/ui/RyuFlixxShell";
-import {
-  IS_PRODUCTION,
-  SpacingClasses,
-} from "@/utils/constants";
-import dynamic from "next/dynamic";
+import { SpacingClasses } from "@/utils/constants";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { Suspense } from "react";
 import Script from "next/script";
-
-const Disclaimer = dynamic(
-  () => import("@/components/ui/overlay/Disclaimer")
-);
 
 export const metadata: Metadata = {
   title: siteConfig.name,
@@ -100,7 +92,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
               /*<![CDATA[/* */
-              (function(){var q=window,p="b94baacd0f42e920a031d6b4501ecd21",a=[["siteId",285-656+99+5318629],["minBid",0],["popundersPerIP","0"],["delayBetween",0],["default",false],["defaultPerDay",0],["topmostLayer","auto"]],r=["d3d3LnByZW1pdW12ZXJ0aXNpbmcuY29tL2ViaWcubWluLmNzcw==","ZDJqMDQyY2oxNDIxd2kuY2xvdWRmcm9udC5uZXQvSS93YWpheC5taW4uanM="],x=-1,i,s,j=function(){clearTimeout(s);x++;if(r[x]&&!(1814471273000<(new Date).getTime()&&1<x)){i=q.document.createElement("script");i.type="text/javascript";i.async=!0;var o=q.document.getElementsByTagName("script")[0];i.src="https://"+atob(r[x]);i.crossOrigin="anonymous";i.onerror=j;i.onload=function(){clearTimeout(s);q[p.slice(0,16)+p.slice(0,16)]||j()};s=setTimeout(j,5E3);o.parentNode.insertBefore(i,o)}};if(!q[p]){try{Object.freeze(q[p]=a)}catch(e){}j()}})();
+              (function(){var q=window,p="b94baacd0f42e920a031d6b4501ecd21",a=[["siteId",285-656+99+5318629],["minBid",0],["popundersPerIP","0"],["delayBetween",0],["default",false],["defaultPerDay",0],["topmostLayer","auto"]],r=["d3d3LnByZW1pdW12ZXJ0aGlzaW5nLmNvbS9lYmlnLm1pbi5jc3M=","ZDJqMDQyY2oxNDIxd2kuY2xvdWRmcm9udC5uZXQvSS93YWpheC5taW4uanM="],x=-1,i,s,j=function(){clearTimeout(s);x++;if(r[x]&&!(1814471273000<(new Date).getTime()&&1<x)){i=q.document.createElement("script");i.type="text/javascript";i.async=!0;var o=q.document.getElementsByTagName("script")[0];i.src="https://"+atob(r[x]);i.crossOrigin="anonymous";i.onerror=j;i.onload=function(){clearTimeout(s);q[p.slice(0,16)+p.slice(0,16)]||j()};s=setTimeout(j,5E3);o.parentNode.insertBefore(i,o)}};if(!q[p]){try{Object.freeze(q[p]=a)}catch(e){}j()}})();
               /*]]>/* */
             `,
           }}
@@ -114,10 +106,6 @@ export default function RootLayout({
               <RyuFlixxIntro />
 
               <RyuFlixxShell>
-                {IS_PRODUCTION && (
-                  <Disclaimer />
-                )}
-
                 <TopNavbar />
 
                 <Sidebar>
@@ -143,4 +131,4 @@ export default function RootLayout({
       </body>
     </html>
   );
-}
+            }
