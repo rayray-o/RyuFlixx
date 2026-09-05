@@ -1,32 +1,144 @@
 "use client";
 
 import { PlayersProps } from "@/types";
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 interface WatchPlayerProps {
   servers: PlayersProps[];
+
   selectedServer: number;
-  onServerChange: (index: number) => void;
+
+  onServerChange: (
+    index: number,
+  ) => void;
+
+  /*
+   * Returns the latest playback position
+   * from usePlayerEvents.
+   */
+  getCurrentTime?: () => number;
+
+  /*
+   * Immediately saves the latest playback
+   * position before destroying the old iframe.
+   */
+  flushProgress?: () => void;
+
+  /*
+   * Gives the parent access to the active iframe.
+   * Used to reject stale postMessage events.
+   */
+  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+
   title?: string;
 }
 
-const WatchPlayer: React.FC<WatchPlayerProps> = ({
+/*
+ * Add/update startAt without destroying any
+ * existing query parameters.
+ */
+function addResumePosition(
+  source: string,
+  position: number,
+) {
+  if (
+    !Number.isFinite(position) ||
+    position <= 0
+  ) {
+    return source;
+  }
+
+  try {
+    const url = new URL(source);
+
+    url.searchParams.set(
+      "startAt",
+      Math.floor(position).toString(),
+    );
+
+    return url.toString();
+  } catch {
+    return source;
+  }
+}
+
+const WatchPlayer: React.FC<
+  WatchPlayerProps
+> = ({
   servers,
   selectedServer,
   onServerChange,
+  getCurrentTime,
+  flushProgress,
+  iframeRef,
   title = "Video Player",
 }) => {
   const safeIndex =
     servers.length > 0
-      ? Math.min(Math.max(selectedServer, 0), servers.length - 1)
+      ? Math.min(
+          Math.max(
+            selectedServer,
+            0,
+          ),
+          servers.length - 1,
+        )
       : 0;
 
-  const currentServer = useMemo(
-    () => servers[safeIndex],
-    [servers, safeIndex],
+  const currentServer =
+    useMemo(
+      () =>
+        servers[safeIndex],
+      [servers, safeIndex],
+    );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  /*
+   * Position captured at the exact moment
+   * the user switches server.
+   */
+  const [
+    handoffPosition,
+    setHandoffPosition,
+  ] = useState<number | null>(
+    null,
   );
 
-  const [loading, setLoading] = useState(true);
+  const internalIframeRef =
+    useRef<HTMLIFrameElement | null>(
+      null,
+    );
+
+  /*
+   * Use the parent's ref when supplied.
+   * Otherwise keep our own.
+   */
+  const setIframeRef = (
+    element: HTMLIFrameElement | null,
+  ) => {
+    internalIframeRef.current =
+      element;
+
+    if (iframeRef) {
+      iframeRef.current =
+        element;
+    }
+  };
+
+  /*
+   * Reset handoff state when the content
+   * itself changes, such as moving to another
+   * movie/episode.
+   */
+  useEffect(() => {
+    setHandoffPosition(null);
+  }, [servers.length]);
 
   useEffect(() => {
     setLoading(true);
@@ -42,20 +154,30 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     );
   }
 
+  const iframeSource =
+    handoffPosition !== null
+      ? addResumePosition(
+          currentServer.source,
+          handoffPosition,
+        )
+      : currentServer.source;
+
   return (
     <section className="w-full">
-      {/* PLAYER CANVAS */}
       <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
         <iframe
-          key={`${currentServer.title}-${currentServer.source}`}
-          src={currentServer.source}
+          ref={setIframeRef}
+          key={`${currentServer.title}-${iframeSource}`}
+          src={iframeSource}
           title={`${title} — ${currentServer.title}`}
           className="absolute inset-0 block h-full w-full border-0"
           allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
           allowFullScreen
           loading="eager"
           referrerPolicy="strict-origin-when-cross-origin"
-          onLoad={() => setLoading(false)}
+          onLoad={() =>
+            setLoading(false)
+          }
         />
 
         {loading && (
@@ -70,57 +192,98 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
               <span className="text-xs text-white/40">
                 {currentServer.title}
               </span>
+
+              {handoffPosition !==
+                null && (
+                <span className="text-[10px] text-white/30">
+                  Resuming at{" "}
+                  {Math.floor(
+                    handoffPosition,
+                  )}
+                  s
+                </span>
+              )}
             </div>
           </div>
         )}
       </div>
 
-      {/* SERVER CONTROLS */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <span className="mr-1 text-xs font-medium uppercase tracking-widest text-white/40">
           Server
         </span>
 
-        {servers.map((server, index) => {
-          const active = index === safeIndex;
+        {servers.map(
+          (server, index) => {
+            const active =
+              index === safeIndex;
 
-          return (
-            <button
-              key={`${server.title}-${index}`}
-              type="button"
-              aria-pressed={active}
-              onClick={() => {
-                if (active) return;
+            return (
+              <button
+                key={`${server.title}-${index}`}
+                type="button"
+                aria-pressed={active}
+                onClick={() => {
+                  if (active) {
+                    return;
+                  }
 
-                setLoading(true);
-                onServerChange(index);
-              }}
-              className={[
-                "rounded-xl border px-4 py-2 text-sm font-medium",
-                "transition-colors duration-150",
-                "focus:outline-none focus:ring-2 focus:ring-white/30",
-                active
-                  ? "border-white/30 bg-white/15 text-white shadow-lg"
-                  : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
-              ].join(" ")}
-            >
-              <span className="flex items-center gap-2">
-                {server.title}
+                  /*
+                   * THIS IS THE IMPORTANT PART.
+                   *
+                   * 1. Read the freshest position.
+                   * 2. Persist it immediately.
+                   * 3. Give that position to the new iframe.
+                   * 4. Then change the server.
+                   */
+                  const position =
+                    Math.max(
+                      0,
+                      getCurrentTime?.() ??
+                        0,
+                    );
 
-                {server.recommended && (
-                  <span className="text-[9px] uppercase tracking-wider text-white/40">
-                    Recommended
-                  </span>
-                )}
-              </span>
-            </button>
-          );
-        })}
+                  flushProgress?.();
+
+                  setHandoffPosition(
+                    position,
+                  );
+
+                  setLoading(true);
+
+                  onServerChange(
+                    index,
+                  );
+                }}
+                className={[
+                  "rounded-xl border px-4 py-2 text-sm font-medium",
+                  "transition-colors duration-150",
+                  "focus:outline-none focus:ring-2 focus:ring-white/30",
+
+                  active
+                    ? "border-white/30 bg-white/15 text-white shadow-lg"
+                    : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
+                ].join(" ")}
+              >
+                <span className="flex items-center gap-2">
+                  {server.title}
+
+                  {server.recommended && (
+                    <span className="text-[9px] uppercase tracking-wider text-white/40">
+                      Recommended
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          },
+        )}
       </div>
     </section>
   );
 };
 
-WatchPlayer.displayName = "WatchPlayer";
+WatchPlayer.displayName =
+  "WatchPlayer";
 
 export default WatchPlayer;
