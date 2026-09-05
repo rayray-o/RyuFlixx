@@ -8,9 +8,9 @@ import {
 } from "@/utils/movies";
 import BookmarkButton from "@/components/ui/button/BookmarkButton";
 import { MovieDetails } from "tmdb-ts/dist/types/movies";
+import { Video } from "tmdb-ts/dist/types/credits";
 import Rating from "../../../ui/other/Rating";
 import ShareButton from "@/components/ui/button/ShareButton";
-import { AppendToResponse } from "tmdb-ts/dist/types/options";
 import { useDocumentTitle } from "@mantine/hooks";
 import { siteConfig } from "@/config/site";
 import { FaCirclePlay } from "react-icons/fa6";
@@ -22,11 +22,11 @@ import Link from "next/link";
 import { SavedMovieDetails } from "@/types/movie";
 
 interface OverviewSectionProps {
-  movie: AppendToResponse<
-    MovieDetails,
-    "videos"[],
-    "movie"
-  >;
+  movie: MovieDetails & {
+    videos?: {
+      results?: Video[];
+    };
+  };
 }
 
 const OverviewSection: React.FC<OverviewSectionProps> = ({
@@ -61,7 +61,7 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({
       <div className="flex flex-col gap-10">
         {/* Main cinematic information */}
         <div className="relative">
-          {/* Desktop poster stays subtle instead of dominating the page */}
+          {/* Subtle desktop poster */}
           <div className="hidden md:block">
             <Image
               isBlurred
@@ -101,13 +101,13 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({
               )}
             </div>
 
-            {/* Title */}
+            {/* Title + metadata */}
             <div className="flex flex-col gap-3">
               <h2 className="text-4xl font-black leading-none tracking-tight md:text-6xl lg:text-7xl">
                 {fullTitle}
               </h2>
 
-              {/* Clean metadata row */}
+              {/* Cinematic metadata row */}
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground/75 md:text-base">
                 <div className="flex items-center gap-1.5">
                   <Clock />
@@ -134,7 +134,7 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({
               </div>
             </div>
 
-            {/* Actions */}
+            {/* Action buttons */}
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 as={Link}
@@ -148,7 +148,7 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({
                 Play Now
               </Button>
 
-              <Trailer videos={movie.videos.results} />
+              <Trailer videos={movie.videos?.results ?? []} />
 
               <div className="flex gap-2">
                 <ShareButton
