@@ -1,8 +1,15 @@
 "use client";
 
 import { ContentType } from "@/types";
-import { saveWatchProgress } from "@/utils/localStorage";
-import { useEffect, useRef } from "react";
+import {
+  getWatchHistory,
+  saveWatchProgress,
+} from "@/utils/localStorage";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 
 export type PlayerEventType =
   | "play"
@@ -70,10 +77,6 @@ function firstDefined<T>(
   ) as T | undefined;
 }
 
-/**
- * Normalizes PLAYER_EVENT messages from the
- * providers currently used by RyuFlixx.
- */
 function parseGenericPlayerMessage(
   raw: BasePlayerEventEnvelope<any>,
 ): UnifiedPlayerEventData | null {
@@ -204,10 +207,10 @@ function parseGenericPlayerMessage(
   };
 }
 
-/**
- * Providers currently present in src/utils/players.ts.
+/*
+ * Current RyuFlixx providers.
  *
- * VidKing has intentionally been removed.
+ * VidKing is intentionally NOT included.
  */
 const PLAYER_ORIGINS = [
   "https://vidlink.pro",
@@ -242,12 +245,6 @@ const PLAYER_ORIGINS = [
 export type PlayerOrigin =
   (typeof PLAYER_ORIGINS)[number];
 
-/**
- * Generate adapters for every current provider.
- *
- * AdapterMap deliberately uses string keys so
- * Object.fromEntries remains TypeScript-safe.
- */
 export const playerAdapters =
   Object.fromEntries(
     PLAYER_ORIGINS.map(
@@ -293,6 +290,14 @@ export interface UsePlayerEventsOptions {
 
   saveHistory?: boolean;
 
+  /*
+   * Ref to the iframe currently controlled by
+   * WatchPlayer.
+   */
+  playerFrameRef?: React.RefObject<
+    HTMLIFrameElement | null
+  >;
+
   onPlay?: (
     data: UnifiedPlayerEventData,
   ) => void;
@@ -320,6 +325,7 @@ export function usePlayerEvents(
   const {
     metadata,
     saveHistory = false,
+    playerFrameRef,
 
     onPlay,
     onPause,
@@ -375,145 +381,179 @@ export function usePlayerEvents(
     onTimeUpdate,
   ]);
 
-  /**
-   * Save the current normalized playback state.
+  /*
+   * Save progress locally.
    */
-  const saveLocalProgress = (
-    data: UnifiedPlayerEventData,
-    completed = false,
-  ) => {
-    if (!saveHistoryRef.current) {
+  const saveLocalProgress = useCallback(
+    (
+      data: UnifiedPlayerEventData,
+      completed = false,
+    ) => {
+      if (!saveHistoryRef.current) {
+        return;
+      }
+
+      const currentMetadata =
+        metadataRef.current;
+
+      const mediaId =
+        Number(data.mediaId);
+
+      if (
+        !Number.isFinite(mediaId) ||
+        mediaId <= 0
+      ) {
+        return;
+      }
+
+      const mediaType =
+        currentMetadata?.mediaType ??
+        data.mediaType;
+
+      const title =
+        currentMetadata?.title;
+
+      const backdropPath =
+        currentMetadata?.backdrop_path;
+
+      const releaseDate =
+        currentMetadata?.release_date;
+
+      const voteAverage =
+        currentMetadata?.vote_average;
+
+      if (
+        !title ||
+        backdropPath === undefined ||
+        releaseDate === undefined ||
+        voteAverage === undefined
+      ) {
+        return;
+      }
+
+      const season =
+        data.season ??
+        currentMetadata?.season;
+
+      const episode =
+        data.episode ??
+        currentMetadata?.episode;
+
+      saveWatchProgress(
+        {
+          mediaId,
+          mediaType,
+
+          title,
+
+          backdrop_path:
+            backdropPath,
+
+          poster_path:
+            currentMetadata?.poster_path,
+
+          release_date:
+            releaseDate,
+
+          vote_average:
+            voteAverage,
+
+          season,
+          episode,
+        },
+
+        data.currentTime,
+        data.duration,
+        completed,
+      );
+
+      lastSavedPositionRef.current =
+        data.currentTime;
+    },
+    [],
+  );
+
+  /*
+   * Force-save the latest known event.
+   */
+  const flushProgress = useCallback(() => {
+    const latest =
+      eventDataRef.current;
+
+    if (!latest) {
       return;
     }
 
-    const currentMetadata =
-      metadataRef.current;
-
-    const mediaId =
-      Number(data.mediaId);
-
-    if (
-      !Number.isFinite(mediaId) ||
-      mediaId <= 0
-    ) {
-      return;
-    }
-
-    const title =
-      currentMetadata?.title;
-
-    const backdropPath =
-      currentMetadata?.backdrop_path;
-
-    const releaseDate =
-      currentMetadata?.release_date;
-
-    const voteAverage =
-      currentMetadata?.vote_average;
-
-    if (
-      !title ||
-      backdropPath === undefined ||
-      releaseDate === undefined ||
-      voteAverage === undefined
-    ) {
-      return;
-    }
-
-    const season =
-      data.season ??
-      currentMetadata?.season;
-
-    const episode =
-      data.episode ??
-      currentMetadata?.episode;
-
-    saveWatchProgress(
-      {
-        mediaId,
-
-        mediaType:
-          currentMetadata?.mediaType ??
-          data.mediaType,
-
-        title,
-
-        backdrop_path:
-          backdropPath,
-
-        poster_path:
-          currentMetadata?.poster_path,
-
-        release_date:
-          releaseDate,
-
-        vote_average:
-          voteAverage,
-
-        season,
-        episode,
-      },
-      data.currentTime,
-      data.duration,
-      completed,
+    saveLocalProgress(
+      latest,
+      latest.event === "ended",
     );
+  }, [saveLocalProgress]);
 
-    lastSavedPositionRef.current =
-      data.currentTime;
-  };
-
-  /**
-   * Normal timeupdate saves are throttled.
-   * Important events such as pause and seek
-   * are saved immediately.
+  /*
+   * Current playback position.
+   *
+   * We intentionally use the latest PLAYER_EVENT
+   * received from the provider rather than attempting
+   * cross-origin access to iframe internals.
    */
-  const maybeSaveProgress = (
-    data: UnifiedPlayerEventData,
-    force = false,
-  ) => {
-    if (!saveHistoryRef.current) {
-      return;
+  const getCurrentTime = useCallback(() => {
+    const latest =
+      eventDataRef.current;
+
+    if (!latest) {
+      return 0;
     }
 
-    if (
-      !force &&
-      Math.abs(
-        data.currentTime -
-          lastSavedPositionRef.current,
-      ) < 5
-    ) {
-      return;
-    }
+    return Math.max(
+      0,
+      latest.currentTime,
+    );
+  }, []);
 
-    saveLocalProgress(data);
-  };
-
-  /**
-   * Save the latest known playback state when
-   * the page/tab becomes hidden or unloads.
+  /*
+   * Save timeupdate events periodically instead
+   * of writing to localStorage every single frame.
    */
-  useEffect(() => {
-    const saveLatestProgress = () => {
-      const latestEvent =
-        eventDataRef.current;
-
-      if (!latestEvent) {
+  const maybeSaveProgress = useCallback(
+    (
+      data: UnifiedPlayerEventData,
+      force = false,
+    ) => {
+      if (!saveHistoryRef.current) {
         return;
       }
 
       if (
-        latestEvent.event === "ended"
+        !force &&
+        Math.abs(
+          data.currentTime -
+            lastSavedPositionRef.current,
+        ) < 5
       ) {
-        saveLocalProgress(
-          latestEvent,
-          true,
-        );
+        return;
+      }
 
+      saveLocalProgress(data);
+    },
+    [saveLocalProgress],
+  );
+
+  /*
+   * Save when the page becomes hidden or closes.
+   */
+  useEffect(() => {
+    const saveLatestProgress = () => {
+      const latest =
+        eventDataRef.current;
+
+      if (!latest) {
         return;
       }
 
       saveLocalProgress(
-        latestEvent,
+        latest,
+        latest.event === "ended",
       );
     };
 
@@ -554,16 +594,19 @@ export function usePlayerEvents(
         handleBeforeUnload,
       );
     };
-  }, []);
+  }, [saveLocalProgress]);
 
-  /**
-   * Listen for playback events coming from
-   * the embedded player iframes.
+  /*
+   * Listen for PLAYER_EVENT messages.
    */
   useEffect(() => {
     const handleMessage = (
       event: MessageEvent,
     ) => {
+      /*
+       * Only accept messages from one of the
+       * providers we actually use.
+       */
       const adapter =
         Object.values(
           playerAdapters,
@@ -574,6 +617,22 @@ export function usePlayerEvents(
         );
 
       if (!adapter) {
+        return;
+      }
+
+      /*
+       * If WatchPlayer supplied an iframe ref,
+       * make sure this message came from that
+       * iframe.
+       */
+      const activeFrame =
+        playerFrameRef?.current;
+
+      if (
+        activeFrame &&
+        event.source !==
+          activeFrame.contentWindow
+      ) {
         return;
       }
 
@@ -664,13 +723,31 @@ export function usePlayerEvents(
         handleMessage,
       );
     };
-  }, []);
+  }, [
+    maybeSaveProgress,
+    playerFrameRef,
+    saveLocalProgress,
+  ]);
 
   return {
-    isPlaying: false,
-    currentTime: 0,
-    duration: 0,
+    isPlaying:
+      eventDataRef.current?.event ===
+      "play",
+
+    currentTime:
+      eventDataRef.current
+        ?.currentTime ?? 0,
+
+    duration:
+      eventDataRef.current
+        ?.duration ?? 0,
+
     lastEvent:
-      null as PlayerEventType | null,
+      eventDataRef.current
+        ?.event ?? null,
+
+    getCurrentTime,
+
+    flushProgress,
   };
-            }
+    }
