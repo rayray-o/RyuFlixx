@@ -17,8 +17,8 @@ import {
 } from "nuqs";
 import {
   memo,
-  useRef,
   useCallback,
+  useRef,
 } from "react";
 import {
   Episode,
@@ -112,8 +112,8 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
     useRef<HTMLIFrameElement | null>(null);
 
   /*
-   * Prevent multiple PLAYER_EVENT "ended"
-   * messages from navigating twice.
+   * Prevent duplicate "ended" events from
+   * causing multiple navigations.
    */
   const transitioningRef = useRef(false);
 
@@ -142,17 +142,14 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
     },
 
     onEnded: useCallback(() => {
-      /*
-       * Some providers can emit ended more than once.
-       * Ignore duplicate events while navigation is happening.
-       */
       if (transitioningRef.current) {
         return;
       }
 
       /*
-       * No next released episode.
-       * Keep this episode as the latest continuation.
+       * No next episode:
+       * keep the current episode as the
+       * latest continuation.
        */
       if (!nextEpisode) {
         setTvContinuation({
@@ -169,9 +166,9 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
       transitioningRef.current = true;
 
       /*
-       * Save the actual next episode before
-       * navigation so Continue Watching is
-       * immediately aware of the new position.
+       * Save the next episode before navigating.
+       * This makes Continue Watching immediately
+       * point at the correct episode.
        */
       setTvContinuation({
         mediaId: id,
@@ -182,12 +179,8 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
       });
 
       /*
-       * Preserve the currently selected server.
-       *
-       * Example:
-       * S1E10 + Server 2
-       *        ↓
-       * S2E1  + Server 2
+       * Preserve the currently selected server
+       * when automatically moving to the next episode.
        */
       const nextUrl =
         `/tv/${id}/${nextEpisode.season_number}/${nextEpisode.episode_number}/player?src=${selectedSource}`;
@@ -286,6 +279,12 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
           episodeHandlers.close
         }
         episodes={episodes}
+        currentSeason={
+          episode.season_number
+        }
+        totalSeasons={
+          tv.number_of_seasons ?? 1
+        }
       />
     </>
   );
