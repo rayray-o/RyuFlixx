@@ -1,7 +1,7 @@
+"use client";
+
 import { ContentType } from "@/types";
-import {
-  saveWatchProgress,
-} from "@/utils/localStorage";
+import { saveWatchProgress } from "@/utils/localStorage";
 import { useEffect, useRef } from "react";
 
 export type PlayerEventType =
@@ -27,17 +27,19 @@ export interface UnifiedPlayerEventData {
   progress?: number;
 }
 
-/*
- * ------------------------------------------------------------
- * GENERIC PLAYER EVENT ADAPTER
- * ------------------------------------------------------------
- *
- * Different embed providers may use slightly different names
- * for the same values. This parser accepts the common variants.
- *
- * Providers that actually expose PLAYER_EVENT messages can
- * therefore use the same normalized playback pipeline.
- */
+export interface PlayerAdapter<
+  RawMessage extends BasePlayerEventEnvelope<any> =
+    BasePlayerEventEnvelope<any>,
+> {
+  origin: `https://${string}`;
+
+  parse: (
+    raw: RawMessage,
+  ) => UnifiedPlayerEventData | null;
+}
+
+export type AdapterMap =
+  Record<string, PlayerAdapter<any>>;
 
 const SUPPORTED_EVENTS: PlayerEventType[] = [
   "play",
@@ -68,6 +70,10 @@ function firstDefined<T>(
   ) as T | undefined;
 }
 
+/**
+ * Normalizes PLAYER_EVENT messages from the
+ * providers currently used by RyuFlixx.
+ */
 function parseGenericPlayerMessage(
   raw: BasePlayerEventEnvelope<any>,
 ): UnifiedPlayerEventData | null {
@@ -166,24 +172,31 @@ function parseGenericPlayerMessage(
 
   return {
     event,
+
     currentTime: Math.max(
       0,
       currentTime,
     ),
+
     duration: Math.max(
       0,
       duration,
     ),
+
     mediaId,
+
     mediaType,
+
     season:
       typeof data.season === "number"
         ? data.season
         : undefined,
+
     episode:
       typeof data.episode === "number"
         ? data.episode
         : undefined,
+
     progress:
       typeof progressRaw === "number"
         ? progressRaw
@@ -191,17 +204,11 @@ function parseGenericPlayerMessage(
   };
 }
 
-/*
- * ------------------------------------------------------------
- * CURRENT RYUFLIXX PROVIDERS
- * ------------------------------------------------------------
+/**
+ * Providers currently present in src/utils/players.ts.
  *
- * VidKing has been completely removed.
- *
- * These origins correspond to the providers currently defined
- * in src/utils/players.ts.
+ * VidKing has intentionally been removed.
  */
-
 const PLAYER_ORIGINS = [
   "https://vidlink.pro",
   "https://embed.filmu.in",
@@ -235,23 +242,11 @@ const PLAYER_ORIGINS = [
 export type PlayerOrigin =
   (typeof PLAYER_ORIGINS)[number];
 
-export interface PlayerAdapter<
-  RawMessage extends BasePlayerEventEnvelope<any> =
-    BasePlayerEventEnvelope<any>,
-> {
-  origin: `https://${string}`;
-
-  parse: (
-    raw: RawMessage,
-  ) => UnifiedPlayerEventData | null;
-}
-
-/*
- * Every current provider gets an adapter.
+/**
+ * Generate adapters for every current provider.
  *
- * The parser is intentionally shared because the important
- * part is normalizing provider messages into the same internal
- * playback format.
+ * AdapterMap deliberately uses string keys so
+ * Object.fromEntries remains TypeScript-safe.
  */
 export const playerAdapters =
   Object.fromEntries(
@@ -265,10 +260,7 @@ export const playerAdapters =
         },
       ],
     ),
-  ) as Record<
-    PlayerOrigin,
-    PlayerAdapter
-  >;
+  ) as AdapterMap;
 
 export interface PlayerMediaMetadata {
   mediaId: number;
@@ -383,12 +375,9 @@ export function usePlayerEvents(
     onTimeUpdate,
   ]);
 
-  /*
-   * ----------------------------------------------------------
-   * LOCAL SAVE
-   * ----------------------------------------------------------
+  /**
+   * Save the current normalized playback state.
    */
-
   const saveLocalProgress = (
     data: UnifiedPlayerEventData,
     completed = false,
@@ -473,12 +462,11 @@ export function usePlayerEvents(
       data.currentTime;
   };
 
-  /*
-   * ----------------------------------------------------------
-   * SAVE THROTTLING
-   * ----------------------------------------------------------
+  /**
+   * Normal timeupdate saves are throttled.
+   * Important events such as pause and seek
+   * are saved immediately.
    */
-
   const maybeSaveProgress = (
     data: UnifiedPlayerEventData,
     force = false,
@@ -500,12 +488,10 @@ export function usePlayerEvents(
     saveLocalProgress(data);
   };
 
-  /*
-   * ----------------------------------------------------------
-   * PAGE / TAB LIFECYCLE
-   * ----------------------------------------------------------
+  /**
+   * Save the latest known playback state when
+   * the page/tab becomes hidden or unloads.
    */
-
   useEffect(() => {
     const saveLatestProgress = () => {
       const latestEvent =
@@ -570,12 +556,10 @@ export function usePlayerEvents(
     };
   }, []);
 
-  /*
-   * ----------------------------------------------------------
-   * PLAYER MESSAGE LISTENER
-   * ----------------------------------------------------------
+  /**
+   * Listen for playback events coming from
+   * the embedded player iframes.
    */
-
   useEffect(() => {
     const handleMessage = (
       event: MessageEvent,
@@ -689,4 +673,4 @@ export function usePlayerEvents(
     lastEvent:
       null as PlayerEventType | null,
   };
-    }
+            }
