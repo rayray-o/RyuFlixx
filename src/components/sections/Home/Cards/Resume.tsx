@@ -23,7 +23,6 @@ import {
 } from "@heroui/react";
 import Link from "next/link";
 import { useCallback } from "react";
-import { X } from "lucide-react";
 
 interface ResumeCardProps {
   media: LocalWatchHistory;
@@ -111,15 +110,15 @@ const ResumeCard: React.FC<ResumeCardProps> = ({
           "group motion-preset-focus relative aspect-video overflow-hidden rounded-lg text-white",
         )}
       >
-        {/* Remove button */}
+        {/* Remove from Continue Watching */}
         <button
           type="button"
           aria-label={`Remove ${media.title} from Continue Watching`}
           title="Remove from Continue Watching"
           onClick={handleRemove}
-          className="absolute right-2 top-2 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white opacity-100 backdrop-blur-sm transition hover:bg-black/85 hover:text-red-400 md:opacity-0 md:group-hover:opacity-100"
+          className="absolute right-2 top-2 z-40 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-sm font-bold text-white opacity-100 backdrop-blur-sm transition hover:bg-danger hover:text-white md:opacity-0 md:group-hover:opacity-100"
         >
-          <X size={17} strokeWidth={2.5} />
+          ×
         </button>
 
         <div className="absolute inset-0 flex items-center justify-center">
