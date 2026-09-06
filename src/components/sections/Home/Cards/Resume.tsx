@@ -5,6 +5,10 @@ import type {
   LocalWatchHistory,
   TvShowContinuation,
 } from "@/utils/localStorage";
+import {
+  clearTvContinuation,
+  removeWatchHistory,
+} from "@/utils/localStorage";
 import { cn } from "@/utils/helpers";
 import { PlayOutline } from "@/utils/icons";
 import {
@@ -19,6 +23,7 @@ import {
 } from "@heroui/react";
 import Link from "next/link";
 import { useCallback } from "react";
+import { X } from "lucide-react";
 
 interface ResumeCardProps {
   media: LocalWatchHistory;
@@ -29,10 +34,9 @@ const ResumeCard: React.FC<ResumeCardProps> = ({
   media,
   continuation = null,
 }) => {
-  const releaseYear =
-    new Date(
-      media.release_date,
-    ).getFullYear();
+  const releaseYear = new Date(
+    media.release_date,
+  ).getFullYear();
 
   const isUpNext =
     media.type === "tv" &&
@@ -47,41 +51,58 @@ const ResumeCard: React.FC<ResumeCardProps> = ({
     continuation?.episode ??
     media.episode;
 
-  const posterImage =
-    getImageUrl(
-      media.backdrop_path ||
-        media.poster_path ||
-        "",
-    );
+  const posterImage = getImageUrl(
+    media.backdrop_path ||
+      media.poster_path ||
+      "",
+  );
 
-  const getRedirectLink =
-    useCallback(() => {
-      if (media.type === "movie") {
-        return `/movie/${media.media_id}/player`;
-      }
+  const getRedirectLink = useCallback(() => {
+    if (media.type === "movie") {
+      return `/movie/${media.media_id}/player`;
+    }
+
+    if (media.type === "tv") {
+      return `/tv/${media.media_id}/${season}/${episode}/player`;
+    }
+
+    return "/";
+  }, [media, season, episode]);
+
+  const handleRemove = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      removeWatchHistory(
+        media.media_id,
+        media.type,
+        media.season,
+        media.episode,
+      );
 
       if (media.type === "tv") {
-        return `/tv/${media.media_id}/${season}/${episode}/player`;
+        clearTvContinuation(media.media_id);
       }
+    },
+    [
+      media.media_id,
+      media.type,
+      media.season,
+      media.episode,
+    ],
+  );
 
-      return "/";
-    }, [
-      media,
-      season,
-      episode,
-    ]);
-
-  const progress =
-    isUpNext
-      ? 0
-      : media.duration > 0
-        ? Math.min(
+  const progress = isUpNext
+    ? 0
+    : media.duration > 0
+      ? Math.min(
+          100,
+          (media.last_position /
+            media.duration) *
             100,
-            (media.last_position /
-              media.duration) *
-              100,
-          )
-        : 0;
+        )
+      : 0;
 
   return (
     <Link href={getRedirectLink()}>
@@ -90,6 +111,17 @@ const ResumeCard: React.FC<ResumeCardProps> = ({
           "group motion-preset-focus relative aspect-video overflow-hidden rounded-lg text-white",
         )}
       >
+        {/* Remove button */}
+        <button
+          type="button"
+          aria-label={`Remove ${media.title} from Continue Watching`}
+          title="Remove from Continue Watching"
+          onClick={handleRemove}
+          className="absolute right-2 top-2 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white opacity-100 backdrop-blur-sm transition hover:bg-black/85 hover:text-red-400 md:opacity-0 md:group-hover:opacity-100"
+        >
+          <X size={17} strokeWidth={2.5} />
+        </button>
+
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="z-10 flex h-12 w-12 items-center justify-center rounded-full bg-black/35 opacity-0 backdrop-blur-xs transition-opacity group-hover:opacity-100">
             <PlayOutline className="h-6 w-6 text-white" />
