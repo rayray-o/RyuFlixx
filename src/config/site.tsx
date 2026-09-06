@@ -11,7 +11,7 @@ import {
   IoInformationCircleOutline,
   IoMoon,
 } from "react-icons/io5";
-import { TbFolder, TbFolderFilled } from "react-icons/tb";
+import { TbFolder, TbFolderFilled, TbHistory } from "react-icons/tb";
 
 export const siteConfig: SiteConfigType = {
   name: "RyuFlix",
@@ -43,10 +43,10 @@ export const siteConfig: SiteConfigType = {
       activeIcon: <TbFolderFilled className="size-full" />,
     },
     {
-      label: "About",
-      href: "/about",
-      icon: <IoInformationCircleOutline className="size-full" />,
-      activeIcon: <IoInformationCircle className="size-full" />,
+      label: "History",
+      href: "/history",
+      icon: <TbHistory className="size-full" />,
+      activeIcon: <TbHistory className="size-full" />,
     },
   ],
   themes: [
