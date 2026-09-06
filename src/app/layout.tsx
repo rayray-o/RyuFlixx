@@ -83,19 +83,16 @@ export default function RootLayout({
         )}
       >
         {/* ================================= */}
-        {/* POPADS GLOBAL POPUNDER             */}
+        {/* 1POP GLOBAL POPUNDER               */}
         {/* ================================= */}
 
         <Script
-          id="popads-global"
+          id="1pop-global"
+          src="https://1pop.online/ad/serve?zone=ZONE_CA9496D6DAB1774A"
           strategy="afterInteractive"
-          dangerouslySetInnerHTML={{
-            __html: `
-              /*<![CDATA[/* */
-              (function(){var q=window,p="b94baacd0f42e920a031d6b4501ecd21",a=[["siteId",285-656+99+5318629],["minBid",0],["popundersPerIP","0"],["delayBetween",0],["default",false],["defaultPerDay",0],["topmostLayer","auto"]],r=["d3d3LnByZW1pdW12ZXJ0aGlzaW5nLmNvbS9lYmlnLm1pbi5jc3M=","ZDJqMDQyY2oxNDIxd2kuY2xvdWRmcm9udC5uZXQvSS93YWpheC5taW4uanM="],x=-1,i,s,j=function(){clearTimeout(s);x++;if(r[x]&&!(1814471273000<(new Date).getTime()&&1<x)){i=q.document.createElement("script");i.type="text/javascript";i.async=!0;var o=q.document.getElementsByTagName("script")[0];i.src="https://"+atob(r[x]);i.crossOrigin="anonymous";i.onerror=j;i.onload=function(){clearTimeout(s);q[p.slice(0,16)+p.slice(0,16)]||j()};s=setTimeout(j,5E3);o.parentNode.insertBefore(i,o)}};if(!q[p]){try{Object.freeze(q[p]=a)}catch(e){}j()}})();
-              /*]]>/* */
-            `,
-          }}
+          type="text/javascript"
+          async
+          defer
         />
 
         <Suspense>
@@ -131,4 +128,4 @@ export default function RootLayout({
       </body>
     </html>
   );
-            }
+        }
