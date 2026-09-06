@@ -14,9 +14,9 @@ import {
 import { TbFolder, TbFolderFilled, TbHistory } from "react-icons/tb";
 
 export const siteConfig: SiteConfigType = {
-  name: "RyuFlix",
-  description: "RyuFlix is a free online streaming platform with 6,634+ movies and TV shows available instantly. No account, no fees, no app required.",
-  favicon: "/favicon.ico",
+  name: "Ryuflix",
+  description: "Ryuflix is a free online streaming platform with 6,634+ movies and TV shows available instantly. No account, no fees, no app required.",
+  favicon: "/ryuflix.favicon.ico",
   navItems: [
     {
       label: "Home",
