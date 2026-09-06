@@ -2,7 +2,6 @@
 
 import { ContentType } from "@/types";
 import {
-  getWatchHistory,
   saveWatchProgress,
 } from "@/utils/localStorage";
 import {
@@ -55,6 +54,14 @@ const SUPPORTED_EVENTS: PlayerEventType[] = [
   "ended",
   "timeupdate",
 ];
+
+/*
+ * Consider an item completed once playback reaches 90%.
+ *
+ * This is primarily a fallback for providers that do not
+ * reliably send an "ended" event.
+ */
+const COMPLETION_THRESHOLD = 0.9;
 
 function isPlayerEvent(
   value: unknown,
@@ -356,6 +363,13 @@ export function usePlayerEvents(
   const lastSavedPositionRef =
     useRef(0);
 
+  /*
+   * Prevent the completion threshold from
+   * firing more than once.
+   */
+  const completionTriggeredRef =
+    useRef(false);
+
   useEffect(() => {
     metadataRef.current = metadata;
   }, [metadata]);
@@ -492,10 +506,6 @@ export function usePlayerEvents(
 
   /*
    * Current playback position.
-   *
-   * We intentionally use the latest PLAYER_EVENT
-   * received from the provider rather than attempting
-   * cross-origin access to iframe internals.
    */
   const getCurrentTime = useCallback(() => {
     const latest =
@@ -512,8 +522,7 @@ export function usePlayerEvents(
   }, []);
 
   /*
-   * Save timeupdate events periodically instead
-   * of writing to localStorage every single frame.
+   * Save timeupdate events periodically.
    */
   const maybeSaveProgress = useCallback(
     (
@@ -540,7 +549,8 @@ export function usePlayerEvents(
   );
 
   /*
-   * Save when the page becomes hidden or closes.
+   * Save when the page becomes hidden
+   * or closes.
    */
   useEffect(() => {
     const saveLatestProgress = () => {
@@ -604,8 +614,8 @@ export function usePlayerEvents(
       event: MessageEvent,
     ) => {
       /*
-       * Only accept messages from one of the
-       * providers we actually use.
+       * Only accept messages from one of
+       * the providers we actually use.
        */
       const adapter =
         Object.values(
@@ -621,9 +631,8 @@ export function usePlayerEvents(
       }
 
       /*
-       * If WatchPlayer supplied an iframe ref,
-       * make sure this message came from that
-       * iframe.
+       * Make sure the message came from
+       * the active iframe.
        */
       const activeFrame =
         playerFrameRef?.current;
@@ -665,6 +674,102 @@ export function usePlayerEvents(
       eventDataRef.current =
         parsed;
 
+      /*
+       * ----------------------------------------------------
+       * COMPLETION THRESHOLD
+       * ----------------------------------------------------
+       *
+       * Providers sometimes fail to emit "ended".
+       *
+       * When a timeupdate gives us a real duration and
+       * playback reaches 90%, mark the item completed
+       * and invoke the exact same callback used by
+       * a genuine "ended" event.
+       *
+       * We deliberately only trigger this on timeupdate,
+       * so simply seeking/pause won't accidentally finish
+       * an episode.
+       */
+      if (
+        parsed.event ===
+        "timeupdate"
+      ) {
+        let progressRatio = 0;
+
+        if (parsed.duration > 0) {
+          progressRatio =
+            parsed.currentTime /
+            parsed.duration;
+        } else if (
+          typeof parsed.progress ===
+          "number"
+        ) {
+          /*
+           * Providers may report progress as either:
+           *
+           *   0.0 - 1.0
+           *
+           * or
+           *
+           *   0 - 100
+           */
+          progressRatio =
+            parsed.progress > 1
+              ? parsed.progress / 100
+              : parsed.progress;
+        }
+
+        if (
+          progressRatio >=
+            COMPLETION_THRESHOLD &&
+          !completionTriggeredRef.current
+        ) {
+          completionTriggeredRef.current =
+            true;
+
+          /*
+           * Save completed=true BEFORE
+           * triggering navigation.
+           */
+          saveLocalProgress(
+            parsed,
+            true,
+          );
+
+          /*
+           * Reuse the existing onEnded
+           * callback. The TV player already
+           * contains the next-episode logic.
+           */
+          callbacksRef.current
+            .onEnded?.(parsed);
+        }
+      }
+
+      /*
+       * Real provider ended event.
+       */
+      if (
+        parsed.event === "ended"
+      ) {
+        if (
+          !completionTriggeredRef.current
+        ) {
+          completionTriggeredRef.current =
+            true;
+
+          saveLocalProgress(
+            parsed,
+            true,
+          );
+
+          callbacksRef.current
+            .onEnded?.(parsed);
+        }
+
+        return;
+      }
+
       switch (parsed.event) {
         case "play":
           callbacksRef.current
@@ -698,16 +803,6 @@ export function usePlayerEvents(
           maybeSaveProgress(
             parsed,
           );
-          break;
-
-        case "ended":
-          saveLocalProgress(
-            parsed,
-            true,
-          );
-
-          callbacksRef.current
-            .onEnded?.(parsed);
           break;
       }
     };
@@ -750,4 +845,4 @@ export function usePlayerEvents(
 
     flushProgress,
   };
-    }
+}
