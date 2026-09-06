@@ -26,8 +26,20 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
 
   icons: {
-    icon: siteConfig.favicon,
-  },
+  icon: [
+    {
+      url: `${siteConfig.favicon}?v=20260906`,
+      type: "image/x-icon",
+    },
+  ],
+  shortcut: [
+    {
+      url: `${siteConfig.favicon}?v=20260906`,
+      type: "image/x-icon",
+    },
+  ],
+  apple: `${siteConfig.favicon}?v=20260906`,
+},
 
   twitter: {
     card: "summary",
