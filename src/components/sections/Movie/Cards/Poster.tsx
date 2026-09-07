@@ -1,3 +1,5 @@
+"use client";
+
 import Rating from "@/components/ui/other/Rating";
 import VaulDrawer from "@/components/ui/overlay/VaulDrawer";
 import useBreakpoints from "@/hooks/useBreakpoints";
@@ -7,7 +9,7 @@ import { Card, CardBody, CardFooter, CardHeader, Chip, Image, Tooltip } from "@h
 import { Icon } from "@iconify/react";
 import { useDisclosure, useHover } from "@mantine/hooks";
 import Link from "next/link";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Movie } from "tmdb-ts/dist/types";
 import { useLongPress } from "use-long-press";
 import HoverPosterCard from "./Hover";
@@ -20,21 +22,65 @@ interface MoviePosterCardProps {
 const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "full" }) => {
   const { hovered, ref } = useHover();
   const [opened, handlers] = useDisclosure(false);
+  const [logo, setLogo] = useState<string | null>(null);
+
   const releaseYear = new Date(movie.release_date).getFullYear();
   const posterImage = getImageUrl(movie.poster_path);
   const title = mutateMovieTitle(movie);
   const { mobile } = useBreakpoints();
   const { startVibration } = useDeviceVibration();
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLogo = async () => {
+      try {
+        const response = await fetch(`/api/movie-logo?id=${movie.id}`);
+
+        if (!response.ok) return;
+
+        const data: { logo?: string | null } = await response.json();
+
+        if (!cancelled) {
+          setLogo(data.logo ?? null);
+        }
+      } catch {
+        if (!cancelled) {
+          setLogo(null);
+        }
+      }
+    };
+
+    loadLogo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [movie.id]);
+
   const callback = useCallback(() => {
     handlers.open();
     setTimeout(() => startVibration([100]), 300);
-  }, []);
+  }, [handlers, startVibration]);
 
   const longPress = useLongPress(mobile ? callback : null, {
     cancelOnMovement: true,
     threshold: 300,
   });
+
+  const titleContent = logo ? (
+    <Image
+      src={logo}
+      alt={title}
+      radius="none"
+      className="h-auto max-h-14 w-auto max-w-[90%] object-contain object-left"
+      classNames={{
+        img: "object-contain object-left",
+      }}
+    />
+  ) : (
+    <h6 className="truncate text-sm font-semibold">{title}</h6>
+  );
 
   return (
     <>
@@ -58,6 +104,7 @@ const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "ful
                   className="absolute-center z-20 text-white"
                 />
               )}
+
               {movie.adult && (
                 <Chip
                   color="danger"
@@ -68,14 +115,18 @@ const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "ful
                   18+
                 </Chip>
               )}
-              <div className="absolute bottom-0 z-2 h-1/2 w-full bg-linear-to-t from-black from-1%"></div>
+
+              <div className="absolute bottom-0 z-2 h-1/2 w-full bg-linear-to-t from-black from-1%" />
+
               <div className="absolute bottom-0 z-3 flex w-full flex-col gap-1 px-4 py-3">
-                <h6 className="truncate text-sm font-semibold">{title}</h6>
+                <div className="flex min-h-14 items-end overflow-hidden">{titleContent}</div>
+
                 <div className="flex justify-between text-xs">
                   <p>{releaseYear}</p>
                   <Rating rate={movie?.vote_average} />
                 </div>
               </div>
+
               <Image
                 alt={title}
                 src={posterImage}
@@ -105,6 +156,7 @@ const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "ful
                       className="absolute-center z-20 text-white"
                     />
                   )}
+
                   {movie.adult && (
                     <Chip
                       color="danger"
@@ -115,6 +167,7 @@ const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "ful
                       18+
                     </Chip>
                   )}
+
                   <div className="relative overflow-hidden rounded-large">
                     <Image
                       isBlurred
@@ -125,9 +178,11 @@ const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "ful
                   </div>
                 </div>
               </CardHeader>
+
               <CardBody className="justify-end pb-1">
-                <p className="text-md truncate font-bold">{title}</p>
+                <div className="flex min-h-10 items-center overflow-hidden">{titleContent}</div>
               </CardBody>
+
               <CardFooter className="justify-between pt-0 text-xs">
                 <p>{releaseYear}</p>
                 <Rating rate={movie.vote_average} />
@@ -151,4 +206,5 @@ const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "ful
     </>
   );
 };
+
 export default MoviePosterCard;
