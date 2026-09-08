@@ -8,7 +8,6 @@ import {
   useDisclosure,
   useDocumentTitle,
   useIdle,
-  useLocalStorage,
 } from "@mantine/hooks";
 import dynamic from "next/dynamic";
 import {
@@ -25,17 +24,10 @@ import {
   TvShowDetails,
 } from "tmdb-ts";
 import useBreakpoints from "@/hooks/useBreakpoints";
-import {
-  ADS_WARNING_STORAGE_KEY,
-  SpacingClasses,
-} from "@/utils/constants";
+import { SpacingClasses } from "@/utils/constants";
 import { usePlayerEvents } from "@/hooks/usePlayerEvents";
 import WatchPlayer from "@/components/WatchPlayer";
 import { useRouter } from "next/navigation";
-
-const AdsWarning = dynamic(
-  () => import("@/components/ui/overlay/AdsWarning"),
-);
 
 const TvShowPlayerHeader = dynamic(
   () => import("./Header"),
@@ -79,11 +71,6 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
   ...props
 }) => {
   const router = useRouter();
-
-  const [seen] = useLocalStorage<boolean>({
-    key: ADS_WARNING_STORAGE_KEY,
-    getInitialValueInEffect: false,
-  });
 
   const { mobile } = useBreakpoints();
 
@@ -209,8 +196,6 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
 
   return (
     <>
-      <AdsWarning />
-
       <div
         className={cn(
           "relative",
@@ -235,27 +220,25 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
           {...props}
         />
 
-        {seen && (
-          <WatchPlayer
-            title={`${props.seriesName} — ${props.seasonName} — ${episode.name}`}
-            servers={players}
-            selectedServer={
-              safeSelectedSource
-            }
-            onServerChange={
-              setSelectedSource
-            }
-            getCurrentTime={
-              getCurrentTime
-            }
-            flushProgress={
-              flushProgress
-            }
-            iframeRef={
-              playerFrameRef
-            }
-          />
-        )}
+        <WatchPlayer
+          title={`${props.seriesName} — ${props.seasonName} — ${episode.name}`}
+          servers={players}
+          selectedServer={
+            safeSelectedSource
+          }
+          onServerChange={
+            setSelectedSource
+          }
+          getCurrentTime={
+            getCurrentTime
+          }
+          flushProgress={
+            flushProgress
+          }
+          iframeRef={
+            playerFrameRef
+          }
+        />
       </div>
 
       <TvShowPlayerSourceSelection
