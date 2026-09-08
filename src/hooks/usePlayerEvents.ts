@@ -365,10 +365,21 @@ export function usePlayerEvents(
 
   /*
    * Prevent the completion threshold from
-   * firing more than once.
+   * firing more than once for the same
+   * movie/episode.
    */
   const completionTriggeredRef =
     useRef(false);
+
+  /*
+   * Track which movie/episode the completion
+   * state belongs to.
+   *
+   * Next.js can keep the same player component
+   * mounted while navigating between episodes.
+   */
+  const completionMediaIdentityRef =
+    useRef<string | null>(null);
 
   useEffect(() => {
     metadataRef.current = metadata;
@@ -671,6 +682,55 @@ export function usePlayerEvents(
         return;
       }
 
+      /*
+       * ----------------------------------------------------
+       * MEDIA / EPISODE IDENTITY RESET
+       * ----------------------------------------------------
+       *
+       * The same player component can survive navigation
+       * from one episode to another.
+       *
+       * If episode 1 reaches 90%, completionTriggeredRef
+       * becomes true. Without resetting it, episode 2
+       * could never trigger its own completion callback.
+       *
+       * The identity includes:
+       *
+       *   media type
+       *   media ID
+       *   season
+       *   episode
+       *
+       * Therefore every distinct movie or episode gets
+       * its own completion state.
+       */
+      const mediaIdentity = [
+        parsed.mediaType,
+        parsed.mediaId,
+        parsed.season ?? "",
+        parsed.episode ?? "",
+      ].join(":");
+
+      if (
+        completionMediaIdentityRef.current !==
+          null &&
+        completionMediaIdentityRef.current !==
+          mediaIdentity
+      ) {
+        completionTriggeredRef.current =
+          false;
+
+        /*
+         * A new movie/episode should start
+         * with its own progress baseline.
+         */
+        lastSavedPositionRef.current =
+          0;
+      }
+
+      completionMediaIdentityRef.current =
+        mediaIdentity;
+
       eventDataRef.current =
         parsed;
 
@@ -845,4 +905,4 @@ export function usePlayerEvents(
 
     flushProgress,
   };
-}
+  }
