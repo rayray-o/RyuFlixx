@@ -80,17 +80,16 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
   });
 
   const titleContent = logo ? (
-    <Image
-      src={logo}
-      alt={title}
-      radius="none"
-      className="h-auto max-h-10 w-auto max-w-[85%] object-contain"
-      classNames={{
-        img: "object-contain",
-      }}
+    <div
+      aria-label={title}
+      role="img"
+      className="h-9 w-full bg-contain bg-center bg-no-repeat"
+      style={{ backgroundImage: `url("${logo}")` }}
     />
   ) : (
-    <h6 className="max-w-full truncate text-sm font-semibold">{title}</h6>
+    <h6 className="max-w-full truncate text-center text-sm font-semibold">
+      {title}
+    </h6>
   );
 
   return (
@@ -139,7 +138,7 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
                 />
               </div>
 
-              <div className="flex h-[48px] items-center justify-center overflow-hidden px-1 pt-2">
+              <div className="flex h-[44px] items-center justify-center overflow-hidden px-1 pt-1">
                 {titleContent}
               </div>
 
@@ -191,7 +190,7 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
               </CardHeader>
 
               <CardBody className="justify-end pb-1">
-                <div className="flex h-[48px] items-center justify-center overflow-hidden">
+                <div className="flex h-[44px] items-center justify-center overflow-hidden">
                   {titleContent}
                 </div>
               </CardBody>
