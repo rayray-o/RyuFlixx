@@ -5,7 +5,15 @@ import VaulDrawer from "@/components/ui/overlay/VaulDrawer";
 import useBreakpoints from "@/hooks/useBreakpoints";
 import useDeviceVibration from "@/hooks/useDeviceVibration";
 import { getImageUrl, mutateMovieTitle } from "@/utils/movies";
-import { Card, CardBody, CardFooter, CardHeader, Chip, Image, Tooltip } from "@heroui/react";
+import {
+  Card,
+  CardBody,
+  CardFooter,
+  CardHeader,
+  Chip,
+  Image,
+  Tooltip,
+} from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { useDisclosure, useHover } from "@mantine/hooks";
 import Link from "next/link";
@@ -19,7 +27,10 @@ interface MoviePosterCardProps {
   variant?: "full" | "bordered";
 }
 
-const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "full" }) => {
+const MoviePosterCard: React.FC<MoviePosterCardProps> = ({
+  movie,
+  variant = "full",
+}) => {
   const { hovered, ref } = useHover();
   const [opened, handlers] = useDisclosure(false);
   const [logo, setLogo] = useState<string | null>(null);
@@ -73,13 +84,13 @@ const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "ful
       src={logo}
       alt={title}
       radius="none"
-      className="h-auto max-h-14 w-auto max-w-[90%] object-contain object-left"
+      className="h-auto max-h-10 w-auto max-w-[85%] object-contain"
       classNames={{
-        img: "object-contain object-left",
+        img: "object-contain",
       }}
     />
   ) : (
-    <h6 className="truncate text-sm font-semibold">{title}</h6>
+    <h6 className="max-w-full truncate text-sm font-semibold">{title}</h6>
   );
 
   return (
@@ -95,47 +106,47 @@ const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "ful
       >
         <Link href={`/movie/${movie.id}`} ref={ref} {...longPress()}>
           {variant === "full" && (
-            <div className="group motion-preset-focus relative aspect-2/3 overflow-hidden rounded-lg border-[3px] border-transparent text-white transition-colors hover:border-primary">
-              {hovered && (
-                <Icon
-                  icon="line-md:play-filled"
-                  width="64"
-                  height="64"
-                  className="absolute-center z-20 text-white"
+            <div className="group motion-preset-focus text-white">
+              <div className="relative aspect-2/3 overflow-hidden rounded-lg border-[3px] border-transparent transition-colors hover:border-primary">
+                {hovered && (
+                  <Icon
+                    icon="line-md:play-filled"
+                    width="64"
+                    height="64"
+                    className="absolute-center z-20 text-white"
+                  />
+                )}
+
+                {movie.adult && (
+                  <Chip
+                    color="danger"
+                    size="sm"
+                    variant="flat"
+                    className="absolute left-2 top-2 z-20"
+                  >
+                    18+
+                  </Chip>
+                )}
+
+                <Image
+                  alt={title}
+                  src={posterImage}
+                  radius="none"
+                  className="z-0 aspect-2/3 h-[250px] object-cover object-center transition group-hover:scale-110 md:h-[300px]"
+                  classNames={{
+                    img: "group-hover:opacity-70",
+                  }}
                 />
-              )}
-
-              {movie.adult && (
-                <Chip
-                  color="danger"
-                  size="sm"
-                  variant="flat"
-                  className="absolute left-2 top-2 z-20"
-                >
-                  18+
-                </Chip>
-              )}
-
-              <div className="absolute bottom-0 z-2 h-1/2 w-full bg-linear-to-t from-black from-1%" />
-
-              <div className="absolute bottom-0 z-3 flex w-full flex-col gap-1 px-4 py-3">
-                <div className="flex min-h-14 items-end overflow-hidden">{titleContent}</div>
-
-                <div className="flex justify-between text-xs">
-                  <p>{releaseYear}</p>
-                  <Rating rate={movie?.vote_average} />
-                </div>
               </div>
 
-              <Image
-                alt={title}
-                src={posterImage}
-                radius="none"
-                className="z-0 aspect-2/3 h-[250px] object-cover object-center transition group-hover:scale-110 md:h-[300px]"
-                classNames={{
-                  img: "group-hover:opacity-70",
-                }}
-              />
+              <div className="flex h-[48px] items-center justify-center overflow-hidden px-1 pt-2">
+                {titleContent}
+              </div>
+
+              <div className="flex justify-between px-1 pt-1 text-xs">
+                <p>{releaseYear}</p>
+                <Rating rate={movie?.vote_average} />
+              </div>
             </div>
           )}
 
@@ -180,7 +191,9 @@ const MoviePosterCard: React.FC<MoviePosterCardProps> = ({ movie, variant = "ful
               </CardHeader>
 
               <CardBody className="justify-end pb-1">
-                <div className="flex min-h-10 items-center overflow-hidden">{titleContent}</div>
+                <div className="flex h-[48px] items-center justify-center overflow-hidden">
+                  {titleContent}
+                </div>
               </CardBody>
 
               <CardFooter className="justify-between pt-0 text-xs">
