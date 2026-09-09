@@ -1,15 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { PlayersProps } from "@/types";
 import { RyuFlixPlayer } from "@/components/ui/player/RyuFlixPlayer";
 
-interface WatchServer {
-  name?: string;
-  url: string;
-}
-
 interface WatchPlayerProps {
-  servers: WatchServer[];
+  servers: PlayersProps[];
   selectedServer: number;
   onServerChange: (index: number) => void;
   getCurrentTime: () => number;
@@ -30,9 +26,7 @@ const addResumePosition = (url: string, startAt?: number) => {
 
   try {
     const parsed = new URL(url);
-
     parsed.searchParams.set("startAt", String(Math.floor(startAt)));
-
     return parsed.toString();
   } catch {
     return url;
@@ -45,7 +39,7 @@ const ServerButton = ({
   selected,
   onClick,
 }: {
-  server: WatchServer;
+  server: PlayersProps;
   index: number;
   selected: boolean;
   onClick: () => void;
@@ -60,7 +54,7 @@ const ServerButton = ({
           : "bg-white/10 text-white/70 hover:bg-white/15 hover:text-white"
       }`}
     >
-      {server.name || `Server ${index + 1}`}
+      {server.title || `Server ${index + 1}`}
     </button>
   );
 };
@@ -86,7 +80,7 @@ export default function WatchPlayer({
       return "";
     }
 
-    return addResumePosition(currentServer.url, getCurrentTime());
+    return addResumePosition(currentServer.source, getCurrentTime());
   }, [currentServer, getCurrentTime]);
 
   const [handoffPosition, setHandoffPosition] = useState(0);
@@ -131,7 +125,6 @@ export default function WatchPlayer({
     );
 
     flushProgress();
-
     onServerChange(index);
   };
 
@@ -151,10 +144,7 @@ export default function WatchPlayer({
             src={RYUFLIX_TEST_HLS}
             title={title}
             resumeAt={handoffPosition}
-            onTimeUpdate={() => {
-              // Existing RyuFlix progress handling remains owned by the
-              // parent/player event system.
-            }}
+            onTimeUpdate={() => {}}
             onEnded={() => {
               flushProgress();
             }}
@@ -180,7 +170,7 @@ export default function WatchPlayer({
 
         {servers.map((server, index) => (
           <ServerButton
-            key={`${server.name || "server"}-${index}`}
+            key={`${server.title}-${index}`}
             server={server}
             index={index}
             selected={index === safeServerIndex}
