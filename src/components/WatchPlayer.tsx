@@ -1,11 +1,15 @@
 "use client";
 
-import type { PlayersProps } from "@/utils/players";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RyuFlixPlayer } from "@/components/ui/player/RyuFlixPlayer";
 
+interface WatchServer {
+  name?: string;
+  url: string;
+}
+
 interface WatchPlayerProps {
-  servers: PlayersProps[];
+  servers: WatchServer[];
   selectedServer: number;
   onServerChange: (index: number) => void;
   getCurrentTime: () => number;
@@ -17,14 +21,6 @@ interface WatchPlayerProps {
 const RYUFLIX_TEST_HLS =
   "https://stream.mux.com/BV3YZtogl89mg9VcNBhhnHm02Y34zI1nlMuMQfAbl3dM.m3u8";
 
-/*
- * Server 12 is intentionally the RyuFlix custom-player test server.
- *
- * The other servers remain the existing external iframe providers.
- * The Video.js player requires an actual authorized media source
- * such as an HLS .m3u8 URL; an iframe URL cannot be converted into
- * a Video.js media source from the parent page.
- */
 const RYUFLIX_CUSTOM_PLAYER_SERVER = 11;
 
 const addResumePosition = (url: string, startAt?: number) => {
@@ -49,7 +45,7 @@ const ServerButton = ({
   selected,
   onClick,
 }: {
-  server: PlayersProps;
+  server: WatchServer;
   index: number;
   selected: boolean;
   onClick: () => void;
@@ -90,10 +86,7 @@ export default function WatchPlayer({
       return "";
     }
 
-    return addResumePosition(
-      currentServer.url,
-      getCurrentTime(),
-    );
+    return addResumePosition(currentServer.url, getCurrentTime());
   }, [currentServer, getCurrentTime]);
 
   const [handoffPosition, setHandoffPosition] = useState(0);
@@ -124,12 +117,9 @@ export default function WatchPlayer({
       return;
     }
 
-    const nativeVideo =
-      isCustomPlayer
-        ? document.querySelector<HTMLVideoElement>(
-            ".ryu-player__video",
-          )
-        : null;
+    const nativeVideo = isCustomPlayer
+      ? document.querySelector<HTMLVideoElement>(".ryu-player__video")
+      : null;
 
     const currentPosition =
       nativeVideo && Number.isFinite(nativeVideo.currentTime)
@@ -161,10 +151,9 @@ export default function WatchPlayer({
             src={RYUFLIX_TEST_HLS}
             title={title}
             resumeAt={handoffPosition}
-            onTimeUpdate={(currentTime) => {
-              // Keep the existing RyuFlix progress system alive.
-              // WatchPlayer's parent remains responsible for persistence.
-              void currentTime;
+            onTimeUpdate={() => {
+              // Existing RyuFlix progress handling remains owned by the
+              // parent/player event system.
             }}
             onEnded={() => {
               flushProgress();
