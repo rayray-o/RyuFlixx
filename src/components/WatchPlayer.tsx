@@ -1,289 +1,208 @@
 "use client";
 
-import { PlayersProps } from "@/types";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import type { PlayersProps } from "@/utils/players";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { RyuFlixPlayer } from "@/components/ui/player/RyuFlixPlayer";
 
 interface WatchPlayerProps {
   servers: PlayersProps[];
-
   selectedServer: number;
-
-  onServerChange: (
-    index: number,
-  ) => void;
-
-  /*
-   * Returns the latest playback position
-   * from usePlayerEvents.
-   */
-  getCurrentTime?: () => number;
-
-  /*
-   * Immediately saves the latest playback
-   * position before destroying the old iframe.
-   */
-  flushProgress?: () => void;
-
-  /*
-   * Gives the parent access to the active iframe.
-   * Used to reject stale postMessage events.
-   */
-  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
-
+  onServerChange: (index: number) => void;
+  getCurrentTime: () => number;
+  flushProgress: () => void;
+  iframeRef: React.RefObject<HTMLIFrameElement | null>;
   title?: string;
 }
 
+const RYUFLIX_TEST_HLS =
+  "https://stream.mux.com/BV3YZtogl89mg9VcNBhhnHm02Y34zI1nlMuMQfAbl3dM.m3u8";
+
 /*
- * Add/update startAt without destroying any
- * existing query parameters.
+ * Server 12 is intentionally the RyuFlix custom-player test server.
+ *
+ * The other servers remain the existing external iframe providers.
+ * The Video.js player requires an actual authorized media source
+ * such as an HLS .m3u8 URL; an iframe URL cannot be converted into
+ * a Video.js media source from the parent page.
  */
-function addResumePosition(
-  source: string,
-  position: number,
-) {
-  if (
-    !Number.isFinite(position) ||
-    position <= 0
-  ) {
-    return source;
+const RYUFLIX_CUSTOM_PLAYER_SERVER = 11;
+
+const addResumePosition = (url: string, startAt?: number) => {
+  if (!startAt || startAt <= 0) {
+    return url;
   }
 
   try {
-    const url = new URL(source);
+    const parsed = new URL(url);
 
-    url.searchParams.set(
-      "startAt",
-      Math.floor(position).toString(),
-    );
+    parsed.searchParams.set("startAt", String(Math.floor(startAt)));
 
-    return url.toString();
+    return parsed.toString();
   } catch {
-    return source;
+    return url;
   }
-}
+};
 
-const WatchPlayer: React.FC<
-  WatchPlayerProps
-> = ({
+const ServerButton = ({
+  server,
+  index,
+  selected,
+  onClick,
+}: {
+  server: PlayersProps;
+  index: number;
+  selected: boolean;
+  onClick: () => void;
+}) => {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-md px-3 py-2 text-xs font-semibold transition ${
+        selected
+          ? "bg-white text-black"
+          : "bg-white/10 text-white/70 hover:bg-white/15 hover:text-white"
+      }`}
+    >
+      {server.name || `Server ${index + 1}`}
+    </button>
+  );
+};
+
+export default function WatchPlayer({
   servers,
   selectedServer,
   onServerChange,
   getCurrentTime,
   flushProgress,
   iframeRef,
-  title = "Video Player",
-}) => {
-  const safeIndex =
-    servers.length > 0
-      ? Math.min(
-          Math.max(
-            selectedServer,
-            0,
-          ),
-          servers.length - 1,
-        )
+  title,
+}: WatchPlayerProps) {
+  const safeServerIndex =
+    selectedServer >= 0 && selectedServer < servers.length
+      ? selectedServer
       : 0;
 
-  const currentServer =
-    useMemo(
-      () =>
-        servers[safeIndex],
-      [servers, safeIndex],
+  const currentServer = servers[safeServerIndex];
+
+  const currentSource = useMemo(() => {
+    if (!currentServer) {
+      return "";
+    }
+
+    return addResumePosition(
+      currentServer.url,
+      getCurrentTime(),
     );
+  }, [currentServer, getCurrentTime]);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [handoffPosition, setHandoffPosition] = useState(0);
 
-  /*
-   * Position captured at the exact moment
-   * the user switches server.
-   */
-  const [
-    handoffPosition,
-    setHandoffPosition,
-  ] = useState<number | null>(
-    null,
-  );
+  const internalIframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  const internalIframeRef =
-    useRef<HTMLIFrameElement | null>(
-      null,
-    );
+  const setIframeRef = (element: HTMLIFrameElement | null) => {
+    internalIframeRef.current = element;
 
-  /*
-   * Use the parent's ref when supplied.
-   * Otherwise keep our own.
-   */
-  const setIframeRef = (
-    element: HTMLIFrameElement | null,
-  ) => {
-    internalIframeRef.current =
-      element;
-
-    if (iframeRef) {
-      iframeRef.current =
-        element;
+    if (typeof iframeRef === "object" && iframeRef !== null) {
+      iframeRef.current = element;
     }
   };
 
-  /*
-   * Reset handoff state when the content
-   * itself changes, such as moving to another
-   * movie/episode.
-   */
   useEffect(() => {
-    setHandoffPosition(null);
+    setHandoffPosition(0);
   }, [servers.length]);
 
   useEffect(() => {
-    setLoading(true);
-  }, [currentServer?.source]);
+    setHandoffPosition(0);
+  }, [safeServerIndex]);
 
-  if (!currentServer) {
+  const isCustomPlayer =
+    safeServerIndex === RYUFLIX_CUSTOM_PLAYER_SERVER;
+
+  const handleServerChange = (index: number) => {
+    if (index === safeServerIndex) {
+      return;
+    }
+
+    const nativeVideo =
+      isCustomPlayer
+        ? document.querySelector<HTMLVideoElement>(
+            ".ryu-player__video",
+          )
+        : null;
+
+    const currentPosition =
+      nativeVideo && Number.isFinite(nativeVideo.currentTime)
+        ? nativeVideo.currentTime
+        : getCurrentTime();
+
+    setHandoffPosition(
+      Number.isFinite(currentPosition) ? Math.max(0, currentPosition) : 0,
+    );
+
+    flushProgress();
+
+    onServerChange(index);
+  };
+
+  if (!currentServer && !isCustomPlayer) {
     return (
-      <section className="w-full">
-        <div className="flex aspect-video w-full items-center justify-center rounded-2xl bg-black text-sm text-white/50 ring-1 ring-white/10">
-          No video server available.
-        </div>
-      </section>
+      <div className="flex min-h-[420px] items-center justify-center rounded-xl bg-black text-sm text-white/60">
+        No playback server available.
+      </div>
     );
   }
 
-  const iframeSource =
-    handoffPosition !== null
-      ? addResumePosition(
-          currentServer.source,
-          handoffPosition,
-        )
-      : currentServer.source;
-
   return (
-    <section className="w-full">
-      <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
-        <iframe
-          ref={setIframeRef}
-          key={`${currentServer.title}-${iframeSource}`}
-          src={iframeSource}
-          title={`${title} — ${currentServer.title}`}
-          className="absolute inset-0 block h-full w-full border-0"
-          allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
-          allowFullScreen
-          loading="eager"
-          referrerPolicy="strict-origin-when-cross-origin"
-          onLoad={() =>
-            setLoading(false)
-          }
-        />
-
-        {loading && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-md">
-            <div className="flex flex-col items-center gap-3">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
-
-              <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/70">
-                Connecting
-              </span>
-
-              <span className="text-xs text-white/40">
-                {currentServer.title}
-              </span>
-
-              {handoffPosition !==
-                null && (
-                <span className="text-[10px] text-white/30">
-                  Resuming at{" "}
-                  {Math.floor(
-                    handoffPosition,
-                  )}
-                  s
-                </span>
-              )}
-            </div>
-          </div>
+    <div className="relative w-full overflow-hidden rounded-xl bg-black">
+      <div className="relative aspect-video w-full">
+        {isCustomPlayer ? (
+          <RyuFlixPlayer
+            src={RYUFLIX_TEST_HLS}
+            title={title}
+            resumeAt={handoffPosition}
+            onTimeUpdate={(currentTime) => {
+              // Keep the existing RyuFlix progress system alive.
+              // WatchPlayer's parent remains responsible for persistence.
+              void currentTime;
+            }}
+            onEnded={() => {
+              flushProgress();
+            }}
+          />
+        ) : (
+          <iframe
+            ref={setIframeRef}
+            key={`${safeServerIndex}-${currentSource}`}
+            src={currentSource}
+            title={title || "RyuFlix Player"}
+            className="absolute inset-0 h-full w-full border-0"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen={false}
+            referrerPolicy="origin"
+          />
         )}
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-xs font-medium uppercase tracking-widest text-white/40">
-          Server
+      <div className="flex flex-wrap items-center gap-2 border-t border-white/10 bg-black/90 p-3">
+        <span className="mr-1 text-[11px] font-bold uppercase tracking-wider text-white/40">
+          Servers
         </span>
 
-        {servers.map(
-          (server, index) => {
-            const active =
-              index === safeIndex;
+        {servers.map((server, index) => (
+          <ServerButton
+            key={`${server.name || "server"}-${index}`}
+            server={server}
+            index={index}
+            selected={index === safeServerIndex}
+            onClick={() => handleServerChange(index)}
+          />
+        ))}
 
-            return (
-              <button
-                key={`${server.title}-${index}`}
-                type="button"
-                aria-pressed={active}
-                onClick={() => {
-                  if (active) {
-                    return;
-                  }
-
-                  /*
-                   * THIS IS THE IMPORTANT PART.
-                   *
-                   * 1. Read the freshest position.
-                   * 2. Persist it immediately.
-                   * 3. Give that position to the new iframe.
-                   * 4. Then change the server.
-                   */
-                  const position =
-                    Math.max(
-                      0,
-                      getCurrentTime?.() ??
-                        0,
-                    );
-
-                  flushProgress?.();
-
-                  setHandoffPosition(
-                    position,
-                  );
-
-                  setLoading(true);
-
-                  onServerChange(
-                    index,
-                  );
-                }}
-                className={[
-                  "rounded-xl border px-4 py-2 text-sm font-medium",
-                  "transition-colors duration-150",
-                  "focus:outline-none focus:ring-2 focus:ring-white/30",
-
-                  active
-                    ? "border-white/30 bg-white/15 text-white shadow-lg"
-                    : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
-                ].join(" ")}
-              >
-                <span className="flex items-center gap-2">
-                  {server.title}
-
-                  {server.recommended && (
-                    <span className="text-[9px] uppercase tracking-wider text-white/40">
-                      Recommended
-                    </span>
-                  )}
-                </span>
-              </button>
-            );
-          },
-        )}
+        <span className="ml-auto rounded-md bg-white/5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/40">
+          {isCustomPlayer ? "RyuFlix Player" : "External Player"}
+        </span>
       </div>
-    </section>
+    </div>
   );
-};
-
-WatchPlayer.displayName =
-  "WatchPlayer";
-
-export default WatchPlayer;
+}
