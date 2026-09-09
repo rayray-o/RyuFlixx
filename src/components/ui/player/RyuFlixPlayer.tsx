@@ -5,7 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
-  type MouseEvent,
+  type ChangeEvent,
 } from "react";
 import { HlsJsVideo } from "@videojs/react/media/hlsjs-video";
 import "./RyuFlixPlayer.css";
@@ -92,20 +92,23 @@ export function RyuFlixPlayer({
     }
   }, []);
 
-  const seek = useCallback((amount: number) => {
-    const video = videoRef.current;
+  const seek = useCallback(
+    (amount: number) => {
+      const video = videoRef.current;
 
-    if (!video) {
-      return;
-    }
+      if (!video) {
+        return;
+      }
 
-    video.currentTime = Math.max(
-      0,
-      Math.min(video.duration || 0, video.currentTime + amount),
-    );
+      video.currentTime = Math.max(
+        0,
+        Math.min(video.duration || 0, video.currentTime + amount),
+      );
 
-    showControls();
-  }, [showControls]);
+      showControls();
+    },
+    [showControls],
+  );
 
   const toggleMute = useCallback(() => {
     const video = videoRef.current;
@@ -174,7 +177,7 @@ export function RyuFlixPlayer({
   );
 
   const handleSeekBar = useCallback(
-    (event: MouseEvent<HTMLInputElement>) => {
+    (event: ChangeEvent<HTMLInputElement>) => {
       const video = videoRef.current;
 
       if (!video) {
@@ -380,7 +383,9 @@ export function RyuFlixPlayer({
   }, [seek, toggleFullscreen, toggleMute, togglePlay]);
 
   const progress =
-    duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
+    duration > 0
+      ? Math.min(100, Math.max(0, (currentTime / duration) * 100))
+      : 0;
 
   const volumePercent = Math.round(volume * 100);
 
@@ -611,4 +616,4 @@ export function RyuFlixPlayer({
       )}
     </div>
   );
-}
+  }
