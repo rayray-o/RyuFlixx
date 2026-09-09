@@ -13,7 +13,7 @@ interface RyuFlixPlayerProps {
   onEnded?: () => void;
 }
 
-export default function RyuFlixPlayer({
+export function RyuFlixPlayer({
   src,
   title,
   resumeAt = 0,
@@ -24,17 +24,15 @@ export default function RyuFlixPlayer({
   const resumeAppliedRef = useRef<string | null>(null);
 
   /*
-   * Reset resume tracking whenever the media changes.
-   * This prevents an old movie/episode position from being
-   * accidentally applied to a new source.
+   * Reset the resume guard whenever the media source changes.
    */
   useEffect(() => {
     resumeAppliedRef.current = null;
   }, [src]);
 
   /*
-   * Connect RyuFlix's existing progress/history system
-   * to the actual Video.js media element.
+   * Connect the underlying HTML video element to
+   * RyuFlix's existing progress/history system.
    */
   useEffect(() => {
     const video = videoRef.current;
@@ -49,13 +47,14 @@ export default function RyuFlixPlayer({
       if (
         resumeAt > 0 &&
         Number.isFinite(resumeAt) &&
+        Number.isFinite(duration) &&
         resumeAt < duration &&
         resumeAppliedRef.current !== src
       ) {
         try {
           video.currentTime = resumeAt;
         } catch {
-          // The browser may reject seeking before the media is ready.
+          // Seeking can fail if the media isn't ready yet.
         }
 
         resumeAppliedRef.current = src;
@@ -72,7 +71,9 @@ export default function RyuFlixPlayer({
         ? video.currentTime
         : 0;
 
-      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      const duration = Number.isFinite(video.duration)
+        ? video.duration
+        : 0;
 
       onTimeUpdate?.(currentTime, duration);
     };
@@ -109,4 +110,6 @@ export default function RyuFlixPlayer({
       </VideoPlayer>
     </div>
   );
-      }
+}
+
+export default RyuFlixPlayer;
