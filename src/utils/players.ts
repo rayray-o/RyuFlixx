@@ -36,7 +36,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
     },
     {
       title: "<RyuFlix Embed>",
-      source: `https://www.2embed.cc/embed/${id}`,
+      source: `https://vidsrc.buzz/embed/movie/${id}`,
       ads: true,
     },
     {
@@ -139,7 +139,7 @@ export const getTvShowPlayers = (
     },
     {
       title: "<RyuFlix Embed>",
-      source: `https://2embed.cc/embed/tv/${id}/${season}/${episode}`,
+      source: `https://vidsrc.buzz/embed/tv/${id}/${season}/${episode}`,
       ads: true,
     },
     {
