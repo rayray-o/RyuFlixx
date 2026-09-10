@@ -8,295 +8,315 @@ type Point = {
   y: number;
 };
 
-type PointerState = {
-  startX: number;
-  startY: number;
-  moved: boolean;
-  active: boolean;
-};
-
 export default function RyuFlixCursor() {
   const pathname = usePathname();
 
-  const dotElementRef = useRef<HTMLDivElement | null>(null);
-  const ringElementRef = useRef<HTMLDivElement | null>(null);
+  const dotRef = useRef<HTMLDivElement>(null);
+  const ringRef = useRef<HTMLDivElement>(null);
 
-  const targetRef = useRef<Point>({ x: -200, y: -200 });
-
-  const dotPositionRef = useRef<Point>({ x: -200, y: -200 });
-  const ringPositionRef = useRef<Point>({ x: -200, y: -200 });
-
-  const dotVelocityRef = useRef<Point>({ x: 0, y: 0 });
-  const ringVelocityRef = useRef<Point>({ x: 0, y: 0 });
-
-  const pointerStateRef = useRef<PointerState>({
-    startX: 0,
-    startY: 0,
-    moved: false,
-    active: false,
+  const target = useRef<Point>({
+    x: -100,
+    y: -100,
   });
 
-  const visibleRef = useRef(false);
-  const lastInteractionRef = useRef(0);
-  const animationFrameRef = useRef<number | null>(null);
+  const dot = useRef<Point>({
+    x: -100,
+    y: -100,
+  });
+
+  const ring = useRef<Point>({
+    x: -100,
+    y: -100,
+  });
+
+  const dotVelocity = useRef<Point>({
+    x: 0,
+    y: 0,
+  });
+
+  const ringVelocity = useRef<Point>({
+    x: 0,
+    y: 0,
+  });
+
+  const visible = useRef(false);
+  const lastInteraction = useRef(0);
+  const frame = useRef<number | null>(null);
+
+  const touchStart = useRef<Point>({
+    x: 0,
+    y: 0,
+  });
+
+  const touchMoved = useRef(false);
 
   const isTv =
     pathname.startsWith("/tv") ||
     pathname.includes("/tv/");
 
-  const accent = isTv ? "#FFB51B" : "#1683FF";
+  const accent = isTv
+    ? "#FFB51B"
+    : "#1683FF";
 
   useEffect(() => {
-    const coarsePointer = window.matchMedia(
-      "(pointer: coarse)",
-    ).matches;
+    const dotElement = dotRef.current;
+    const ringElement = ringRef.current;
 
-    const dot = dotElementRef.current;
-    const ring = ringElementRef.current;
+    if (!dotElement || !ringElement) {
+      return;
+    }
 
-    if (!dot || !ring) return;
+    const coarse =
+      window.matchMedia(
+        "(pointer: coarse)",
+      ).matches;
 
     /*
-     * DOT
+     * This is intentionally NOT a spring.
      *
-     * Fast, tight response.
-     * It reaches the target quickly without looking
-     * like it teleports.
+     * The dot is simply a fast eased follower.
+     * There is no oscillation and no bounce.
      */
     const updateDot = () => {
-      const position = dotPositionRef.current;
-      const target = targetRef.current;
-      const velocity = dotVelocityRef.current;
+      const dx =
+        target.current.x -
+        dot.current.x;
 
-      const dx = target.x - position.x;
-      const dy = target.y - position.y;
+      const dy =
+        target.current.y -
+        dot.current.y;
 
-      velocity.x += dx * 0.42;
-      velocity.y += dy * 0.42;
+      dotVelocity.current.x =
+        dotVelocity.current.x * 0.62 +
+        dx * 0.38;
 
-      velocity.x *= 0.68;
-      velocity.y *= 0.68;
+      dotVelocity.current.y =
+        dotVelocity.current.y * 0.62 +
+        dy * 0.38;
 
-      position.x += velocity.x;
-      position.y += velocity.y;
+      dot.current.x +=
+        dotVelocity.current.x;
+
+      dot.current.y +=
+        dotVelocity.current.y;
     };
 
     /*
-     * RING
+     * The ring is deliberately much heavier.
      *
-     * Completely independent from the dot.
-     *
-     * Lower stiffness + higher inertia gives it
-     * the graceful "comes after it" motion.
+     * It does NOT bounce around the dot.
+     * It simply has more inertia and therefore
+     * arrives gracefully after the dot.
      */
     const updateRing = () => {
-      const position = ringPositionRef.current;
-      const target = targetRef.current;
-      const velocity = ringVelocityRef.current;
+      const dx =
+        target.current.x -
+        ring.current.x;
 
-      const dx = target.x - position.x;
-      const dy = target.y - position.y;
+      const dy =
+        target.current.y -
+        ring.current.y;
 
-      velocity.x += dx * 0.075;
-      velocity.y += dy * 0.075;
+      ringVelocity.current.x =
+        ringVelocity.current.x * 0.82 +
+        dx * 0.18;
 
-      velocity.x *= 0.91;
-      velocity.y *= 0.91;
+      ringVelocity.current.y =
+        ringVelocity.current.y * 0.82 +
+        dy * 0.18;
 
-      position.x += velocity.x;
-      position.y += velocity.y;
+      ring.current.x +=
+        ringVelocity.current.x;
+
+      ring.current.y +=
+        ringVelocity.current.y;
     };
 
-    const animate = () => {
+    const render = () => {
       updateDot();
       updateRing();
 
-      const dotPosition = dotPositionRef.current;
-      const ringPosition = ringPositionRef.current;
+      dotElement.style.transform =
+        `translate3d(${dot.current.x}px, ${dot.current.y}px, 0) translate(-50%, -50%)`;
 
-      /*
-       * translate3d keeps this on the compositor rather
-       * than forcing layout on every animation frame.
-       */
-      dot.style.transform = `
-        translate3d(
-          ${dotPosition.x}px,
-          ${dotPosition.y}px,
-          0
-        )
-        translate(-50%, -50%)
-      `;
+      ringElement.style.transform =
+        `translate3d(${ring.current.x}px, ${ring.current.y}px, 0) translate(-50%, -50%)`;
 
-      ring.style.transform = `
-        translate3d(
-          ${ringPosition.x}px,
-          ${ringPosition.y}px,
-          0
-        )
-        translate(-50%, -50%)
-      `;
+      if (visible.current) {
+        const elapsed =
+          performance.now() -
+          lastInteraction.current;
 
-      /*
-       * The cursor doesn't vanish immediately.
-       * It remains visible after interaction and only
-       * gently fades after a period of inactivity.
-       */
-      if (visibleRef.current) {
-        const idleTime =
-          performance.now() - lastInteractionRef.current;
-
-        const fadeStart = 2200;
-        const fadeDuration = 700;
-
-        if (idleTime <= fadeStart) {
-          dot.style.opacity = "1";
-          ring.style.opacity = "0.72";
-        } else if (idleTime < fadeStart + fadeDuration) {
+        /*
+         * Stay fully visible for a while.
+         * Then fade instead of abruptly disappearing.
+         */
+        if (elapsed < 2600) {
+          dotElement.style.opacity = "1";
+          ringElement.style.opacity = "0.72";
+        } else if (elapsed < 3400) {
           const progress =
-            (idleTime - fadeStart) / fadeDuration;
+            (elapsed - 2600) / 800;
 
-          const eased =
-            1 - progress * progress;
+          const opacity =
+            1 - progress;
 
-          dot.style.opacity = String(eased);
-          ring.style.opacity = String(eased * 0.72);
+          dotElement.style.opacity =
+            String(opacity);
+
+          ringElement.style.opacity =
+            String(opacity * 0.72);
         } else {
-          dot.style.opacity = "0";
-          ring.style.opacity = "0";
-          visibleRef.current = false;
+          dotElement.style.opacity = "0";
+          ringElement.style.opacity = "0";
+
+          visible.current = false;
         }
       }
 
-      animationFrameRef.current =
-        requestAnimationFrame(animate);
+      frame.current =
+        requestAnimationFrame(render);
     };
 
-    const showAt = (x: number, y: number) => {
-      /*
-       * Do NOT instantly teleport either element.
-       *
-       * The target changes immediately, but both physical
-       * bodies have to travel toward it.
-       */
-      targetRef.current.x = x;
-      targetRef.current.y = y;
+    const moveTo = (
+      x: number,
+      y: number,
+    ) => {
+      target.current.x = x;
+      target.current.y = y;
 
-      lastInteractionRef.current =
+      lastInteraction.current =
         performance.now();
 
-      visibleRef.current = true;
+      visible.current = true;
 
       /*
-       * Give the dot a little extra initial velocity so
-       * it arrives noticeably faster than the ring.
+       * No teleporting.
+       *
+       * Both elements travel toward the new
+       * target using their own existing velocity.
        */
-      const dotPosition = dotPositionRef.current;
-
-      dotVelocityRef.current.x +=
-        (x - dotPosition.x) * 0.035;
-
-      dotVelocityRef.current.y +=
-        (y - dotPosition.y) * 0.035;
     };
 
     /*
      * DESKTOP
      *
-     * Continuous mouse tracking.
+     * Continuous cursor movement.
      */
-    const handleMouseMove = (event: MouseEvent) => {
-      if (coarsePointer) return;
+    const handleMouseMove = (
+      event: MouseEvent,
+    ) => {
+      if (coarse) {
+        return;
+      }
 
-      showAt(event.clientX, event.clientY);
+      moveTo(
+        event.clientX,
+        event.clientY,
+      );
     };
 
     /*
      * MOBILE
      *
-     * We deliberately DO NOT update the target during
-     * touchmove.
+     * We ONLY remember where the finger began.
      *
-     * This is what prevents scrolling from dragging
-     * the cursor around with the finger.
+     * We never move the cursor during touchmove.
+     * Therefore scrolling cannot drag the cursor.
      */
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!coarsePointer) return;
+    const handlePointerDown = (
+      event: PointerEvent,
+    ) => {
+      if (!coarse) {
+        return;
+      }
 
-      if (event.pointerType !== "touch") return;
+      if (event.pointerType !== "touch") {
+        return;
+      }
 
-      pointerStateRef.current = {
-        startX: event.clientX,
-        startY: event.clientY,
-        moved: false,
-        active: true,
+      touchStart.current = {
+        x: event.clientX,
+        y: event.clientY,
       };
+
+      touchMoved.current = false;
     };
 
-    const handlePointerMove = (event: PointerEvent) => {
-      if (!coarsePointer) return;
+    const handlePointerMove = (
+      event: PointerEvent,
+    ) => {
+      if (!coarse) {
+        return;
+      }
 
-      if (event.pointerType !== "touch") return;
-
-      const state = pointerStateRef.current;
-
-      if (!state.active) return;
+      if (event.pointerType !== "touch") {
+        return;
+      }
 
       const dx =
-        event.clientX - state.startX;
+        event.clientX -
+        touchStart.current.x;
 
       const dy =
-        event.clientY - state.startY;
+        event.clientY -
+        touchStart.current.y;
 
       /*
-       * Once the finger has moved enough to be a scroll,
-       * this interaction is permanently ignored.
+       * Once this is a scroll gesture,
+       * completely ignore the interaction.
        */
       if (
-        Math.sqrt(dx * dx + dy * dy) > 12
+        Math.hypot(dx, dy) > 10
       ) {
-        state.moved = true;
+        touchMoved.current = true;
       }
     };
 
-    const handlePointerUp = (event: PointerEvent) => {
-      if (!coarsePointer) return;
+    const handlePointerUp = (
+      event: PointerEvent,
+    ) => {
+      if (!coarse) {
+        return;
+      }
 
-      if (event.pointerType !== "touch") return;
-
-      const state = pointerStateRef.current;
-
-      if (!state.active) return;
+      if (event.pointerType !== "touch") {
+        return;
+      }
 
       /*
-       * Only a genuine tap moves the cursor.
+       * Only an actual tap changes the cursor.
+       *
+       * A scroll never gets here as a cursor movement.
        */
-      if (!state.moved) {
-        showAt(
+      if (!touchMoved.current) {
+        moveTo(
           event.clientX,
           event.clientY,
         );
       }
-
-      state.active = false;
     };
 
     const handlePointerCancel = (
       event: PointerEvent,
     ) => {
-      if (!coarsePointer) return;
-
-      if (event.pointerType !== "touch") return;
-
-      pointerStateRef.current.active = false;
+      if (
+        coarse &&
+        event.pointerType === "touch"
+      ) {
+        touchMoved.current = true;
+      }
     };
 
     const handleMouseLeave = () => {
-      if (coarsePointer) return;
+      if (coarse) {
+        return;
+      }
 
-      visibleRef.current = false;
+      visible.current = false;
 
-      dot.style.opacity = "0";
-      ring.style.opacity = "0";
+      dotElement.style.opacity = "0";
+      ringElement.style.opacity = "0";
     };
 
     window.addEventListener(
@@ -335,8 +355,8 @@ export default function RyuFlixCursor() {
       { passive: true },
     );
 
-    animationFrameRef.current =
-      requestAnimationFrame(animate);
+    frame.current =
+      requestAnimationFrame(render);
 
     return () => {
       window.removeEventListener(
@@ -369,21 +389,17 @@ export default function RyuFlixCursor() {
         handleMouseLeave,
       );
 
-      if (
-        animationFrameRef.current !== null
-      ) {
-        cancelAnimationFrame(
-          animationFrameRef.current,
-        );
+      if (frame.current !== null) {
+        cancelAnimationFrame(frame.current);
       }
     };
   }, []);
 
   return (
     <>
-      {/* Momentum ring */}
+      {/* Independent trailing ring */}
       <div
-        ref={ringElementRef}
+        ref={ringRef}
         aria-hidden="true"
         className="
           pointer-events-none
@@ -398,9 +414,8 @@ export default function RyuFlixCursor() {
         style={{
           border: `1px solid ${accent}`,
           boxShadow: `
-            0 0 10px ${accent}55,
-            0 0 24px ${accent}25,
-            inset 0 0 8px ${accent}10
+            0 0 8px ${accent}66,
+            0 0 20px ${accent}33
           `,
           opacity: 0,
           willChange:
@@ -408,9 +423,9 @@ export default function RyuFlixCursor() {
         }}
       />
 
-      {/* Fast dot */}
+      {/* Fast central dot */}
       <div
-        ref={dotElementRef}
+        ref={dotRef}
         aria-hidden="true"
         className="
           pointer-events-none
@@ -418,16 +433,16 @@ export default function RyuFlixCursor() {
           left-0
           top-0
           z-[100000]
-          h-[10px]
-          w-[10px]
+          h-[9px]
+          w-[9px]
           rounded-full
         "
         style={{
           backgroundColor: accent,
           boxShadow: `
-            0 0 7px ${accent},
-            0 0 16px ${accent}aa,
-            0 0 28px ${accent}44
+            0 0 6px ${accent},
+            0 0 15px ${accent}aa,
+            0 0 24px ${accent}44
           `,
           opacity: 0,
           willChange:
@@ -436,4 +451,4 @@ export default function RyuFlixCursor() {
       />
     </>
   );
-          }
+        }
