@@ -8,55 +8,34 @@ type Point = {
   y: number;
 };
 
+const HIDDEN: Point = {
+  x: -100,
+  y: -100,
+};
+
 export default function RyuFlixCursor() {
   const pathname = usePathname();
 
   const dotRef = useRef<HTMLDivElement>(null);
   const ringRef = useRef<HTMLDivElement>(null);
 
-  const target = useRef<Point>({
-    x: -100,
-    y: -100,
-  });
-
-  const dot = useRef<Point>({
-    x: -100,
-    y: -100,
-  });
-
-  const ring = useRef<Point>({
-    x: -100,
-    y: -100,
-  });
-
-  const dotVelocity = useRef<Point>({
-    x: 0,
-    y: 0,
-  });
-
-  const ringVelocity = useRef<Point>({
-    x: 0,
-    y: 0,
-  });
+  const target = useRef<Point>({ ...HIDDEN });
+  const dot = useRef<Point>({ ...HIDDEN });
+  const ring = useRef<Point>({ ...HIDDEN });
 
   const visible = useRef(false);
   const lastInteraction = useRef(0);
   const frame = useRef<number | null>(null);
+  const lastFrameTime = useRef<number | null>(null);
 
-  const touchStart = useRef<Point>({
-    x: 0,
-    y: 0,
-  });
-
+  const touchStart = useRef<Point>({ x: 0, y: 0 });
   const touchMoved = useRef(false);
 
   const isTv =
     pathname.startsWith("/tv") ||
     pathname.includes("/tv/");
 
-  const accent = isTv
-    ? "#FFB51B"
-    : "#1683FF";
+  const accent = isTv ? "#FFB51B" : "#1683FF";
 
   useEffect(() => {
     const dotElement = dotRef.current;
@@ -66,75 +45,91 @@ export default function RyuFlixCursor() {
       return;
     }
 
-    const coarse =
-      window.matchMedia(
-        "(pointer: coarse)",
-      ).matches;
+    const coarse = window.matchMedia(
+      "(pointer: coarse)",
+    ).matches;
 
     /*
-     * This is intentionally NOT a spring.
+     * IMPORTANT:
      *
-     * The dot is simply a fast eased follower.
-     * There is no oscillation and no bounce.
+     * There is deliberately NO velocity here.
+     * No spring.
+     * No acceleration.
+     * No damping.
+     * No oscillation.
+     *
+     * Both objects use a first-order exponential
+     * follower. That means they can approach the
+     * target asymptotically, but they cannot overshoot
+     * it or wobble around it.
      */
-    const updateDot = () => {
-      const dx =
-        target.current.x -
-        dot.current.x;
 
-      const dy =
-        target.current.y -
-        dot.current.y;
+    const follow = (
+      current: number,
+      destination: number,
+      speed: number,
+      dt: number,
+    ) => {
+      const alpha = 1 - Math.exp(-speed * dt);
 
-      dotVelocity.current.x =
-        dotVelocity.current.x * 0.62 +
-        dx * 0.38;
-
-      dotVelocity.current.y =
-        dotVelocity.current.y * 0.62 +
-        dy * 0.38;
-
-      dot.current.x +=
-        dotVelocity.current.x;
-
-      dot.current.y +=
-        dotVelocity.current.y;
+      return current + (destination - current) * alpha;
     };
 
-    /*
-     * The ring is deliberately much heavier.
-     *
-     * It does NOT bounce around the dot.
-     * It simply has more inertia and therefore
-     * arrives gracefully after the dot.
-     */
-    const updateRing = () => {
-      const dx =
-        target.current.x -
-        ring.current.x;
+    const render = (now: number) => {
+      const previous = lastFrameTime.current;
 
-      const dy =
-        target.current.y -
-        ring.current.y;
+      let dt = previous === null
+        ? 1 / 60
+        : (now - previous) / 1000;
 
-      ringVelocity.current.x =
-        ringVelocity.current.x * 0.82 +
-        dx * 0.18;
+      lastFrameTime.current = now;
 
-      ringVelocity.current.y =
-        ringVelocity.current.y * 0.82 +
-        dy * 0.18;
+      /*
+       * Prevent a tab switch / frame stall from producing
+       * a giant movement jump.
+       */
+      dt = Math.min(Math.max(dt, 0), 0.033);
 
-      ring.current.x +=
-        ringVelocity.current.x;
+      /*
+       * FAST DOT
+       *
+       * This reaches the target quickly but never
+       * overshoots it.
+       */
+      dot.current.x = follow(
+        dot.current.x,
+        target.current.x,
+        24,
+        dt,
+      );
 
-      ring.current.y +=
-        ringVelocity.current.y;
-    };
+      dot.current.y = follow(
+        dot.current.y,
+        target.current.y,
+        24,
+        dt,
+      );
 
-    const render = () => {
-      updateDot();
-      updateRing();
+      /*
+       * SLOWER RING
+       *
+       * Same target, completely independent position.
+       * Because the response is slower, it naturally
+       * trails behind the dot without any spring physics.
+       */
+      ring.current.x = follow(
+        ring.current.x,
+        target.current.x,
+        7,
+        dt,
+      );
+
+      ring.current.y = follow(
+        ring.current.y,
+        target.current.y,
+        7,
+        dt,
+      );
 
       dotElement.style.transform =
         `translate3d(${dot.current.x}px, ${dot.current.y}px, 0) translate(-50%, -50%)`;
@@ -144,28 +139,26 @@ export default function RyuFlixCursor() {
 
       if (visible.current) {
         const elapsed =
-          performance.now() -
-          lastInteraction.current;
+          now - lastInteraction.current;
 
         /*
-         * Stay fully visible for a while.
-         * Then fade instead of abruptly disappearing.
+         * Stay visible.
+         * Fade only after being stationary for a while.
          */
-        if (elapsed < 2600) {
+        if (elapsed < 2800) {
           dotElement.style.opacity = "1";
-          ringElement.style.opacity = "0.72";
-        } else if (elapsed < 3400) {
+          ringElement.style.opacity = "0.68";
+        } else if (elapsed < 3600) {
           const progress =
-            (elapsed - 2600) / 800;
+            (elapsed - 2800) / 800;
 
-          const opacity =
-            1 - progress;
+          const opacity = 1 - progress;
 
           dotElement.style.opacity =
             String(opacity);
 
           ringElement.style.opacity =
-            String(opacity * 0.72);
+            String(opacity * 0.68);
         } else {
           dotElement.style.opacity = "0";
           ringElement.style.opacity = "0";
@@ -189,19 +182,14 @@ export default function RyuFlixCursor() {
         performance.now();
 
       visible.current = true;
-
-      /*
-       * No teleporting.
-       *
-       * Both elements travel toward the new
-       * target using their own existing velocity.
-       */
     };
 
     /*
      * DESKTOP
      *
-     * Continuous cursor movement.
+     * The actual mouse position becomes the target.
+     * Rendering remains completely separate from the
+     * event frequency.
      */
     const handleMouseMove = (
       event: MouseEvent,
@@ -219,10 +207,10 @@ export default function RyuFlixCursor() {
     /*
      * MOBILE
      *
-     * We ONLY remember where the finger began.
+     * A finger moving across the screen is NOT cursor
+     * movement.
      *
-     * We never move the cursor during touchmove.
-     * Therefore scrolling cannot drag the cursor.
+     * We only record where the touch started.
      */
     const handlePointerDown = (
       event: PointerEvent,
@@ -243,6 +231,12 @@ export default function RyuFlixCursor() {
       touchMoved.current = false;
     };
 
+    /*
+     * NEVER update target here.
+     *
+     * This is what prevents the indicator from
+     * following a finger during scrolling.
+     */
     const handlePointerMove = (
       event: PointerEvent,
     ) => {
@@ -262,17 +256,14 @@ export default function RyuFlixCursor() {
         event.clientY -
         touchStart.current.y;
 
-      /*
-       * Once this is a scroll gesture,
-       * completely ignore the interaction.
-       */
-      if (
-        Math.hypot(dx, dy) > 10
-      ) {
+      if (Math.hypot(dx, dy) > 10) {
         touchMoved.current = true;
       }
     };
 
+    /*
+     * Only a genuine tap places the indicator.
+     */
     const handlePointerUp = (
       event: PointerEvent,
     ) => {
@@ -284,17 +275,14 @@ export default function RyuFlixCursor() {
         return;
       }
 
-      /*
-       * Only an actual tap changes the cursor.
-       *
-       * A scroll never gets here as a cursor movement.
-       */
-      if (!touchMoved.current) {
-        moveTo(
-          event.clientX,
-          event.clientY,
-        );
+      if (touchMoved.current) {
+        return;
       }
+
+      moveTo(
+        event.clientX,
+        event.clientY,
+      );
     };
 
     const handlePointerCancel = (
@@ -397,7 +385,6 @@ export default function RyuFlixCursor() {
 
   return (
     <>
-      {/* Independent trailing ring */}
       <div
         ref={ringRef}
         aria-hidden="true"
@@ -407,23 +394,21 @@ export default function RyuFlixCursor() {
           left-0
           top-0
           z-[99999]
-          h-[34px]
-          w-[34px]
+          h-[36px]
+          w-[36px]
           rounded-full
         "
         style={{
           border: `1px solid ${accent}`,
           boxShadow: `
-            0 0 8px ${accent}66,
-            0 0 20px ${accent}33
+            0 0 7px ${accent}66,
+            0 0 18px ${accent}33
           `,
           opacity: 0,
-          willChange:
-            "transform, opacity",
+          willChange: "transform, opacity",
         }}
       />
 
-      {/* Fast central dot */}
       <div
         ref={dotRef}
         aria-hidden="true"
@@ -441,14 +426,13 @@ export default function RyuFlixCursor() {
           backgroundColor: accent,
           boxShadow: `
             0 0 6px ${accent},
-            0 0 15px ${accent}aa,
-            0 0 24px ${accent}44
+            0 0 14px ${accent}aa,
+            0 0 22px ${accent}44
           `,
           opacity: 0,
-          willChange:
-            "transform, opacity",
+          willChange: "transform, opacity",
         }}
       />
     </>
   );
-        }
+            }
