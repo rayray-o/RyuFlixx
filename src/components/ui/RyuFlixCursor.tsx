@@ -11,6 +11,11 @@ type Point = {
 export default function RyuFlixCursor() {
   const pathname = usePathname();
 
+  const [visible, setVisible] = useState(false);
+  const [hovering, setHovering] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+
   const targetRef = useRef<Point>({
     x: -100,
     y: -100,
@@ -26,101 +31,35 @@ export default function RyuFlixCursor() {
     y: -100,
   });
 
+  const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
   const animationFrameRef = useRef<number | null>(null);
-  const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [visible, setVisible] = useState(false);
-  const [hovering, setHovering] = useState(false);
-  const [pressed, setPressed] = useState(false);
-  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const isTv =
+    pathname.startsWith("/tv") ||
+    pathname.includes("/tv/");
 
-  const isTv = pathname.includes("/tv/");
-
-  const accent = isTv ? "#FFD400" : "#1683FF";
+  const accent = isTv ? "#FFB51B" : "#1683FF";
 
   useEffect(() => {
-    const coarse =
-      window.matchMedia("(pointer: coarse)").matches ||
-      "ontouchstart" in window;
+    const coarsePointer = window.matchMedia(
+      "(pointer: coarse)",
+    ).matches;
 
-    setIsTouchDevice(coarse);
+    setIsTouchDevice(coarsePointer);
 
-    const prefersReducedMotion = window.matchMedia(
+    const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
 
-    if (prefersReducedMotion) {
-      return;
-    }
-
-    const updateTarget = (x: number, y: number) => {
-      targetRef.current.x = x;
-      targetRef.current.y = y;
+    const showTouchDot = (x: number, y: number) => {
+      targetRef.current = { x, y };
+      dotRef.current = { x, y };
+      ringRef.current = { x, y };
 
       setVisible(true);
-
-      if (hideTimeoutRef.current) {
-        clearTimeout(hideTimeoutRef.current);
-      }
-
-      if (coarse) {
-        hideTimeoutRef.current = setTimeout(() => {
-          setVisible(false);
-        }, 900);
-      }
-    };
-
-    const checkInteractive = (target: EventTarget | null) => {
-      if (!(target instanceof Element)) {
-        setHovering(false);
-        return;
-      }
-
-      const interactive = target.closest(
-        "a, button, input, select, textarea, [role='button'], [data-cursor-hover]",
-      );
-
-      setHovering(Boolean(interactive));
-    };
-
-    const handleMouseMove = (event: MouseEvent) => {
-      if (coarse) {
-        return;
-      }
-
-      updateTarget(event.clientX, event.clientY);
-      checkInteractive(event.target);
-    };
-
-    const handleMouseLeave = () => {
-      if (!coarse) {
-        setVisible(false);
-      }
-    };
-
-    const handleTouchStart = (event: TouchEvent) => {
-      const touch = event.touches[0];
-
-      if (!touch) {
-        return;
-      }
-
-      updateTarget(touch.clientX, touch.clientY);
-      checkInteractive(event.target);
-    };
-
-    const handleTouchMove = (event: TouchEvent) => {
-      const touch = event.touches[0];
-
-      if (!touch) {
-        return;
-      }
-
-      updateTarget(touch.clientX, touch.clientY);
-      checkInteractive(event.target);
-    };
-
-    const handleTouchEnd = () => {
       setHovering(false);
 
       if (hideTimeoutRef.current) {
@@ -129,49 +68,108 @@ export default function RyuFlixCursor() {
 
       hideTimeoutRef.current = setTimeout(() => {
         setVisible(false);
-      }, 500);
+      }, 650);
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (coarsePointer) {
+        return;
+      }
+
+      targetRef.current.x = event.clientX;
+      targetRef.current.y = event.clientY;
+
+      setVisible(true);
+
+      const element = event.target;
+
+      if (element instanceof Element) {
+        const interactive = element.closest(
+          "a, button, input, select, textarea, [role='button'], [data-cursor-hover]",
+        );
+
+        setHovering(Boolean(interactive));
+      }
+    };
+
+    const handleMouseLeave = () => {
+      if (!coarsePointer) {
+        setVisible(false);
+        setHovering(false);
+      }
+    };
+
+    /*
+     * IMPORTANT:
+     *
+     * On touch devices we intentionally listen ONLY to touchstart.
+     *
+     * We DO NOT listen to touchmove.
+     *
+     * This means the dot appears where the user initially taps,
+     * but it never follows their finger while scrolling.
+     */
+    const handleTouchStart = (event: TouchEvent) => {
+      if (!coarsePointer) {
+        return;
+      }
+
+      const touch = event.touches[0];
+
+      if (!touch) {
+        return;
+      }
+
+      showTouchDot(touch.clientX, touch.clientY);
     };
 
     const handlePointerDown = () => {
+      if (coarsePointer) {
+        return;
+      }
+
       setPressed(true);
 
       window.setTimeout(() => {
         setPressed(false);
-      }, 180);
+      }, 160);
     };
 
     const animate = () => {
-      const target = targetRef.current;
+      if (!coarsePointer && !reducedMotion) {
+        const target = targetRef.current;
 
-      const dot = dotRef.current;
-      const ring = ringRef.current;
+        dotRef.current.x +=
+          (target.x - dotRef.current.x) * 0.42;
 
-      const dotEase = coarse ? 0.32 : 0.42;
-      const ringEase = coarse ? 0.12 : 0.14;
+        dotRef.current.y +=
+          (target.y - dotRef.current.y) * 0.42;
 
-      dot.x += (target.x - dot.x) * dotEase;
-      dot.y += (target.y - dot.y) * dotEase;
+        ringRef.current.x +=
+          (target.x - ringRef.current.x) * 0.13;
 
-      ring.x += (target.x - ring.x) * ringEase;
-      ring.y += (target.y - ring.y) * ringEase;
+        ringRef.current.y +=
+          (target.y - ringRef.current.y) * 0.13;
+      }
 
-      const dotElement = document.getElementById(
+      const dot = document.getElementById(
         "ryuflix-cursor-dot",
       );
 
-      const ringElement = document.getElementById(
+      const ring = document.getElementById(
         "ryuflix-cursor-ring",
       );
 
-      if (dotElement) {
-        dotElement.style.transform = `translate3d(${dot.x}px, ${dot.y}px, 0) translate(-50%, -50%)`;
+      if (dot) {
+        dot.style.transform = `translate3d(${dotRef.current.x}px, ${dotRef.current.y}px, 0) translate(-50%, -50%)`;
       }
 
-      if (ringElement) {
-        ringElement.style.transform = `translate3d(${ring.x}px, ${ring.y}px, 0) translate(-50%, -50%)`;
+      if (ring) {
+        ring.style.transform = `translate3d(${ringRef.current.x}px, ${ringRef.current.y}px, 0) translate(-50%, -50%)`;
       }
 
-      animationFrameRef.current = requestAnimationFrame(animate);
+      animationFrameRef.current =
+        requestAnimationFrame(animate);
     };
 
     window.addEventListener("mousemove", handleMouseMove);
@@ -179,26 +177,36 @@ export default function RyuFlixCursor() {
     window.addEventListener("touchstart", handleTouchStart, {
       passive: true,
     });
-    window.addEventListener("touchmove", handleTouchMove, {
-      passive: true,
-    });
-    window.addEventListener("touchend", handleTouchEnd, {
-      passive: true,
-    });
     window.addEventListener("pointerdown", handlePointerDown);
 
-    animationFrameRef.current = requestAnimationFrame(animate);
+    animationFrameRef.current =
+      requestAnimationFrame(animate);
 
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseleave", handleMouseLeave);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener(
+        "mousemove",
+        handleMouseMove,
+      );
+
+      window.removeEventListener(
+        "mouseleave",
+        handleMouseLeave,
+      );
+
+      window.removeEventListener(
+        "touchstart",
+        handleTouchStart,
+      );
+
+      window.removeEventListener(
+        "pointerdown",
+        handlePointerDown,
+      );
 
       if (animationFrameRef.current !== null) {
-        cancelAnimationFrame(animationFrameRef.current);
+        cancelAnimationFrame(
+          animationFrameRef.current,
+        );
       }
 
       if (hideTimeoutRef.current) {
@@ -207,24 +215,27 @@ export default function RyuFlixCursor() {
     };
   }, []);
 
-  if (isTouchDevice && !visible) {
-    return null;
-  }
-
   return (
     <>
+      {/* Desktop outer follower */}
       <div
         id="ryuflix-cursor-ring"
         aria-hidden="true"
-        className="pointer-events-none fixed left-0 top-0 z-[99999] hidden h-10 w-10 rounded-full md:block"
+        className="pointer-events-none fixed left-0 top-0 z-[99999] hidden h-9 w-9 rounded-full md:block"
         style={{
           border: `1px solid ${accent}`,
-          boxShadow: `0 0 18px ${accent}55, inset 0 0 12px ${accent}15`,
-          opacity: visible ? 0.75 : 0,
-          scale: hovering || pressed ? "1.45" : "1",
+          boxShadow: `
+            0 0 14px ${accent}55,
+            inset 0 0 10px ${accent}12
+          `,
+          opacity: visible ? 0.72 : 0,
+          scale:
+            hovering || pressed
+              ? "1.5"
+              : "1",
           transition: [
-            "opacity 180ms ease",
-            "scale 220ms cubic-bezier(0.22, 1, 0.36, 1)",
+            "opacity 160ms ease",
+            "scale 180ms cubic-bezier(0.22, 1, 0.36, 1)",
             "border-color 300ms ease",
             "box-shadow 300ms ease",
           ].join(", "),
@@ -232,15 +243,24 @@ export default function RyuFlixCursor() {
         }}
       />
 
+      {/* Main dot */}
       <div
         id="ryuflix-cursor-dot"
         aria-hidden="true"
         className="pointer-events-none fixed left-0 top-0 z-[100000] h-2.5 w-2.5 rounded-full"
         style={{
           backgroundColor: accent,
-          boxShadow: `0 0 10px ${accent}, 0 0 22px ${accent}99`,
+          boxShadow: `
+            0 0 7px ${accent},
+            0 0 17px ${accent}99
+          `,
           opacity: visible ? 1 : 0,
-          scale: pressed ? "1.8" : hovering ? "1.25" : "1",
+          scale:
+            pressed
+              ? "1.65"
+              : hovering
+                ? "1.2"
+                : "1",
           transition: [
             "opacity 120ms ease",
             "scale 140ms cubic-bezier(0.22, 1, 0.36, 1)",
@@ -250,14 +270,6 @@ export default function RyuFlixCursor() {
           willChange: "transform",
         }}
       />
-
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed inset-0 z-[99998] hidden md:block"
-        style={{
-          cursor: "none",
-        }}
-      />
     </>
   );
-            }
+}
