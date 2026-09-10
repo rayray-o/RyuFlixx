@@ -13,6 +13,7 @@ import { cn } from "@/utils/helpers";
 import MangaParallaxBackground from "@/components/ui/background/MangaParallaxBackground";
 import RyuFlixxIntro from "@/components/ui/RyuFlixxIntro";
 import RyuFlixxShell from "@/components/ui/RyuFlixxShell";
+import RyuFlixCursor from "@/components/ui/RyuFlixCursor";
 import { SpacingClasses } from "@/utils/constants";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { Suspense } from "react";
@@ -82,6 +83,8 @@ export default function RootLayout({
           Poppins.className
         )}
       >
+        <RyuFlixCursor />
+
         {/* ================================= */}
         {/* POPADS ANTI-ADBLOCK GLOBAL         */}
         {/* ================================= */}
@@ -131,4 +134,4 @@ export default function RootLayout({
       </body>
     </html>
   );
-}
+                  }
