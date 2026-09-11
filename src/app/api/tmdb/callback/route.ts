@@ -4,17 +4,50 @@ import { env } from "@/utils/env";
 
 const REQUEST_COOKIE = "ryuflix_tmdb_request_token";
 const ACCESS_COOKIE = "ryuflix_tmdb_access_token";
+const SESSION_COOKIE = "ryuflix_tmdb_session_id";
 const ACCOUNT_COOKIE = "ryuflix_tmdb_account_id";
+const USERNAME_COOKIE = "ryuflix_tmdb_username";
+const NAME_COOKIE = "ryuflix_tmdb_name";
+
+type TMDBResponse = Record<string, unknown>;
+
+async function parseResponse(
+  response: Response,
+): Promise<TMDBResponse> {
+  const raw = await response.text();
+
+  try {
+    return raw ? (JSON.parse(raw) as TMDBResponse) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function tmdbRequest(
+  url: string,
+  accessToken: string,
+  init: RequestInit = {},
+) {
+  return fetch(url, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+      ...(init.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+}
 
 export async function GET(request: Request) {
-  try {
-    const url = new URL(request.url);
-    const cookieStore = await cookies();
+  const requestUrl = new URL(request.url);
+  const cookieStore = await cookies();
 
+  try {
     const requestToken =
-      url.searchParams.get("request_token") ??
-      url.searchParams.get("requestToken") ??
-      url.searchParams.get("token") ??
+      requestUrl.searchParams.get("request_token") ??
+      requestUrl.searchParams.get("requestToken") ??
+      requestUrl.searchParams.get("token") ??
       cookieStore.get(REQUEST_COOKIE)?.value ??
       null;
 
@@ -27,13 +60,30 @@ export async function GET(request: Request) {
       );
     }
 
-    const response = await fetch(
+    const applicationToken =
+      env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN;
+
+    if (!applicationToken) {
+      return NextResponse.redirect(
+        new URL(
+          "/personalize?tmdb=error&reason=missing_application_token",
+          request.url,
+        ),
+      );
+    }
+
+    /*
+     * STEP 1
+     *
+     * Exchange the approved request token for
+     * the actual authenticated TMDB v4 user token.
+     */
+    const accessResponse = await fetch(
       "https://api.themoviedb.org/4/auth/access_token",
       {
         method: "POST",
         headers: {
-          Authorization:
-            `Bearer ${env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN}`,
+          Authorization: `Bearer ${applicationToken}`,
           "Content-Type": "application/json",
           Accept: "application/json",
         },
@@ -44,128 +94,257 @@ export async function GET(request: Request) {
       },
     );
 
-    const raw = await response.text();
+    const accessData =
+      await parseResponse(accessResponse);
 
-    let data: Record<string, unknown> = {};
-
-    try {
-      data = raw ? JSON.parse(raw) : {};
-    } catch {
+    if (!accessResponse.ok) {
       console.error(
-        "TMDB access-token response was not JSON:",
-        raw,
-      );
-    }
-
-    if (!response.ok) {
-      console.error(
-        "TMDB access-token exchange failed:",
-        response.status,
-        raw,
+        "TMDB v4 access-token exchange failed:",
+        accessResponse.status,
+        accessData,
       );
 
-      const result = NextResponse.redirect(
+      return NextResponse.redirect(
         new URL(
-          `/personalize?tmdb=error&reason=exchange_${response.status}`,
+          `/personalize?tmdb=error&reason=access_exchange_${accessResponse.status}`,
           request.url,
         ),
       );
-
-      result.cookies.delete(REQUEST_COOKIE);
-
-      return result;
     }
 
     const accessToken =
-      typeof data.access_token === "string"
-        ? data.access_token
+      typeof accessData.access_token === "string"
+        ? accessData.access_token
         : null;
 
-    /*
-     * TMDB's v4 access-token response uses
-     * account_id for the authenticated account.
-     *
-     * Keep account_object_id as a compatibility
-     * fallback in case TMDB returns that field.
-     */
-    const accountId =
-      typeof data.account_id === "string"
-        ? data.account_id
-        : typeof data.account_id === "number"
-          ? String(data.account_id)
-          : typeof data.account_object_id === "string"
-            ? data.account_object_id
-            : null;
-
-    if (!accessToken || !accountId) {
-      console.error(
-        "TMDB authentication response did not contain the required account data.",
-        {
-          hasAccessToken: Boolean(accessToken),
-          accountId,
-          fields: Object.keys(data),
-        },
-      );
-
-      const result = NextResponse.redirect(
+    if (!accessToken) {
+      return NextResponse.redirect(
         new URL(
-          "/personalize?tmdb=error&reason=missing_account_data",
+          "/personalize?tmdb=error&reason=missing_access_token",
           request.url,
         ),
       );
-
-      result.cookies.delete(REQUEST_COOKIE);
-      result.cookies.delete(ACCESS_COOKIE);
-      result.cookies.delete(ACCOUNT_COOKIE);
-
-      return result;
     }
 
-    const result = NextResponse.redirect(
+    /*
+     * STEP 2
+     *
+     * Convert the authenticated v4 user token into
+     * a v3 session ID.
+     *
+     * TMDB specifically documents this endpoint for
+     * converting an authenticated v4 token into a
+     * v3 session.
+     */
+    const sessionResponse = await tmdbRequest(
+      "https://api.themoviedb.org/3/authentication/session/convert/4",
+      accessToken,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          access_token: accessToken,
+        }),
+      },
+    );
+
+    const sessionData =
+      await parseResponse(sessionResponse);
+
+    if (!sessionResponse.ok) {
+      console.error(
+        "TMDB v4-to-v3 session conversion failed:",
+        sessionResponse.status,
+        sessionData,
+      );
+
+      return NextResponse.redirect(
+        new URL(
+          `/personalize?tmdb=error&reason=session_conversion_${sessionResponse.status}`,
+          request.url,
+        ),
+      );
+    }
+
+    const sessionId =
+      typeof sessionData.session_id === "string"
+        ? sessionData.session_id
+        : null;
+
+    if (!sessionId) {
+      return NextResponse.redirect(
+        new URL(
+          "/personalize?tmdb=error&reason=missing_session_id",
+          request.url,
+        ),
+      );
+    }
+
+    /*
+     * STEP 3
+     *
+     * Get the REAL TMDB account object:
+     *
+     * - numeric account ID
+     * - username
+     * - name
+     *
+     * This is what the UI should display.
+     */
+    const accountResponse = await tmdbRequest(
+      `https://api.themoviedb.org/3/account?session_id=${encodeURIComponent(
+        sessionId,
+      )}`,
+      accessToken,
+    );
+
+    const accountData =
+      await parseResponse(accountResponse);
+
+    if (!accountResponse.ok) {
+      console.error(
+        "TMDB account lookup failed:",
+        accountResponse.status,
+        accountData,
+      );
+
+      return NextResponse.redirect(
+        new URL(
+          `/personalize?tmdb=error&reason=account_lookup_${accountResponse.status}`,
+          request.url,
+        ),
+      );
+    }
+
+    const accountId =
+      typeof accountData.id === "number"
+        ? accountData.id
+        : typeof accountData.id === "string" &&
+            /^\d+$/.test(accountData.id)
+          ? Number(accountData.id)
+          : null;
+
+    const username =
+      typeof accountData.username === "string"
+        ? accountData.username
+        : "";
+
+    const name =
+      typeof accountData.name === "string"
+        ? accountData.name
+        : "";
+
+    if (!accountId) {
+      return NextResponse.redirect(
+        new URL(
+          "/personalize?tmdb=error&reason=missing_numeric_account_id",
+          request.url,
+        ),
+      );
+    }
+
+    /*
+     * STEP 4
+     *
+     * Validate that this exact authenticated account
+     * can actually access its rated movies.
+     */
+    const validationResponse = await tmdbRequest(
+      `https://api.themoviedb.org/3/account/${accountId}/rated/movies?session_id=${encodeURIComponent(
+        sessionId,
+      )}&page=1&language=en-US&sort_by=created_at.desc`,
+      accessToken,
+    );
+
+    if (!validationResponse.ok) {
+      const validationData =
+        await parseResponse(validationResponse);
+
+      console.error(
+        "TMDB authenticated account validation failed:",
+        validationResponse.status,
+        validationData,
+      );
+
+      return NextResponse.redirect(
+        new URL(
+          `/personalize?tmdb=error&reason=account_validation_${validationResponse.status}`,
+          request.url,
+        ),
+      );
+    }
+
+    /*
+     * Everything is valid.
+     *
+     * Store:
+     * - v4 user token
+     * - v3 session ID
+     * - numeric account ID
+     * - username
+     * - display name
+     */
+    const response = NextResponse.redirect(
       new URL(
         "/personalize?tmdb=connected",
         request.url,
       ),
     );
 
-    result.cookies.set({
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax" as const,
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+    };
+
+    response.cookies.set({
+      ...cookieOptions,
       name: ACCESS_COOKIE,
       value: accessToken,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 365,
     });
 
-    result.cookies.set({
+    response.cookies.set({
+      ...cookieOptions,
+      name: SESSION_COOKIE,
+      value: sessionId,
+    });
+
+    response.cookies.set({
+      ...cookieOptions,
       name: ACCOUNT_COOKIE,
-      value: accountId,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 365,
+      value: String(accountId),
     });
 
-    result.cookies.delete(REQUEST_COOKIE);
+    response.cookies.set({
+      ...cookieOptions,
+      name: USERNAME_COOKIE,
+      value: username,
+    });
 
-    return result;
+    response.cookies.set({
+      ...cookieOptions,
+      name: NAME_COOKIE,
+      value: name,
+    });
+
+    response.cookies.delete(REQUEST_COOKIE);
+
+    return response;
   } catch (error) {
     console.error(
-      "TMDB callback crashed:",
+      "TMDB callback failed:",
       error,
     );
 
-    const result = NextResponse.redirect(
+    return NextResponse.redirect(
       new URL(
         "/personalize?tmdb=error&reason=callback_exception",
         request.url,
       ),
     );
-
-    result.cookies.delete(REQUEST_COOKIE);
-
-    return result;
   }
 }
