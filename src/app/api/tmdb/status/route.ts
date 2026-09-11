@@ -1,173 +1,99 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
-const TMDB_ACCESS_COOKIE =
-  "ryuflix_tmdb_access_token";
-
-const TMDB_ACCOUNT_COOKIE =
-  "ryuflix_tmdb_account_id";
+const ACCESS_COOKIE = "ryuflix_tmdb_access_token";
+const ACCOUNT_COOKIE = "ryuflix_tmdb_account_id";
 
 export async function GET() {
   try {
     const cookieStore = await cookies();
 
     const accessToken =
-      cookieStore.get(
-        TMDB_ACCESS_COOKIE,
-      )?.value;
+      cookieStore.get(ACCESS_COOKIE)?.value ?? null;
 
-    const accountObjectId =
-      cookieStore.get(
-        TMDB_ACCOUNT_COOKIE,
-      )?.value;
+    const accountId =
+      cookieStore.get(ACCOUNT_COOKIE)?.value ?? null;
 
-    if (!accessToken) {
+    if (!accessToken || !accountId) {
       return NextResponse.json({
         connected: false,
       });
     }
 
     /*
-     * The v4 OAuth flow gives us the account_object_id.
+     * Validate the actual user connection against
+     * the v4 account collection endpoint.
      *
-     * That ID is what the authenticated v4 account
-     * collection endpoints require.
-     *
-     * We deliberately do NOT call:
-     *
-     *   /3/account
-     *
-     * here because that endpoint expects the numeric
-     * v3 account_id in its path.
-     */
-
-    if (!accountObjectId) {
-      return NextResponse.json({
-        connected: false,
-        reason:
-          "TMDB access token exists but account_object_id is missing.",
-      });
-    }
-
-    /*
-     * Validate the actual authenticated token by
-     * requesting the user's rated movies collection.
-     *
-     * This is the same endpoint the importer uses.
+     * TMDB documents this endpoint as:
+     * /4/account/{account_object_id}/movie/rated
      */
     const response = await fetch(
       `https://api.themoviedb.org/4/account/${encodeURIComponent(
-        accountObjectId,
+        accountId,
       )}/movie/rated?page=1&language=en-US&sort_by=created_at.desc`,
       {
         headers: {
           Authorization:
             `Bearer ${accessToken}`,
-
-          Accept:
-            "application/json",
+          Accept: "application/json",
         },
-
         cache: "no-store",
       },
     );
 
-    const rawText =
-      await response.text();
-
     if (!response.ok) {
+      const raw = await response.text();
+
       console.error(
-        "TMDB status validation failed:",
+        "TMDB connection validation failed:",
         response.status,
-        rawText,
+        raw,
       );
 
-      const errorResponse =
-        NextResponse.json(
-          {
-            connected: false,
-
-            reason:
-              `TMDB validation failed (${response.status}).`,
-          },
-        );
-
-      errorResponse.cookies.delete(
-        TMDB_ACCESS_COOKIE,
-      );
-
-      errorResponse.cookies.delete(
-        TMDB_ACCOUNT_COOKIE,
-      );
-
-      return errorResponse;
-    }
-
-    let data: {
-      total_results?: number;
-      results?: unknown[];
-    } = {};
-
-    try {
-      data = rawText
-        ? JSON.parse(rawText)
-        : {};
-    } catch {
-      console.error(
-        "TMDB status returned invalid JSON:",
-        rawText,
-      );
-
-      return NextResponse.json({
+      const result = NextResponse.json({
         connected: false,
-
-        reason:
-          "TMDB returned invalid JSON.",
       });
+
+      result.cookies.delete(ACCESS_COOKIE);
+      result.cookies.delete(ACCOUNT_COOKIE);
+
+      return result;
     }
 
+    const data = await response.json();
+
+    /*
+     * Account details are optional here.
+     * The important part is that the authenticated
+     * user token + account object ID actually work.
+     */
     return NextResponse.json({
       connected: true,
 
       account: {
-        id:
-          null,
-
-        objectId:
-          accountObjectId,
-
-        username:
-          null,
-
-        name:
-          null,
+        id: accountId,
+        objectId: accountId,
+        username: null,
+        name: null,
       },
 
       validation: {
         ratedMovies:
-          data.total_results ??
-          data.results?.length ??
-          0,
+          typeof data.total_results === "number"
+            ? data.total_results
+            : Array.isArray(data.results)
+              ? data.results.length
+              : 0,
       },
     });
   } catch (error) {
     console.error(
-      "TMDB status error:",
+      "TMDB status route crashed:",
       error,
     );
 
-    return NextResponse.json(
-      {
-        connected: false,
-
-        reason:
-          error instanceof Error
-            ? error.message
-            : "TMDB status check failed.",
-      },
-      {
-        status: 500,
-      },
-    );
+    return NextResponse.json({
+      connected: false,
+    });
   }
 }
