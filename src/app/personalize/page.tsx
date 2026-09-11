@@ -13,8 +13,7 @@ import { SiLetterboxd } from "react-icons/si";
 
 import type { TasteProfile } from "@/utils/personalization/taste-engine";
 
-const TASTE_STORAGE_KEY =
-  "ryuflix_taste_profile";
+const TASTE_STORAGE_KEY = "ryuflix_taste_profile";
 
 type TMDBAccount = {
   id: number;
@@ -69,6 +68,66 @@ type StoredTasteProfile = {
   tasteProfile: TasteProfile;
 };
 
+const formatScore = (score: number) => {
+  if (Number.isInteger(score)) {
+    return String(score);
+  }
+
+  return score.toFixed(1);
+};
+
+const formatImportedDate = (date: string) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(date));
+  } catch {
+    return date;
+  }
+};
+
+const SignalPill = ({
+  name,
+  score,
+}: {
+  name: string;
+  score?: number;
+}) => {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-default-200 bg-default-50/60 px-4 py-3">
+      <span className="truncate text-sm font-medium">
+        {name}
+      </span>
+
+      {typeof score === "number" && (
+        <span
+          className={
+            score >= 0
+              ? "shrink-0 text-xs font-semibold text-primary"
+              : "shrink-0 text-xs font-semibold text-danger"
+          }
+        >
+          {score >= 0 ? "+" : ""}
+          {formatScore(score)}
+        </span>
+      )}
+    </div>
+  );
+};
+
+const EmptyState = ({
+  text,
+}: {
+  text: string;
+}) => {
+  return (
+    <div className="rounded-xl border border-dashed border-default-200 px-4 py-6 text-center text-sm text-default-500">
+      {text}
+    </div>
+  );
+};
+
 const PersonalizePage = () => {
   const fileInputRef =
     useRef<HTMLInputElement>(null);
@@ -104,7 +163,7 @@ const PersonalizePage = () => {
   /*
    * Load the locally stored taste profile.
    *
-   * RyuFlix does not use a user account
+   * RyuFlix does not use a RyuFlix account
    * for personalization.
    */
   useEffect(() => {
@@ -288,11 +347,6 @@ const PersonalizePage = () => {
       const result =
         data as TMDBImportResult;
 
-      /*
-       * Save the complete taste profile
-       * locally. Nothing is sent to or
-       * stored in a RyuFlix account.
-       */
       saveTasteProfile(
         result,
       );
@@ -367,21 +421,24 @@ const PersonalizePage = () => {
           </div>
         </section>
 
-        {/* Local profile status */}
+        {/* Saved profile status */}
         {savedProfile && (
           <section className="rounded-2xl border border-success/20 bg-success/5 p-5">
             <div className="flex items-start gap-3">
               <IoCheckmarkCircle className="mt-0.5 size-6 shrink-0 text-success" />
 
-              <div>
+              <div className="min-w-0">
                 <p className="font-semibold text-success">
                   Your RyuFlix taste is saved
                 </p>
 
                 <p className="mt-1 text-sm text-default-500">
-                  Your personalization profile
-                  is stored locally in this
-                  browser.
+                  Imported{" "}
+                  {formatImportedDate(
+                    savedProfile.importedAt,
+                  )}
+                  . Your personalization profile
+                  is stored locally in this browser.
                 </p>
               </div>
             </div>
@@ -525,8 +582,7 @@ const PersonalizePage = () => {
                   </div>
                 </div>
 
-                {selectedFiles.length >
-                  0 && (
+                {selectedFiles.length > 0 && (
                   <IoCheckmarkCircle className="size-5 text-success" />
                 )}
               </div>
@@ -538,11 +594,9 @@ const PersonalizePage = () => {
                 }
                 className="mt-6 h-11 w-full rounded-xl bg-foreground text-sm font-semibold text-background transition-opacity hover:opacity-90"
               >
-                {selectedFiles.length >
-                0
+                {selectedFiles.length > 0
                   ? `${selectedFiles.length} file${
-                      selectedFiles.length ===
-                      1
+                      selectedFiles.length === 1
                         ? ""
                         : "s"
                     } selected`
@@ -578,296 +632,421 @@ const PersonalizePage = () => {
           </section>
         )}
 
-        {/* Import results */}
-        {importResult && (
-          <section className="rounded-3xl border border-primary/20 bg-background/60 p-6 backdrop-blur-xl sm:p-8">
-            <div className="flex flex-col gap-6">
+        {/* Taste profile */}
+        {profile && (
+          <section className="flex flex-col gap-5">
+
+            {/* Header */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <p className="text-sm font-medium uppercase tracking-[0.2em] text-primary">
-                  Taste data found
+                <p className="text-sm font-medium uppercase tracking-[0.18em] text-primary">
+                  Your taste profile
                 </p>
 
-                <h2 className="mt-2 text-2xl font-semibold">
-                  Your RyuFlix profile is ready.
+                <h2 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+                  RyuFlix is starting to know you.
                 </h2>
 
-                <p className="mt-1 text-sm text-default-500">
-                  RyuFlix analyzed your TMDB
-                  activity and saved the resulting
-                  taste profile locally.
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-default-500">
+                  This profile is built from your
+                  imported TMDB activity. It will be
+                  used by the recommendation system
+                  in the next stage.
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {[
-                  [
-                    "Rated movies",
-                    importResult.totals
-                      .ratedMovies,
-                  ],
-                  [
-                    "Rated TV",
-                    importResult.totals
-                      .ratedTV,
-                  ],
-                  [
-                    "Movie favourites",
-                    importResult.totals
-                      .favoritesMovies,
-                  ],
-                  [
-                    "TV favourites",
-                    importResult.totals
-                      .favoritesTV,
-                  ],
-                  [
-                    "Movie watchlist",
-                    importResult.totals
-                      .watchlistMovies,
-                  ],
-                  [
-                    "TV watchlist",
-                    importResult.totals
-                      .watchlistTV,
-                  ],
-                ].map(
-                  ([label, value]) => (
-                    <div
-                      key={label}
-                      className="rounded-2xl border border-default-200 bg-default-50/40 p-4"
-                    >
-                      <p className="text-2xl font-bold">
-                        {value}
-                      </p>
+              <div className="shrink-0 rounded-2xl border border-primary/20 bg-primary/5 px-5 py-4">
+                <p className="text-xs font-medium text-default-500">
+                  Taste confidence
+                </p>
 
-                      <p className="mt-1 text-xs text-default-500">
-                        {label}
-                      </p>
-                    </div>
-                  ),
-                )}
+                <div className="mt-1 flex items-end gap-1">
+                  <span className="text-3xl font-bold text-primary">
+                    {profile.confidence}
+                  </span>
+
+                  <span className="pb-1 text-sm text-default-500">
+                    %
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick summary */}
+            <div className="grid gap-4 sm:grid-cols-3">
+
+              <div className="rounded-2xl border border-default-200 bg-background/60 p-5 backdrop-blur-xl">
+                <p className="text-xs font-medium uppercase tracking-wider text-default-500">
+                  You lean toward
+                </p>
+
+                <p className="mt-2 text-xl font-semibold">
+                  {profile.summary.strongestGenre ??
+                    "Still learning"}
+                </p>
+
+                <p className="mt-1 text-sm text-default-500">
+                  strongest genre signal
+                </p>
               </div>
 
-              {(importResult.samples
-                .ratedMovies.length >
-                0 ||
-                importResult.samples
-                  .ratedTV.length >
-                  0) && (
-                <div className="grid gap-6 md:grid-cols-2">
-                  {importResult.samples
-                    .ratedMovies.length >
-                    0 && (
-                    <div>
-                      <h3 className="mb-3 font-semibold">
-                        Recent movie ratings
-                      </h3>
+              <div className="rounded-2xl border border-default-200 bg-background/60 p-5 backdrop-blur-xl">
+                <p className="text-xs font-medium uppercase tracking-wider text-default-500">
+                  Preferred format
+                </p>
 
-                      <div className="flex flex-col gap-2">
-                        {importResult.samples.ratedMovies
-                          .slice(0, 5)
-                          .map((movie) => (
-                            <div
-                              key={movie.id}
-                              className="flex items-center justify-between gap-3 rounded-xl bg-default-100/60 px-4 py-3"
-                            >
-                              <span className="truncate text-sm">
-                                {movie.title}
-                              </span>
+                <p className="mt-2 text-xl font-semibold capitalize">
+                  {profile.summary.preferredMediaType ===
+                  "balanced"
+                    ? "Balanced"
+                    : profile.summary
+                        .preferredMediaType ===
+                        "tv"
+                      ? "TV"
+                      : "Movies"}
+                </p>
 
-                              <span className="shrink-0 rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
-                                {movie.userRating ??
-                                  "—"}
-                                /10
-                              </span>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                  )}
+                <p className="mt-1 text-sm text-default-500">
+                  based on your activity
+                </p>
+              </div>
 
-                  {importResult.samples
-                    .ratedTV.length >
-                    0 && (
-                    <div>
-                      <h3 className="mb-3 font-semibold">
-                        Recent TV ratings
-                      </h3>
+              <div className="rounded-2xl border border-default-200 bg-background/60 p-5 backdrop-blur-xl">
+                <p className="text-xs font-medium uppercase tracking-wider text-default-500">
+                  Favorite era
+                </p>
 
-                      <div className="flex flex-col gap-2">
-                        {importResult.samples.ratedTV
-                          .slice(0, 5)
-                          .map((show) => (
-                            <div
-                              key={show.id}
-                              className="flex items-center justify-between gap-3 rounded-xl bg-default-100/60 px-4 py-3"
-                            >
-                              <span className="truncate text-sm">
-                                {show.title}
-                              </span>
+                <p className="mt-2 text-xl font-semibold">
+                  {profile.summary.preferredEra ??
+                    "Still learning"}
+                </p>
 
-                              <span className="shrink-0 rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
-                                {show.userRating ??
-                                  "—"}
-                                /10
-                              </span>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
+                <p className="mt-1 text-sm text-default-500">
+                  strongest release-era signal
+                </p>
+              </div>
+            </div>
+
+            {/* Genres + keywords */}
+            <div className="grid gap-5 lg:grid-cols-2">
+
+              <div className="rounded-2xl border border-default-200 bg-background/60 p-5 backdrop-blur-xl">
+                <div className="mb-4">
+                  <h3 className="font-semibold">
+                    Genres you gravitate toward
+                  </h3>
+
+                  <p className="mt-1 text-sm text-default-500">
+                    The strongest positive genre
+                    signals from your activity.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  {profile.topGenres.length > 0 ? (
+                    profile.topGenres
+                      .slice(0, 8)
+                      .map((genre) => (
+                        <SignalPill
+                          key={genre.name}
+                          name={genre.name}
+                          score={genre.score}
+                        />
+                      ))
+                  ) : (
+                    <EmptyState text="Not enough genre data yet." />
                   )}
                 </div>
-              )}
+              </div>
+
+              <div className="rounded-2xl border border-default-200 bg-background/60 p-5 backdrop-blur-xl">
+                <div className="mb-4">
+                  <h3 className="font-semibold">
+                    Themes you keep coming back to
+                  </h3>
+
+                  <p className="mt-1 text-sm text-default-500">
+                    Keywords extracted from the
+                    strongest titles in your history.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  {profile.topKeywords.length > 0 ? (
+                    profile.topKeywords
+                      .slice(0, 8)
+                      .map((keyword) => (
+                        <SignalPill
+                          key={keyword.name}
+                          name={keyword.name}
+                          score={keyword.score}
+                        />
+                      ))
+                  ) : (
+                    <EmptyState text="Not enough keyword data yet." />
+                  )}
+                </div>
+              </div>
             </div>
-          </section>
-        )}
 
-        {/* Taste profile preview */}
-        {profile && (
-          <section className="rounded-3xl border border-default-200 bg-background/60 p-6 backdrop-blur-xl sm:p-8">
-            <div className="flex flex-col gap-6">
-              <div>
-                <p className="text-sm font-medium uppercase tracking-[0.2em] text-primary">
-                  RyuFlix taste engine
-                </p>
+            {/* Directors + actors */}
+            <div className="grid gap-5 lg:grid-cols-2">
 
-                <h2 className="mt-2 text-2xl font-semibold">
-                  We know what you tend to like.
-                </h2>
+              <div className="rounded-2xl border border-default-200 bg-background/60 p-5 backdrop-blur-xl">
+                <div className="mb-4">
+                  <h3 className="font-semibold">
+                    Directors you seem to like
+                  </h3>
+
+                  <p className="mt-1 text-sm text-default-500">
+                    RyuFlix will use these signals
+                    when ranking future recommendations.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  {profile.topDirectors.length > 0 ? (
+                    profile.topDirectors
+                      .slice(0, 8)
+                      .map((director) => (
+                        <SignalPill
+                          key={director.name}
+                          name={director.name}
+                          score={director.score}
+                        />
+                      ))
+                  ) : (
+                    <EmptyState text="Not enough director data yet." />
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-default-200 bg-background/60 p-5 backdrop-blur-xl">
+                <div className="mb-4">
+                  <h3 className="font-semibold">
+                    Actors you seem to like
+                  </h3>
+
+                  <p className="mt-1 text-sm text-default-500">
+                    Cast preferences will become
+                    another recommendation signal.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  {profile.topActors.length > 0 ? (
+                    profile.topActors
+                      .slice(0, 8)
+                      .map((actor) => (
+                        <SignalPill
+                          key={actor.name}
+                          name={actor.name}
+                          score={actor.score}
+                        />
+                      ))
+                  ) : (
+                    <EmptyState text="Not enough actor data yet." />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* More profile information */}
+            <div className="rounded-2xl border border-default-200 bg-background/60 p-5 backdrop-blur-xl">
+              <div className="mb-4">
+                <h3 className="font-semibold">
+                  More about your taste
+                </h3>
 
                 <p className="mt-1 text-sm text-default-500">
-                  This profile will power the
-                  recommendation system in the
-                  next stage.
+                  Additional signals RyuFlix has
+                  extracted for future recommendation
+                  ranking.
                 </p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-2xl bg-default-100/60 p-4">
+
+                <div className="rounded-xl bg-default-100/60 p-4">
                   <p className="text-xs text-default-500">
-                    Strongest genre
+                    Languages
                   </p>
 
-                  <p className="mt-2 font-semibold">
-                    {profile.summary
-                      .strongestGenre ??
-                      "Not enough data"}
+                  <p className="mt-1 font-semibold">
+                    {Object.keys(
+                      profile.preferences
+                        .languages,
+                    ).length || "None yet"}
                   </p>
                 </div>
 
-                <div className="rounded-2xl bg-default-100/60 p-4">
+                <div className="rounded-xl bg-default-100/60 p-4">
                   <p className="text-xs text-default-500">
-                    Strongest theme
+                    Countries
                   </p>
 
-                  <p className="mt-2 font-semibold">
-                    {profile.summary
-                      .strongestKeyword ??
-                      "Not enough data"}
+                  <p className="mt-1 font-semibold">
+                    {Object.keys(
+                      profile.preferences
+                        .countries,
+                    ).length || "None yet"}
                   </p>
                 </div>
 
-                <div className="rounded-2xl bg-default-100/60 p-4">
+                <div className="rounded-xl bg-default-100/60 p-4">
                   <p className="text-xs text-default-500">
-                    Preferred format
+                    Rated titles
                   </p>
 
-                  <p className="mt-2 font-semibold capitalize">
-                    {profile.summary
-                      .preferredMediaType}
+                  <p className="mt-1 font-semibold">
+                    {profile.analyzed.ratedMovies +
+                      profile.analyzed.ratedTV}
                   </p>
                 </div>
 
-                <div className="rounded-2xl bg-default-100/60 p-4">
+                <div className="rounded-xl bg-default-100/60 p-4">
                   <p className="text-xs text-default-500">
-                    Profile confidence
+                    Deeply analyzed
                   </p>
 
-                  <p className="mt-2 font-semibold">
-                    {profile.confidence}%
+                  <p className="mt-1 font-semibold">
+                    {profile.analyzed.enrichedItems}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Source breakdown */}
+            <div className="rounded-2xl border border-default-200 bg-background/60 p-5 backdrop-blur-xl">
+              <div className="mb-4 flex items-center gap-3">
+                <IoCloudUploadOutline className="size-5 text-primary" />
+
+                <div>
+                  <h3 className="font-semibold">
+                    What RyuFlix analyzed
+                  </h3>
+
+                  <p className="text-sm text-default-500">
+                    Your profile was generated from
+                    the following TMDB activity.
                   </p>
                 </div>
               </div>
 
-              {profile.topGenres.length >
-                0 && (
-                <div>
-                  <h3 className="mb-3 font-semibold">
-                    Your strongest genres
-                  </h3>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 
-                  <div className="flex flex-wrap gap-2">
-                    {profile.topGenres
-                      .slice(0, 8)
-                      .map((genre) => (
-                        <span
-                          key={genre.name}
-                          className="rounded-full bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary"
-                        >
-                          {genre.name}
-                        </span>
-                      ))}
-                  </div>
+                <div className="rounded-xl border border-default-200 p-4">
+                  <p className="text-xs text-default-500">
+                    Rated movies
+                  </p>
+
+                  <p className="mt-1 text-2xl font-semibold">
+                    {profile.analyzed.ratedMovies}
+                  </p>
                 </div>
-              )}
 
-              {profile.topDirectors.length >
-                0 && (
-                <div>
-                  <h3 className="mb-3 font-semibold">
-                    Directors you tend to like
-                  </h3>
+                <div className="rounded-xl border border-default-200 p-4">
+                  <p className="text-xs text-default-500">
+                    Rated TV
+                  </p>
 
-                  <div className="flex flex-wrap gap-2">
-                    {profile.topDirectors
-                      .slice(0, 6)
-                      .map((director) => (
-                        <span
-                          key={director.name}
-                          className="rounded-full bg-default-100 px-3 py-1.5 text-sm text-default-700"
-                        >
-                          {director.name}
-                        </span>
-                      ))}
-                  </div>
+                  <p className="mt-1 text-2xl font-semibold">
+                    {profile.analyzed.ratedTV}
+                  </p>
                 </div>
-              )}
+
+                <div className="rounded-xl border border-default-200 p-4">
+                  <p className="text-xs text-default-500">
+                    Favorite movies
+                  </p>
+
+                  <p className="mt-1 text-2xl font-semibold">
+                    {profile.analyzed.favoritesMovies}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-default-200 p-4">
+                  <p className="text-xs text-default-500">
+                    Favorite TV
+                  </p>
+
+                  <p className="mt-1 text-2xl font-semibold">
+                    {profile.analyzed.favoritesTV}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-default-200 p-4">
+                  <p className="text-xs text-default-500">
+                    Movie watchlist
+                  </p>
+
+                  <p className="mt-1 text-2xl font-semibold">
+                    {profile.analyzed.watchlistMovies}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-default-200 p-4">
+                  <p className="text-xs text-default-500">
+                    TV watchlist
+                  </p>
+
+                  <p className="mt-1 text-2xl font-semibold">
+                    {profile.analyzed.watchlistTV}
+                  </p>
+                </div>
+              </div>
             </div>
+
+            {/* Local storage / reset */}
+            <section className="rounded-2xl border border-default-200 bg-background/50 p-5">
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <IoLockClosedOutline className="mt-0.5 size-5 shrink-0 text-default-500" />
+
+                  <div>
+                    <p className="font-medium">
+                      Your taste profile stays on this browser
+                    </p>
+
+                    <p className="mt-1 text-sm leading-6 text-default-500">
+                      RyuFlix stores this personalization
+                      profile in localStorage. It is not
+                      tied to a RyuFlix login.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={clearLocalTaste}
+                  className="h-10 shrink-0 rounded-xl bg-default-100 px-4 text-sm font-semibold text-default-700 transition-colors hover:bg-danger/10 hover:text-danger"
+                >
+                  Clear taste profile
+                </button>
+              </div>
+            </section>
           </section>
         )}
 
-        {/* Privacy */}
-        <section className="rounded-2xl border border-default-200 bg-background/50 p-5">
-          <div className="flex items-start gap-3">
-            <IoLockClosedOutline className="mt-0.5 size-5 shrink-0 text-default-500" />
-
-            <div className="flex-1">
-              <p className="font-medium">
-                Your RyuFlix taste stays in this
-                browser.
-              </p>
-
-              <p className="mt-1 text-sm leading-6 text-default-500">
-                The generated personalization
-                profile is stored in localStorage.
-                RyuFlix does not need a separate
-                account for this.
-              </p>
+        {/* No profile yet */}
+        {!profile && !importing && (
+          <section className="rounded-3xl border border-default-200 bg-background/50 p-8 text-center backdrop-blur-xl sm:p-12">
+            <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <IoSparkles className="size-8" />
             </div>
-          </div>
 
-          {savedProfile && (
-            <button
-              type="button"
-              onClick={clearLocalTaste}
-              className="mt-4 flex items-center gap-2 rounded-xl bg-default-100 px-4 py-2.5 text-sm font-medium text-default-700 transition-colors hover:bg-danger/10 hover:text-danger"
-            >
-              <IoCloudUploadOutline className="size-4 rotate-180" />
-              Clear local taste profile
-            </button>
-          )}
-        </section>
+            <h2 className="mt-5 text-2xl font-semibold">
+              Your taste profile is waiting.
+            </h2>
 
+            <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-default-500">
+              Connect TMDB and import your activity.
+              RyuFlix will analyze your ratings,
+              favorites, watchlists and deeper movie
+              metadata.
+            </p>
+          </section>
+        )}
       </div>
     </div>
   );
