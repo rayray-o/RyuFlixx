@@ -3,8 +3,15 @@ import { cookies } from "next/headers";
 
 import {
   buildTasteProfile,
+} from "@/utils/personalization/taste-engine";
+
+import type {
   TasteProfile,
 } from "@/utils/personalization/taste-engine";
+
+import {
+  createClient,
+} from "@/utils/supabase/server";
 
 const TMDB_COOKIE =
   "ryuflix_tmdb_access_token";
@@ -145,6 +152,7 @@ async function enrichItem(
 
     return {
       ...data,
+
       mediaType:
         item.mediaType,
 
@@ -186,33 +194,39 @@ function dedupeItems(
       map.get(key);
 
     if (!existing) {
-      map.set(key, {
-        ...item,
-      });
+      map.set(
+        key,
+        {
+          ...item,
+        },
+      );
 
       continue;
     }
 
-    map.set(key, {
-      ...existing,
+    map.set(
+      key,
+      {
+        ...existing,
 
-      userRating:
-        item.userRating ??
-        existing.userRating ??
-        null,
+        userRating:
+          item.userRating ??
+          existing.userRating ??
+          null,
 
-      favorite:
-        Boolean(
-          existing.favorite ||
-            item.favorite,
-        ),
+        favorite:
+          Boolean(
+            existing.favorite ||
+              item.favorite,
+          ),
 
-      watchlist:
-        Boolean(
-          existing.watchlist ||
-            item.watchlist,
-        ),
-    });
+        watchlist:
+          Boolean(
+            existing.watchlist ||
+              item.watchlist,
+          ),
+      },
+    );
   }
 
   return Array.from(
@@ -222,6 +236,42 @@ function dedupeItems(
 
 export async function POST() {
   try {
+    /*
+     * RyuFlix authentication.
+     *
+     * The taste profile belongs to
+     * the RyuFlix account, not merely
+     * the TMDB account.
+     */
+    const supabase =
+      await createClient();
+
+    const {
+      data: {
+        user,
+      },
+      error: userError,
+    } =
+      await supabase.auth.getUser();
+
+    if (
+      userError ||
+      !user
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "You must be signed in to RyuFlix.",
+        },
+        {
+          status: 401,
+        },
+      );
+    }
+
+    /*
+     * TMDB authentication.
+     */
     const cookieStore =
       await cookies();
 
@@ -236,7 +286,9 @@ export async function POST() {
           error:
             "TMDB is not connected.",
         },
-        { status: 401 },
+        {
+          status: 401,
+        },
       );
     }
 
@@ -254,7 +306,7 @@ export async function POST() {
       account.id;
 
     /*
-     * Pull the user's actual TMDB
+     * Pull the user's TMDB
      * collections.
      */
     const [
@@ -296,12 +348,15 @@ export async function POST() {
       ),
     ]);
 
-    const ratedMovieItems: TasteItem[] =
+    const ratedMovieItems:
+      TasteItem[] =
       ratedMovies.results.map(
         (movie) => ({
           ...movie,
+
           mediaType:
             "movie",
+
           userRating:
             (
               movie as TMDBItem & {
@@ -312,12 +367,15 @@ export async function POST() {
         }),
       );
 
-    const ratedTVItems: TasteItem[] =
+    const ratedTVItems:
+      TasteItem[] =
       ratedTV.results.map(
         (show) => ({
           ...show,
+
           mediaType:
             "tv",
+
           userRating:
             (
               show as TMDBItem & {
@@ -333,9 +391,12 @@ export async function POST() {
       favoriteMovies.results.map(
         (movie) => ({
           ...movie,
+
           mediaType:
             "movie",
-          favorite: true,
+
+          favorite:
+            true,
         }),
       );
 
@@ -344,9 +405,12 @@ export async function POST() {
       favoriteTV.results.map(
         (show) => ({
           ...show,
+
           mediaType:
             "tv",
-          favorite: true,
+
+          favorite:
+            true,
         }),
       );
 
@@ -355,9 +419,12 @@ export async function POST() {
       movieWatchlist.results.map(
         (movie) => ({
           ...movie,
+
           mediaType:
             "movie",
-          watchlist: true,
+
+          watchlist:
+            true,
         }),
       );
 
@@ -366,17 +433,19 @@ export async function POST() {
       tvWatchlist.results.map(
         (show) => ({
           ...show,
+
           mediaType:
             "tv",
-          watchlist: true,
+
+          watchlist:
+            true,
         }),
       );
 
     /*
-     * Combine everything so repeated
-     * appearances of the same title
-     * become one item with multiple
-     * signals.
+     * Merge duplicate titles so a movie
+     * can simultaneously have a rating,
+     * favourite flag and watchlist flag.
      */
     const allItems =
       dedupeItems([
@@ -389,40 +458,40 @@ export async function POST() {
       ]);
 
     /*
-     * Deep enrichment is deliberately
-     * limited to the strongest signals.
-     *
-     * This prevents a huge account from
-     * causing hundreds of TMDB detail
-     * requests during one refresh.
+     * Only deeply enrich the strongest
+     * signals to keep refreshes reasonable.
      */
     const strongestItems =
       [...allItems]
         .sort((a, b) => {
-          const score = (
-            item: TasteItem,
-          ) => {
-            let value = 0;
+          const score =
+            (item: TasteItem) => {
+              let value = 0;
 
-            if (
-              item.userRating != null
-            ) {
-              value += Math.abs(
-                item.userRating -
-                  5,
-              );
-            }
+              if (
+                item.userRating != null
+              ) {
+                value +=
+                  Math.abs(
+                    item.userRating -
+                      5,
+                  );
+              }
 
-            if (item.favorite) {
-              value += 5;
-            }
+              if (
+                item.favorite
+              ) {
+                value += 5;
+              }
 
-            if (item.watchlist) {
-              value += 1;
-            }
+              if (
+                item.watchlist
+              ) {
+                value += 1;
+              }
 
-            return value;
-          };
+              return value;
+            };
 
           return (
             score(b) -
@@ -431,21 +500,19 @@ export async function POST() {
         })
         .slice(0, 30);
 
-    /*
-     * Run a small number of enrichment
-     * requests concurrently.
-     */
     const enrichedResults:
       (
         | EnrichedItem
         | null
       )[] = [];
 
-    const batchSize = 5;
+    const batchSize =
+      5;
 
     for (
       let i = 0;
-      i < strongestItems.length;
+      i <
+        strongestItems.length;
       i += batchSize
     ) {
       const batch =
@@ -456,11 +523,12 @@ export async function POST() {
 
       const results =
         await Promise.all(
-          batch.map((item) =>
-            enrichItem(
-              item,
-              accessToken,
-            ),
+          batch.map(
+            (item) =>
+              enrichItem(
+                item,
+                accessToken,
+              ),
           ),
         );
 
@@ -478,7 +546,8 @@ export async function POST() {
       );
 
     /*
-     * Build the actual taste profile.
+     * Generate the RyuFlix taste
+     * profile.
      */
     const tasteProfile:
       TasteProfile =
@@ -504,70 +573,165 @@ export async function POST() {
         enrichedItems,
       });
 
+    /*
+     * SAVE IT.
+     *
+     * This is the actual 3A.2 step.
+     *
+     * We deliberately store the derived
+     * profile and lightweight source
+     * information — never the TMDB
+     * access token.
+     */
+    const {
+      error: saveError,
+    } =
+      await supabase
+        .from(
+          "taste_profiles",
+        )
+        .upsert(
+          {
+            user_id:
+              user.id,
+
+            profile:
+              tasteProfile,
+
+            source_data: {
+              provider:
+                "tmdb",
+
+              tmdbAccountId:
+                accountId,
+
+              importedAt:
+                new Date().toISOString(),
+
+              ratedMovies:
+                ratedMovies.totalResults,
+
+              ratedTV:
+                ratedTV.totalResults,
+
+              favoritesMovies:
+                favoriteMovies.totalResults,
+
+              favoritesTV:
+                favoriteTV.totalResults,
+
+              watchlistMovies:
+                movieWatchlist.totalResults,
+
+              watchlistTV:
+                tvWatchlist.totalResults,
+
+              enrichedItems:
+                enrichedItems.length,
+            },
+
+            version:
+              tasteProfile.version,
+          },
+          {
+            onConflict:
+              "user_id",
+          },
+        );
+
+    if (saveError) {
+      console.error(
+        "Failed to save taste profile:",
+        saveError,
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Taste profile was generated but could not be saved.",
+        },
+        {
+          status: 500,
+        },
+      );
+    }
+
+    /*
+     * Keep the existing useful response
+     * data so the current Personalize
+     * page continues working.
+     */
     const ratedMovieSamples =
       ratedMovies.results
         .slice(0, 10)
-        .map((movie) => ({
-          id: movie.id,
+        .map(
+          (movie) => ({
+            id:
+              movie.id,
 
-          title:
-            movie.title ??
-            null,
+            title:
+              movie.title ??
+              null,
 
-          rating:
-            typeof movie.vote_average ===
-            "number"
-              ? movie.vote_average
-              : null,
+            rating:
+              typeof movie.vote_average ===
+              "number"
+                ? movie.vote_average
+                : null,
 
-          userRating:
-            (
-              movie as TMDBItem & {
-                rating?: number;
-              }
-            ).rating ??
-            null,
+            userRating:
+              (
+                movie as TMDBItem & {
+                  rating?: number;
+                }
+              ).rating ??
+              null,
 
-          releaseDate:
-            movie.release_date ??
-            null,
-        }));
+            releaseDate:
+              movie.release_date ??
+              null,
+          }),
+        );
 
     const ratedTVSamples =
       ratedTV.results
         .slice(0, 10)
-        .map((show) => ({
-          id: show.id,
+        .map(
+          (show) => ({
+            id:
+              show.id,
 
-          title:
-            show.name ??
-            null,
+            title:
+              show.name ??
+              null,
 
-          rating:
-            typeof show.vote_average ===
-            "number"
-              ? show.vote_average
-              : null,
+            rating:
+              typeof show.vote_average ===
+              "number"
+                ? show.vote_average
+                : null,
 
-          userRating:
-            (
-              show as TMDBItem & {
-                rating?: number;
-              }
-            ).rating ??
-            null,
+            userRating:
+              (
+                show as TMDBItem & {
+                  rating?: number;
+                }
+              ).rating ??
+              null,
 
-          releaseDate:
-            show.first_air_date ??
-            null,
-        }));
+            releaseDate:
+              show.first_air_date ??
+              null,
+          }),
+        );
 
     return NextResponse.json({
       importedAt:
         new Date().toISOString(),
 
       account: {
-        id: account.id,
+        id:
+          account.id,
 
         username:
           account.username ??
@@ -606,11 +770,6 @@ export async function POST() {
           ratedTVSamples,
       },
 
-      /*
-       * NEW:
-       * This is what Stage 3A.1
-       * actually produces.
-       */
       tasteProfile,
     });
   } catch (error) {
@@ -626,7 +785,9 @@ export async function POST() {
             ? error.message
             : "Failed to import TMDB data.",
       },
-      { status: 502 },
+      {
+        status: 502,
+      },
     );
   }
-              }
+  }
