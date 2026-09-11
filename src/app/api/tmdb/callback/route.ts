@@ -2,101 +2,58 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { env } from "@/utils/env";
 
-const TMDB_REQUEST_COOKIE =
-  "ryuflix_tmdb_request_token";
+const TMDB_REQUEST_COOKIE = "ryuflix_tmdb_request_token";
 
-const TMDB_ACCESS_COOKIE =
-  "ryuflix_tmdb_access_token";
-
-const TMDB_ACCOUNT_COOKIE =
-  "ryuflix_tmdb_account_id";
-
-export async function GET(
-  request: Request,
-) {
+export async function GET(request: Request) {
   try {
-    const url =
-      new URL(request.url);
+    const url = new URL(request.url);
+    const cookieStore = await cookies();
 
-    const cookieStore =
-      await cookies();
-
-    /*
-     * TMDB may return the request token through
-     * the callback URL. Otherwise use the temporary
-     * token that RyuFlix stored before redirecting.
-     */
     const callbackRequestToken =
-      url.searchParams.get(
-        "request_token",
-      ) ??
-      url.searchParams.get(
-        "requestToken",
-      ) ??
-      url.searchParams.get(
-        "token",
-      );
+      url.searchParams.get("request_token") ??
+      url.searchParams.get("requestToken") ??
+      url.searchParams.get("token");
 
     const storedRequestToken =
-      cookieStore.get(
-        TMDB_REQUEST_COOKIE,
-      )?.value;
+      cookieStore.get(TMDB_REQUEST_COOKIE)?.value;
 
     const requestToken =
-      callbackRequestToken ??
-      storedRequestToken;
+      callbackRequestToken ?? storedRequestToken;
 
     if (!requestToken) {
       console.error(
-        "TMDB callback: no request token.",
+        "TMDB DIAGNOSTIC: no request token.",
         url.search,
       );
 
       return NextResponse.redirect(
         new URL(
-          "/personalize?tmdb=error",
+          "/personalize?tmdb=error&reason=no_request_token",
           request.url,
         ),
       );
     }
 
-    /*
-     * Exchange the approved request token
-     * for the user's v4 access token.
-     */
-    const response =
-      await fetch(
-        "https://api.themoviedb.org/4/auth/access_token",
-        {
-          method: "POST",
-
-          headers: {
-            Authorization:
-              `Bearer ${env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN}`,
-
-            "Content-Type":
-              "application/json",
-
-            Accept:
-              "application/json",
-          },
-
-          body: JSON.stringify({
-            request_token:
-              requestToken,
-          }),
-
-          cache: "no-store",
+    const response = await fetch(
+      "https://api.themoviedb.org/4/auth/access_token",
+      {
+        method: "POST",
+        headers: {
+          Authorization:
+            `Bearer ${env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
         },
-      );
+        body: JSON.stringify({
+          request_token: requestToken,
+        }),
+        cache: "no-store",
+      },
+    );
 
-    const rawText =
-      await response.text();
+    const rawText = await response.text();
 
-    let data: Record<
-      string,
-      unknown
-    > = {};
+    let data: Record<string, unknown> = {};
 
     try {
       data = rawText
@@ -104,10 +61,141 @@ export async function GET(
         : {};
     } catch {
       console.error(
-        "TMDB callback returned invalid JSON:",
+        "TMDB DIAGNOSTIC: invalid JSON:",
         rawText,
       );
     }
+
+    /*
+     * IMPORTANT:
+     *
+     * Never log the actual access token.
+     * We only log the names/types of fields
+     * TMDB returned.
+     */
+    const safeDiagnostic = Object.fromEntries(
+      Object.entries(data).map(
+        ([key, value]) => {
+          if (
+            key.toLowerCase().includes("token")
+          ) {
+            return [
+              key,
+              "[REDACTED]",
+            ];
+          }
+
+          if (
+            typeof value === "string"
+          ) {
+            return [
+              key,
+              {
+                type: "string",
+                length: value.length,
+                preview:
+                  value.length > 80
+                    ? `${value.slice(0, 80)}...`
+                    : value,
+              },
+            ];
+          }
+
+          if (
+            typeof value === "number"
+          ) {
+            return [
+              key,
+              {
+                type: "number",
+                value,
+              },
+            ];
+          }
+
+          if (
+            typeof value === "boolean"
+          ) {
+            return [
+              key,
+              {
+                type: "boolean",
+                value,
+              },
+            ];
+          }
+
+          if (
+            value === null
+          ) {
+            return [
+              key,
+              {
+                type: "null",
+              },
+            ];
+          }
+
+          if (
+            Array.isArray(value)
+          ) {
+            return [
+              key,
+              {
+                type: "array",
+                length: value.length,
+              },
+            ];
+          }
+
+          if (
+            typeof value === "object"
+          ) {
+            return [
+              key,
+              {
+                type: "object",
+                keys: Object.keys(
+                  value as Record<
+                    string,
+                    unknown
+                  >,
+                ),
+              },
+            ];
+          }
+
+          return [
+            key,
+            {
+              type: typeof value,
+            },
+          ];
+        },
+      ),
+    );
+
+    console.log(
+      "================ TMDB AUTH DIAGNOSTIC ================",
+    );
+
+    console.log(
+      "HTTP STATUS:",
+      response.status,
+    );
+
+    console.log(
+      "RETURNED FIELDS:",
+      JSON.stringify(
+        safeDiagnostic,
+        null,
+        2,
+      ),
+    );
+
+    console.log(
+      "=======================================================",
+    );
 
     if (!response.ok) {
       console.error(
@@ -119,34 +207,7 @@ export async function GET(
       const errorResponse =
         NextResponse.redirect(
           new URL(
-            "/personalize?tmdb=error",
-            request.url,
-          ),
-        );
-
-      errorResponse.cookies.delete(
-        TMDB_REQUEST_COOKIE,
-      );
-
-      return errorResponse;
-    }
-
-    const accessToken =
-      typeof data.access_token ===
-      "string"
-        ? data.access_token
-        : null;
-
-    if (!accessToken) {
-      console.error(
-        "TMDB access token missing:",
-        data,
-      );
-
-      const errorResponse =
-        NextResponse.redirect(
-          new URL(
-            "/personalize?tmdb=error",
+            "/personalize?tmdb=error&reason=access_token_exchange",
             request.url,
           ),
         );
@@ -159,218 +220,35 @@ export async function GET(
     }
 
     /*
-     * TMDB's v4 auth response normally contains
-     * account_object_id.
+     * Diagnostic mode deliberately DOES NOT
+     * save the access token or account ID.
      *
-     * Keep the fallback fields because TMDB has
-     * returned slightly different response shapes
-     * across versions of the authentication flow.
+     * This prevents another potentially wrong
+     * account identifier from being persisted.
      */
-    const accountObjectId =
-      typeof data.account_object_id ===
-      "string"
-        ? data.account_object_id
-        : typeof data.account_id ===
-            "string"
-          ? data.account_id
-          : typeof data.account_id ===
-              "number"
-            ? String(
-                data.account_id,
-              )
-            : null;
-
-    if (!accountObjectId) {
-      console.error(
-        "TMDB callback: account object ID missing.",
-        data,
-      );
-
-      const errorResponse =
-        NextResponse.redirect(
-          new URL(
-            "/personalize?tmdb=error",
-            request.url,
-          ),
-        );
-
-      errorResponse.cookies.delete(
-        TMDB_REQUEST_COOKIE,
-      );
-
-      return errorResponse;
-    }
-
-    /*
-     * CRITICAL VALIDATION
-     *
-     * Before saving the account object ID,
-     * make the exact request that Stage 3 will
-     * later use.
-     */
-    const validationResponse =
-      await fetch(
-        `https://api.themoviedb.org/4/account/${encodeURIComponent(
-          accountObjectId,
-        )}/movie/rated?page=1&language=en-US&sort_by=created_at.desc`,
-        {
-          headers: {
-            Authorization:
-              `Bearer ${accessToken}`,
-
-            Accept:
-              "application/json",
-          },
-
-          cache: "no-store",
-        },
-      );
-
-    const validationText =
-      await validationResponse.text();
-
-    if (!validationResponse.ok) {
-      console.error(
-        "TMDB account object validation failed:",
-        {
-          status:
-            validationResponse.status,
-
-          accountObjectId,
-
-          response:
-            validationText.slice(
-              0,
-              1000,
-            ),
-        },
-      );
-
-      const errorResponse =
-        NextResponse.redirect(
-          new URL(
-            "/personalize?tmdb=error",
-            request.url,
-          ),
-        );
-
-      errorResponse.cookies.delete(
-        TMDB_REQUEST_COOKIE,
-      );
-
-      return errorResponse;
-    }
-
-    let validationData: {
-      total_results?: number;
-      results?: unknown[];
-    } = {};
-
-    try {
-      validationData =
-        validationText
-          ? JSON.parse(
-              validationText,
-            )
-          : {};
-    } catch {
-      console.error(
-        "TMDB account validation returned invalid JSON.",
-      );
-    }
-
-    console.log(
-      "TMDB account successfully validated:",
-      {
-        accountObjectId,
-
-        ratedMovies:
-          validationData.total_results ??
-          validationData.results?.length ??
-          0,
-      },
-    );
-
-    /*
-     * Everything has now been validated.
-     *
-     * Store the real user token and the exact
-     * account_object_id that successfully worked.
-     */
-    const redirectUrl =
-      new URL(
-        "/personalize?tmdb=connected",
-        request.url,
-      );
-
-    const nextResponse =
+    const diagnosticResponse =
       NextResponse.redirect(
-        redirectUrl,
+        new URL(
+          "/personalize?tmdb=diagnostic",
+          request.url,
+        ),
       );
 
-    nextResponse.cookies.set({
-      name:
-        TMDB_ACCESS_COOKIE,
-
-      value:
-        accessToken,
-
-      httpOnly:
-        true,
-
-      secure:
-        process.env.NODE_ENV ===
-        "production",
-
-      sameSite:
-        "lax",
-
-      path:
-        "/",
-
-      maxAge:
-        60 * 60 * 24 * 365,
-    });
-
-    nextResponse.cookies.set({
-      name:
-        TMDB_ACCOUNT_COOKIE,
-
-      value:
-        accountObjectId,
-
-      httpOnly:
-        true,
-
-      secure:
-        process.env.NODE_ENV ===
-        "production",
-
-      sameSite:
-        "lax",
-
-      path:
-        "/",
-
-      maxAge:
-        60 * 60 * 24 * 365,
-    });
-
-    nextResponse.cookies.delete(
+    diagnosticResponse.cookies.delete(
       TMDB_REQUEST_COOKIE,
     );
 
-    return nextResponse;
+    return diagnosticResponse;
   } catch (error) {
     console.error(
-      "TMDB callback error:",
+      "TMDB diagnostic callback error:",
       error,
     );
 
     const errorResponse =
       NextResponse.redirect(
         new URL(
-          "/personalize?tmdb=error",
+          "/personalize?tmdb=error&reason=callback_exception",
           request.url,
         ),
       );
