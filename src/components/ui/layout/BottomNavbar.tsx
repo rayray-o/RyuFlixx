@@ -19,6 +19,10 @@ const BottomNavbar = () => {
     return null;
   }
 
+  const bottomNavItems = siteConfig.navItems.filter(
+    (item) => item.href !== "/personalize",
+  );
+
   return (
     <>
       {/* Reserve space so page content isn't hidden behind the navbar. */}
@@ -39,7 +43,7 @@ const BottomNavbar = () => {
         }}
       >
         <div className="mx-auto grid h-full max-w-lg grid-cols-5">
-          {siteConfig.navItems.map((item) => {
+          {bottomNavItems.map((item) => {
             const isActive =
               pathName === item.href;
 
