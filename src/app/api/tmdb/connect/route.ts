@@ -2,121 +2,62 @@ import { NextResponse } from "next/server";
 import { env } from "@/utils/env";
 
 const REQUEST_COOKIE = "ryuflix_tmdb_request_token";
-const ACCESS_COOKIE = "ryuflix_tmdb_access_token";
-const SESSION_COOKIE = "ryuflix_tmdb_session_id";
-const ACCOUNT_COOKIE = "ryuflix_tmdb_account_id";
-const USERNAME_COOKIE = "ryuflix_tmdb_username";
-const NAME_COOKIE = "ryuflix_tmdb_name";
 
-function errorMessage(value: unknown) {
-  if (typeof value === "string" && value.trim()) {
-    return value.trim();
-  }
-
-  if (value && typeof value === "object") {
-    const object = value as Record<string, unknown>;
-
-    for (const candidate of [
-      object.status_message,
-      object.message,
-      object.error,
-      object.status,
-    ]) {
-      if (typeof candidate === "string" && candidate.trim()) {
-        return candidate.trim();
-      }
-    }
-  }
-
-  return "TMDB authorization failed.";
-}
+const OLD_COOKIES = [
+  "ryuflix_tmdb_access_token",
+  "ryuflix_tmdb_session_id",
+  "ryuflix_tmdb_account_id",
+  "ryuflix_tmdb_account_object_id",
+  "ryuflix_tmdb_username",
+  "ryuflix_tmdb_name",
+];
 
 export async function GET() {
   try {
-    const apiToken = env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN;
+    const applicationToken = env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN;
     const redirectUri = env.TMDB_PERSONALIZATION_REDIRECT_URI;
 
-    if (!apiToken) {
-      return NextResponse.json(
-        {
-          error:
-            "TMDB API access token is missing on the server.",
-        },
-        { status: 500 },
-      );
+    if (!applicationToken) {
+      return NextResponse.json({ error: "TMDB application access token is missing." }, { status: 500 });
     }
 
     if (!redirectUri) {
-      return NextResponse.json(
-        {
-          error:
-            "TMDB personalization redirect URI is missing.",
-        },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: "TMDB personalization redirect URI is missing." }, { status: 500 });
     }
 
-    const response = await fetch(
-      "https://api.themoviedb.org/4/auth/request_token",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({
-          redirect_to: redirectUri,
-        }),
-        cache: "no-store",
+    const response = await fetch("https://api.themoviedb.org/4/auth/request_token", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${applicationToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
       },
-    );
+      body: JSON.stringify({ redirect_to: redirectUri }),
+      cache: "no-store",
+    });
 
-    const raw = await response.text();
-
-    let data: Record<string, unknown> = {};
-
-    try {
-      data = raw ? JSON.parse(raw) : {};
-    } catch {
-      // handled below
-    }
+    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
     if (!response.ok) {
       return NextResponse.json(
-        {
-          error: `TMDB authorization failed: ${errorMessage(data)}`,
-        },
+        { error: typeof data.status_message === "string" ? data.status_message : "TMDB authorization failed." },
         { status: 502 },
       );
     }
 
-    const requestToken = data.request_token;
+    const requestToken = typeof data.request_token === "string" ? data.request_token : null;
 
-    if (typeof requestToken !== "string" || !requestToken) {
-      return NextResponse.json(
-        {
-          error:
-            "TMDB did not return an authorization request token.",
-        },
-        { status: 502 },
-      );
+    if (!requestToken) {
+      return NextResponse.json({ error: "TMDB did not return a request token." }, { status: 502 });
     }
 
-    const responseRedirect = NextResponse.redirect(
-      `https://www.themoviedb.org/auth/access?request_token=${encodeURIComponent(
-        requestToken,
-      )}`,
+    const redirect = NextResponse.redirect(
+      `https://www.themoviedb.org/auth/access?request_token=${encodeURIComponent(requestToken)}`,
     );
 
-    // Clear every previous connection before starting a fresh one.
-    responseRedirect.cookies.delete(ACCESS_COOKIE);
-    responseRedirect.cookies.delete(SESSION_COOKIE);
-    responseRedirect.cookies.delete(ACCOUNT_COOKIE);
-    responseRedirect.cookies.delete(USERNAME_COOKIE);
-    responseRedirect.cookies.delete(NAME_COOKIE);
+    for (const cookie of OLD_COOKIES) redirect.cookies.delete(cookie);
 
-    responseRedirect.cookies.set({
+    redirect.cookies.set({
       name: REQUEST_COOKIE,
       value: requestToken,
       httpOnly: true,
@@ -126,16 +67,11 @@ export async function GET() {
       maxAge: 60 * 15,
     });
 
-    return responseRedirect;
+    return redirect;
   } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? `TMDB authorization could not start: ${error.message}`
-            : "TMDB authorization could not start.",
-      },
+      { error: error instanceof Error ? error.message : "Could not start TMDB authorization." },
       { status: 500 },
     );
   }
-        }
+}
