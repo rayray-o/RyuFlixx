@@ -10,13 +10,17 @@ import {
   IoInformationCircle,
   IoInformationCircleOutline,
   IoMoon,
+  IoSparkles,
+  IoSparklesOutline,
 } from "react-icons/io5";
 import { TbFolder, TbFolderFilled, TbHistory } from "react-icons/tb";
 
 export const siteConfig: SiteConfigType = {
   name: "Ryuflix",
-  description: "Ryuflix is a free online streaming platform with 6,634+ movies and TV shows available instantly. No account, no fees, no app required.",
+  description:
+    "Ryuflix is a free online streaming platform with 6,634+ movies and TV shows available instantly. No account, no fees, no app required.",
   favicon: "/ryuflix.favicon.ico",
+
   navItems: [
     {
       label: "Home",
@@ -48,7 +52,14 @@ export const siteConfig: SiteConfigType = {
       icon: <TbHistory className="size-full" />,
       activeIcon: <TbHistory className="size-full" />,
     },
+    {
+      label: "Personalize",
+      href: "/personalize",
+      icon: <IoSparklesOutline className="size-full" />,
+      activeIcon: <IoSparkles className="size-full" />,
+    },
   ],
+
   themes: [
     {
       name: "light",
@@ -63,6 +74,7 @@ export const siteConfig: SiteConfigType = {
       icon: <HiComputerDesktop className="size-full" />,
     },
   ],
+
   queryLists: {
     movies: [
       {
@@ -96,6 +108,7 @@ export const siteConfig: SiteConfigType = {
         param: "topRated",
       },
     ],
+
     tvShows: [
       {
         name: "Today's Trending TV Shows",
