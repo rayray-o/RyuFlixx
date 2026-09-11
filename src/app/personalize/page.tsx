@@ -16,7 +16,8 @@ import type { TasteProfile } from "@/utils/personalization/taste-engine";
 const TASTE_STORAGE_KEY = "ryuflix_taste_profile";
 
 type TMDBAccount = {
-  id: number;
+  id: string | number | null;
+  objectId?: string | null;
   username: string | null;
   name: string | null;
 };
@@ -386,6 +387,14 @@ const PersonalizePage = () => {
     importResult?.tasteProfile ??
     null;
 
+  const connectedAccountName =
+    tmdb.account?.username ||
+    tmdb.account?.name ||
+    (tmdb.account?.id !== null &&
+    tmdb.account?.id !== undefined
+      ? `TMDB #${tmdb.account.id}`
+      : "TMDB account connected");
+
   return (
     <div className="mx-auto w-full max-w-5xl pb-10">
       <div className="flex flex-col gap-8">
@@ -504,9 +513,7 @@ const PersonalizePage = () => {
                     </p>
 
                     <p className="mt-1 font-semibold">
-                      {tmdb.account.username ||
-                        tmdb.account.name ||
-                        `TMDB #${tmdb.account.id}`}
+                      {connectedAccountName}
                     </p>
                   </div>
                 )}
