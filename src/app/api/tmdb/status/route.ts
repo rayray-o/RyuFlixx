@@ -2,96 +2,128 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
 const ACCESS_COOKIE = "ryuflix_tmdb_access_token";
+const SESSION_COOKIE = "ryuflix_tmdb_session_id";
 const ACCOUNT_COOKIE = "ryuflix_tmdb_account_id";
+const USERNAME_COOKIE = "ryuflix_tmdb_username";
+const NAME_COOKIE = "ryuflix_tmdb_name";
+
+async function readJSON(response: Response) {
+  const raw = await response.text();
+
+  try {
+    return raw
+      ? (JSON.parse(raw) as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
 
 export async function GET() {
+  const cookieStore = await cookies();
+
+  const accessToken =
+    cookieStore.get(ACCESS_COOKIE)?.value ?? null;
+
+  const sessionId =
+    cookieStore.get(SESSION_COOKIE)?.value ?? null;
+
+  const accountId =
+    cookieStore.get(ACCOUNT_COOKIE)?.value ?? null;
+
+  if (
+    !accessToken ||
+    !sessionId ||
+    !accountId
+  ) {
+    return NextResponse.json({
+      connected: false,
+    });
+  }
+
   try {
-    const cookieStore = await cookies();
-
-    const accessToken =
-      cookieStore.get(ACCESS_COOKIE)?.value ?? null;
-
-    const accountId =
-      cookieStore.get(ACCOUNT_COOKIE)?.value ?? null;
-
-    if (!accessToken || !accountId) {
-      return NextResponse.json({
-        connected: false,
-      });
-    }
-
-    /*
-     * Validate the actual user connection against
-     * the v4 account collection endpoint.
-     *
-     * TMDB documents this endpoint as:
-     * /4/account/{account_object_id}/movie/rated
-     */
-    const response = await fetch(
-      `https://api.themoviedb.org/4/account/${encodeURIComponent(
+    const accountResponse = await fetch(
+      `https://api.themoviedb.org/3/account/${encodeURIComponent(
         accountId,
-      )}/movie/rated?page=1&language=en-US&sort_by=created_at.desc`,
+      )}?session_id=${encodeURIComponent(
+        sessionId,
+      )}`,
       {
         headers: {
-          Authorization:
-            `Bearer ${accessToken}`,
+          Authorization: `Bearer ${accessToken}`,
           Accept: "application/json",
         },
         cache: "no-store",
       },
     );
 
-    if (!response.ok) {
-      const raw = await response.text();
+    const accountData =
+      await readJSON(accountResponse);
 
-      console.error(
-        "TMDB connection validation failed:",
-        response.status,
-        raw,
-      );
-
-      const result = NextResponse.json({
+    if (!accountResponse.ok) {
+      const response = NextResponse.json({
         connected: false,
       });
 
-      result.cookies.delete(ACCESS_COOKIE);
-      result.cookies.delete(ACCOUNT_COOKIE);
+      response.cookies.delete(ACCESS_COOKIE);
+      response.cookies.delete(SESSION_COOKIE);
+      response.cookies.delete(ACCOUNT_COOKIE);
+      response.cookies.delete(USERNAME_COOKIE);
+      response.cookies.delete(NAME_COOKIE);
 
-      return result;
+      return response;
     }
 
-    const data = await response.json();
+    const username =
+      typeof accountData.username === "string"
+        ? accountData.username
+        : cookieStore.get(USERNAME_COOKIE)?.value ?? "";
 
-    /*
-     * Account details are optional here.
-     * The important part is that the authenticated
-     * user token + account object ID actually work.
-     */
+    const name =
+      typeof accountData.name === "string"
+        ? accountData.name
+        : cookieStore.get(NAME_COOKIE)?.value ?? "";
+
+    const realAccountId =
+      typeof accountData.id === "number"
+        ? accountData.id
+        : Number(accountId);
+
+    const ratedResponse = await fetch(
+      `https://api.themoviedb.org/3/account/${encodeURIComponent(
+        String(realAccountId),
+      )}/rated/movies?session_id=${encodeURIComponent(
+        sessionId,
+      )}&page=1&language=en-US&sort_by=created_at.desc`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      },
+    );
+
+    const ratedData =
+      await readJSON(ratedResponse);
+
     return NextResponse.json({
       connected: true,
 
       account: {
-        id: accountId,
-        objectId: accountId,
-        username: null,
-        name: null,
+        id: realAccountId,
+        username: username || null,
+        name: name || null,
       },
 
       validation: {
         ratedMovies:
-          typeof data.total_results === "number"
-            ? data.total_results
-            : Array.isArray(data.results)
-              ? data.results.length
-              : 0,
+          typeof ratedData.total_results === "number"
+            ? ratedData.total_results
+            : 0,
       },
     });
-  } catch (error) {
-    console.error(
-      "TMDB status route crashed:",
-      error,
-    );
-
+  } catch {
     return NextResponse.json({
       connected: false,
     });
