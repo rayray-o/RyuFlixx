@@ -9,10 +9,6 @@ import type {
   TasteProfile,
 } from "@/utils/personalization/taste-engine";
 
-import {
-  createClient,
-} from "@/utils/supabase/server";
-
 const TMDB_COOKIE =
   "ryuflix_tmdb_access_token";
 
@@ -40,45 +36,44 @@ type TasteItem = TMDBItem & {
   watchlist?: boolean;
 };
 
-type EnrichedItem =
-  TasteItem & {
-    genres?: {
+type EnrichedItem = TasteItem & {
+  genres?: {
+    id: number;
+    name: string;
+  }[];
+
+  keywords?: {
+    id: number;
+    name: string;
+  }[];
+
+  credits?: {
+    cast?: {
       id: number;
       name: string;
+      order?: number;
     }[];
 
-    keywords?: {
+    crew?: {
       id: number;
       name: string;
+      job?: string;
+      department?: string;
     }[];
-
-    credits?: {
-      cast?: {
-        id: number;
-        name: string;
-        order?: number;
-      }[];
-
-      crew?: {
-        id: number;
-        name: string;
-        job?: string;
-        department?: string;
-      }[];
-    };
-
-    spoken_languages?: {
-      iso_639_1: string;
-      english_name?: string;
-    }[];
-
-    production_countries?: {
-      iso_3166_1: string;
-      name?: string;
-    }[];
-
-    origin_country?: string[];
   };
+
+  spoken_languages?: {
+    iso_639_1: string;
+    english_name?: string;
+  }[];
+
+  production_countries?: {
+    iso_3166_1: string;
+    name?: string;
+  }[];
+
+  origin_country?: string[];
+};
 
 async function tmdbRequest<T>(
   endpoint: string,
@@ -237,40 +232,12 @@ function dedupeItems(
 export async function POST() {
   try {
     /*
-     * RyuFlix authentication.
+     * RyuFlix has no account system.
      *
-     * The taste profile belongs to
-     * the RyuFlix account, not merely
-     * the TMDB account.
-     */
-    const supabase =
-      await createClient();
-
-    const {
-      data: {
-        user,
-      },
-      error: userError,
-    } =
-      await supabase.auth.getUser();
-
-    if (
-      userError ||
-      !user
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "You must be signed in to RyuFlix.",
-        },
-        {
-          status: 401,
-        },
-      );
-    }
-
-    /*
-     * TMDB authentication.
+     * The only authentication needed
+     * here is the user's TMDB OAuth
+     * access token stored in the
+     * HttpOnly TMDB cookie.
      */
     const cookieStore =
       await cookies();
@@ -292,6 +259,9 @@ export async function POST() {
       );
     }
 
+    /*
+     * Verify the TMDB connection.
+     */
     const account =
       await tmdbRequest<{
         id: number;
@@ -443,9 +413,7 @@ export async function POST() {
       );
 
     /*
-     * Merge duplicate titles so a movie
-     * can simultaneously have a rating,
-     * favourite flag and watchlist flag.
+     * Merge duplicate titles.
      */
     const allItems =
       dedupeItems([
@@ -458,8 +426,8 @@ export async function POST() {
       ]);
 
     /*
-     * Only deeply enrich the strongest
-     * signals to keep refreshes reasonable.
+     * Deeply enrich the strongest
+     * taste signals.
      */
     const strongestItems =
       [...allItems]
@@ -512,7 +480,7 @@ export async function POST() {
     for (
       let i = 0;
       i <
-        strongestItems.length;
+      strongestItems.length;
       i += batchSize
     ) {
       const batch =
@@ -546,8 +514,8 @@ export async function POST() {
       );
 
     /*
-     * Generate the RyuFlix taste
-     * profile.
+     * Build the actual RyuFlix
+     * taste profile.
      */
     const tasteProfile:
       TasteProfile =
@@ -574,93 +542,12 @@ export async function POST() {
       });
 
     /*
-     * SAVE IT.
+     * Nothing is saved to Supabase.
      *
-     * This is the actual 3A.2 step.
-     *
-     * We deliberately store the derived
-     * profile and lightweight source
-     * information — never the TMDB
-     * access token.
+     * The browser will receive this
+     * profile and store it locally.
      */
-    const {
-      error: saveError,
-    } =
-      await supabase
-        .from(
-          "taste_profiles",
-        )
-        .upsert(
-          {
-            user_id:
-              user.id,
 
-            profile:
-              tasteProfile,
-
-            source_data: {
-              provider:
-                "tmdb",
-
-              tmdbAccountId:
-                accountId,
-
-              importedAt:
-                new Date().toISOString(),
-
-              ratedMovies:
-                ratedMovies.totalResults,
-
-              ratedTV:
-                ratedTV.totalResults,
-
-              favoritesMovies:
-                favoriteMovies.totalResults,
-
-              favoritesTV:
-                favoriteTV.totalResults,
-
-              watchlistMovies:
-                movieWatchlist.totalResults,
-
-              watchlistTV:
-                tvWatchlist.totalResults,
-
-              enrichedItems:
-                enrichedItems.length,
-            },
-
-            version:
-              tasteProfile.version,
-          },
-          {
-            onConflict:
-              "user_id",
-          },
-        );
-
-    if (saveError) {
-      console.error(
-        "Failed to save taste profile:",
-        saveError,
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            "Taste profile was generated but could not be saved.",
-        },
-        {
-          status: 500,
-        },
-      );
-    }
-
-    /*
-     * Keep the existing useful response
-     * data so the current Personalize
-     * page continues working.
-     */
     const ratedMovieSamples =
       ratedMovies.results
         .slice(0, 10)
@@ -790,4 +677,4 @@ export async function POST() {
       },
     );
   }
-  }
+      }
