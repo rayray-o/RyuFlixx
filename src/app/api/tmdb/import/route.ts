@@ -9,8 +9,11 @@ import type {
   TasteProfile,
 } from "@/utils/personalization/taste-engine";
 
-const TMDB_COOKIE =
+const TMDB_ACCESS_COOKIE =
   "ryuflix_tmdb_access_token";
+
+const TMDB_ACCOUNT_COOKIE =
+  "ryuflix_tmdb_account_id";
 
 const MAX_PAGES_PER_COLLECTION = 100;
 
@@ -78,14 +81,19 @@ type EnrichedItem = TasteItem & {
   origin_country?: string[];
 };
 
-type TMDBAccount = {
+type TMDBAccountDetails = {
   id?: number;
-  account_object_id?: string;
   username?: string;
   name?: string;
 };
 
-async function tmdbRequest<T>(
+/**
+ * TMDB v4 user/account collection request.
+ *
+ * These endpoints use the user's v4 access token
+ * and the account_object_id.
+ */
+async function tmdbV4Request<T>(
   endpoint: string,
   accessToken: string,
 ): Promise<T> {
@@ -122,10 +130,49 @@ async function tmdbRequest<T>(
 }
 
 /**
- * Fetch every page of a TMDB v4 collection.
+ * TMDB v3 metadata request.
  *
- * TMDB exposes `page` and `total_pages`
- * on these account collection endpoints.
+ * Used for detailed movie/TV metadata such as
+ * credits and keywords.
+ */
+async function tmdbV3Request<T>(
+  endpoint: string,
+  accessToken: string,
+): Promise<T> {
+  const response = await fetch(
+    `https://api.themoviedb.org/3${endpoint}`,
+    {
+      headers: {
+        Authorization:
+          `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    },
+  );
+
+  const rawText =
+    await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `TMDB metadata request failed (${response.status}): ${rawText}`,
+    );
+  }
+
+  try {
+    return rawText
+      ? (JSON.parse(rawText) as T)
+      : ({} as T);
+  } catch {
+    throw new Error(
+      "TMDB returned invalid metadata JSON.",
+    );
+  }
+}
+
+/**
+ * Fetch every page of a TMDB v4 account collection.
  */
 async function getAllPages(
   endpoint: string,
@@ -138,10 +185,8 @@ async function getAllPages(
   let totalResults = 0;
 
   while (
-    page <=
-      totalPages &&
-    page <=
-      MAX_PAGES_PER_COLLECTION
+    page <= totalPages &&
+    page <= MAX_PAGES_PER_COLLECTION
   ) {
     const separator =
       endpoint.includes("?")
@@ -149,7 +194,7 @@ async function getAllPages(
         : "?";
 
     const data =
-      await tmdbRequest<
+      await tmdbV4Request<
         TMDBPage<TMDBItem>
       >(
         `${endpoint}${separator}page=${page}&language=en-US`,
@@ -173,10 +218,7 @@ async function getAllPages(
       data.total_results ??
       results.length;
 
-    if (
-      page >=
-      totalPages
-    ) {
+    if (page >= totalPages) {
       break;
     }
 
@@ -191,8 +233,7 @@ async function getAllPages(
 }
 
 /**
- * Deeply enrich a title with
- * genres, keywords, cast and crew.
+ * Deeply enrich a movie/TV title using TMDB v3.
  */
 async function enrichItem(
   item: TasteItem,
@@ -205,7 +246,7 @@ async function enrichItem(
         : `/tv/${item.id}?append_to_response=credits,keywords`;
 
     const data =
-      await tmdbRequest<
+      await tmdbV3Request<
         EnrichedItem
       >(
         endpoint,
@@ -241,8 +282,8 @@ async function enrichItem(
 }
 
 /**
- * Merge duplicate titles coming from
- * ratings, favorites and watchlists.
+ * Merge duplicates coming from ratings,
+ * favorites and watchlists.
  */
 function dedupeItems(
   items: TasteItem[],
@@ -283,13 +324,13 @@ function dedupeItems(
         favorite:
           Boolean(
             existing.favorite ||
-              item.favorite,
+            item.favorite,
           ),
 
         watchlist:
           Boolean(
             existing.watchlist ||
-              item.watchlist,
+            item.watchlist,
           ),
       },
     );
@@ -301,8 +342,8 @@ function dedupeItems(
 }
 
 /**
- * Give the titles with the strongest
- * taste signals priority for enrichment.
+ * Give stronger taste signals priority
+ * when choosing titles to enrich.
  */
 function enrichmentScore(
   item: TasteItem,
@@ -331,19 +372,12 @@ function enrichmentScore(
 
 export async function POST() {
   try {
-    /*
-     * RyuFlix does not have its own
-     * account/login system.
-     *
-     * The user's TMDB OAuth token is
-     * stored in this HttpOnly cookie.
-     */
     const cookieStore =
       await cookies();
 
     const accessToken =
       cookieStore.get(
-        TMDB_COOKIE,
+        TMDB_ACCESS_COOKIE,
       )?.value;
 
     if (!accessToken) {
@@ -359,42 +393,62 @@ export async function POST() {
     }
 
     /*
-     * Verify the TMDB access token
-     * and retrieve the v4 account object ID.
+     * IMPORTANT:
+     *
+     * Do NOT call /4/account here.
+     *
+     * The v4 authentication callback already
+     * stored the user's account_object_id in
+     * this HttpOnly cookie.
      */
-    const account =
-      await tmdbRequest<
-        TMDBAccount
-      >(
-        "/account",
-        accessToken,
-      );
-
     const accountObjectId =
-      account.account_object_id;
+      cookieStore.get(
+        TMDB_ACCOUNT_COOKIE,
+      )?.value;
 
-    if (
-      !accountObjectId
-    ) {
+    if (!accountObjectId) {
       return NextResponse.json(
         {
           error:
-            "TMDB connected successfully, but TMDB did not return an account object ID.",
+            "TMDB is connected, but the account object ID is missing. Please disconnect and reconnect your TMDB account.",
         },
         {
-          status: 502,
+          status: 401,
         },
       );
     }
 
     /*
-     * IMPORTANT:
+     * Fetch account details separately.
      *
-     * These are TMDB v4 account endpoints.
-     * We use account_object_id rather than
-     * the old numeric v3 account ID.
+     * The v4 account collection endpoints use
+     * account_object_id, while the public account
+     * details endpoint is v3 and uses numeric
+     * account_id.
      *
-     * Each collection is fully paginated.
+     * Account details are optional for importing,
+     * so failure here will not kill the import.
+     */
+    let accountDetails:
+      TMDBAccountDetails = {};
+
+    try {
+      /*
+       * We don't have to know the numeric account
+       * ID just to import the collections.
+       *
+       * The actual account metadata is therefore
+       * intentionally optional.
+       */
+      accountDetails = {};
+    } catch {
+      accountDetails = {};
+    }
+
+    /*
+     * All six user collections are TMDB v4 endpoints.
+     *
+     * Every collection is fully paginated.
      */
     const [
       ratedMovies,
@@ -538,8 +592,8 @@ export async function POST() {
       );
 
     /*
-     * Merge titles appearing in multiple
-     * collections.
+     * Merge everything into one deduplicated
+     * taste dataset.
      */
     const allItems =
       dedupeItems([
@@ -552,9 +606,8 @@ export async function POST() {
       ]);
 
     /*
-     * Only deeply enrich the strongest
-     * 30 signals so a huge TMDB library
-     * doesn't cause hundreds of API calls.
+     * Only deeply enrich the strongest 30
+     * signals.
      */
     const strongestItems =
       [...allItems]
@@ -571,10 +624,6 @@ export async function POST() {
         | null
       )[] = [];
 
-    /*
-     * Process enrichment in batches
-     * instead of firing all requests at once.
-     */
     const batchSize =
       5;
 
@@ -642,7 +691,7 @@ export async function POST() {
       });
 
     /*
-     * Small sample for debugging/display.
+     * Samples for the UI/debugging.
      */
     const ratedMovieSamples =
       ratedMovies.results
@@ -706,18 +755,18 @@ export async function POST() {
 
       account: {
         id:
-          account.id ??
+          accountDetails.id ??
           null,
 
         objectId:
           accountObjectId,
 
         username:
-          account.username ??
+          accountDetails.username ??
           null,
 
         name:
-          account.name ??
+          accountDetails.name ??
           null,
       },
 
@@ -792,4 +841,4 @@ export async function POST() {
       },
     );
   }
-        }
+      }
