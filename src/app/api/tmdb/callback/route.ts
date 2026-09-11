@@ -2,33 +2,26 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { env } from "@/utils/env";
 
-const TMDB_REQUEST_COOKIE = "ryuflix_tmdb_request_token";
+const REQUEST_COOKIE = "ryuflix_tmdb_request_token";
+const ACCESS_COOKIE = "ryuflix_tmdb_access_token";
+const ACCOUNT_COOKIE = "ryuflix_tmdb_account_id";
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const cookieStore = await cookies();
 
-    const callbackRequestToken =
+    const requestToken =
       url.searchParams.get("request_token") ??
       url.searchParams.get("requestToken") ??
-      url.searchParams.get("token");
-
-    const storedRequestToken =
-      cookieStore.get(TMDB_REQUEST_COOKIE)?.value;
-
-    const requestToken =
-      callbackRequestToken ?? storedRequestToken;
+      url.searchParams.get("token") ??
+      cookieStore.get(REQUEST_COOKIE)?.value ??
+      null;
 
     if (!requestToken) {
-      console.error(
-        "TMDB DIAGNOSTIC: no request token.",
-        url.search,
-      );
-
       return NextResponse.redirect(
         new URL(
-          "/personalize?tmdb=error&reason=no_request_token",
+          "/personalize?tmdb=error&reason=missing_request_token",
           request.url,
         ),
       );
@@ -51,212 +44,128 @@ export async function GET(request: Request) {
       },
     );
 
-    const rawText = await response.text();
+    const raw = await response.text();
 
     let data: Record<string, unknown> = {};
 
     try {
-      data = rawText
-        ? JSON.parse(rawText)
-        : {};
+      data = raw ? JSON.parse(raw) : {};
     } catch {
       console.error(
-        "TMDB DIAGNOSTIC: invalid JSON:",
-        rawText,
+        "TMDB access-token response was not JSON:",
+        raw,
       );
     }
-
-    /*
-     * IMPORTANT:
-     *
-     * Never log the actual access token.
-     * We only log the names/types of fields
-     * TMDB returned.
-     */
-    const safeDiagnostic = Object.fromEntries(
-      Object.entries(data).map(
-        ([key, value]) => {
-          if (
-            key.toLowerCase().includes("token")
-          ) {
-            return [
-              key,
-              "[REDACTED]",
-            ];
-          }
-
-          if (
-            typeof value === "string"
-          ) {
-            return [
-              key,
-              {
-                type: "string",
-                length: value.length,
-                preview:
-                  value.length > 80
-                    ? `${value.slice(0, 80)}...`
-                    : value,
-              },
-            ];
-          }
-
-          if (
-            typeof value === "number"
-          ) {
-            return [
-              key,
-              {
-                type: "number",
-                value,
-              },
-            ];
-          }
-
-          if (
-            typeof value === "boolean"
-          ) {
-            return [
-              key,
-              {
-                type: "boolean",
-                value,
-              },
-            ];
-          }
-
-          if (
-            value === null
-          ) {
-            return [
-              key,
-              {
-                type: "null",
-              },
-            ];
-          }
-
-          if (
-            Array.isArray(value)
-          ) {
-            return [
-              key,
-              {
-                type: "array",
-                length: value.length,
-              },
-            ];
-          }
-
-          if (
-            typeof value === "object"
-          ) {
-            return [
-              key,
-              {
-                type: "object",
-                keys: Object.keys(
-                  value as Record<
-                    string,
-                    unknown
-                  >,
-                ),
-              },
-            ];
-          }
-
-          return [
-            key,
-            {
-              type: typeof value,
-            },
-          ];
-        },
-      ),
-    );
-
-    console.log(
-      "================ TMDB AUTH DIAGNOSTIC ================",
-    );
-
-    console.log(
-      "HTTP STATUS:",
-      response.status,
-    );
-
-    console.log(
-      "RETURNED FIELDS:",
-      JSON.stringify(
-        safeDiagnostic,
-        null,
-        2,
-      ),
-    );
-
-    console.log(
-      "=======================================================",
-    );
 
     if (!response.ok) {
       console.error(
         "TMDB access-token exchange failed:",
         response.status,
-        rawText,
+        raw,
       );
 
-      const errorResponse =
-        NextResponse.redirect(
-          new URL(
-            "/personalize?tmdb=error&reason=access_token_exchange",
-            request.url,
-          ),
-        );
-
-      errorResponse.cookies.delete(
-        TMDB_REQUEST_COOKIE,
-      );
-
-      return errorResponse;
-    }
-
-    /*
-     * Diagnostic mode deliberately DOES NOT
-     * save the access token or account ID.
-     *
-     * This prevents another potentially wrong
-     * account identifier from being persisted.
-     */
-    const diagnosticResponse =
-      NextResponse.redirect(
+      const result = NextResponse.redirect(
         new URL(
-          "/personalize?tmdb=diagnostic",
+          `/personalize?tmdb=error&reason=exchange_${response.status}`,
           request.url,
         ),
       );
 
-    diagnosticResponse.cookies.delete(
-      TMDB_REQUEST_COOKIE,
+      result.cookies.delete(REQUEST_COOKIE);
+
+      return result;
+    }
+
+    const accessToken =
+      typeof data.access_token === "string"
+        ? data.access_token
+        : null;
+
+    /*
+     * TMDB's v4 access-token response uses
+     * account_id for the authenticated account.
+     *
+     * Keep account_object_id as a compatibility
+     * fallback in case TMDB returns that field.
+     */
+    const accountId =
+      typeof data.account_id === "string"
+        ? data.account_id
+        : typeof data.account_id === "number"
+          ? String(data.account_id)
+          : typeof data.account_object_id === "string"
+            ? data.account_object_id
+            : null;
+
+    if (!accessToken || !accountId) {
+      console.error(
+        "TMDB authentication response did not contain the required account data.",
+        {
+          hasAccessToken: Boolean(accessToken),
+          accountId,
+          fields: Object.keys(data),
+        },
+      );
+
+      const result = NextResponse.redirect(
+        new URL(
+          "/personalize?tmdb=error&reason=missing_account_data",
+          request.url,
+        ),
+      );
+
+      result.cookies.delete(REQUEST_COOKIE);
+      result.cookies.delete(ACCESS_COOKIE);
+      result.cookies.delete(ACCOUNT_COOKIE);
+
+      return result;
+    }
+
+    const result = NextResponse.redirect(
+      new URL(
+        "/personalize?tmdb=connected",
+        request.url,
+      ),
     );
 
-    return diagnosticResponse;
+    result.cookies.set({
+      name: ACCESS_COOKIE,
+      value: accessToken,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+
+    result.cookies.set({
+      name: ACCOUNT_COOKIE,
+      value: accountId,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+
+    result.cookies.delete(REQUEST_COOKIE);
+
+    return result;
   } catch (error) {
     console.error(
-      "TMDB diagnostic callback error:",
+      "TMDB callback crashed:",
       error,
     );
 
-    const errorResponse =
-      NextResponse.redirect(
-        new URL(
-          "/personalize?tmdb=error&reason=callback_exception",
-          request.url,
-        ),
-      );
-
-    errorResponse.cookies.delete(
-      TMDB_REQUEST_COOKIE,
+    const result = NextResponse.redirect(
+      new URL(
+        "/personalize?tmdb=error&reason=callback_exception",
+        request.url,
+      ),
     );
 
-    return errorResponse;
+    result.cookies.delete(REQUEST_COOKIE);
+
+    return result;
   }
 }
