@@ -2,52 +2,37 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
 const ACCESS_COOKIE = "ryuflix_tmdb_access_token";
-const SESSION_COOKIE = "ryuflix_tmdb_session_id";
+const ACCOUNT_OBJECT_COOKIE = "ryuflix_tmdb_account_object_id";
 const ACCOUNT_COOKIE = "ryuflix_tmdb_account_id";
 const USERNAME_COOKIE = "ryuflix_tmdb_username";
 const NAME_COOKIE = "ryuflix_tmdb_name";
 
-async function readJSON(response: Response) {
-  const raw = await response.text();
-
-  try {
-    return raw
-      ? (JSON.parse(raw) as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
+function clearConnection(response: NextResponse) {
+  for (const cookie of [
+    ACCESS_COOKIE,
+    ACCOUNT_OBJECT_COOKIE,
+    ACCOUNT_COOKIE,
+    USERNAME_COOKIE,
+    NAME_COOKIE,
+    "ryuflix_tmdb_session_id",
+  ]) {
+    response.cookies.delete(cookie);
   }
 }
 
 export async function GET() {
   const cookieStore = await cookies();
 
-  const accessToken =
-    cookieStore.get(ACCESS_COOKIE)?.value ?? null;
+  const accessToken = cookieStore.get(ACCESS_COOKIE)?.value ?? null;
+  const accountObjectId = cookieStore.get(ACCOUNT_OBJECT_COOKIE)?.value ?? null;
 
-  const sessionId =
-    cookieStore.get(SESSION_COOKIE)?.value ?? null;
-
-  const accountId =
-    cookieStore.get(ACCOUNT_COOKIE)?.value ?? null;
-
-  if (
-    !accessToken ||
-    !sessionId ||
-    !accountId
-  ) {
-    return NextResponse.json({
-      connected: false,
-    });
+  if (!accessToken || !accountObjectId) {
+    return NextResponse.json({ connected: false });
   }
 
   try {
-    const accountResponse = await fetch(
-      `https://api.themoviedb.org/3/account/${encodeURIComponent(
-        accountId,
-      )}?session_id=${encodeURIComponent(
-        sessionId,
-      )}`,
+    const response = await fetch(
+      `https://api.themoviedb.org/4/account/${encodeURIComponent(accountObjectId)}`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -57,44 +42,20 @@ export async function GET() {
       },
     );
 
-    const accountData =
-      await readJSON(accountResponse);
-
-    if (!accountResponse.ok) {
-      const response = NextResponse.json({
-        connected: false,
-      });
-
-      response.cookies.delete(ACCESS_COOKIE);
-      response.cookies.delete(SESSION_COOKIE);
-      response.cookies.delete(ACCOUNT_COOKIE);
-      response.cookies.delete(USERNAME_COOKIE);
-      response.cookies.delete(NAME_COOKIE);
-
-      return response;
+    if (!response.ok) {
+      const result = NextResponse.json({ connected: false });
+      clearConnection(result);
+      return result;
     }
 
-    const username =
-      typeof accountData.username === "string"
-        ? accountData.username
-        : cookieStore.get(USERNAME_COOKIE)?.value ?? "";
-
-    const name =
-      typeof accountData.name === "string"
-        ? accountData.name
-        : cookieStore.get(NAME_COOKIE)?.value ?? "";
-
-    const realAccountId =
-      typeof accountData.id === "number"
-        ? accountData.id
-        : Number(accountId);
+    const account = (await response.json()) as {
+      id?: number;
+      username?: string;
+      name?: string;
+    };
 
     const ratedResponse = await fetch(
-      `https://api.themoviedb.org/3/account/${encodeURIComponent(
-        String(realAccountId),
-      )}/rated/movies?session_id=${encodeURIComponent(
-        sessionId,
-      )}&page=1&language=en-US&sort_by=created_at.desc`,
+      `https://api.themoviedb.org/4/account/${encodeURIComponent(accountObjectId)}/movie/rated?page=1&language=en-US&sort_by=created_at.desc`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -104,28 +65,34 @@ export async function GET() {
       },
     );
 
-    const ratedData =
-      await readJSON(ratedResponse);
+    if (!ratedResponse.ok) {
+      const result = NextResponse.json({ connected: false });
+      clearConnection(result);
+      return result;
+    }
+
+    const rated = (await ratedResponse.json()) as { total_results?: number };
+    const storedId = Number(cookieStore.get(ACCOUNT_COOKIE)?.value ?? 0);
+    const numericId =
+      typeof account.id === "number" && account.id > 0
+        ? account.id
+        : storedId > 0
+          ? storedId
+          : null;
 
     return NextResponse.json({
       connected: true,
-
       account: {
-        id: realAccountId,
-        username: username || null,
-        name: name || null,
+        id: numericId,
+        objectId: accountObjectId,
+        username: account.username ?? cookieStore.get(USERNAME_COOKIE)?.value ?? null,
+        name: account.name ?? cookieStore.get(NAME_COOKIE)?.value ?? null,
       },
-
       validation: {
-        ratedMovies:
-          typeof ratedData.total_results === "number"
-            ? ratedData.total_results
-            : 0,
+        ratedMovies: typeof rated.total_results === "number" ? rated.total_results : 0,
       },
     });
   } catch {
-    return NextResponse.json({
-      connected: false,
-    });
+    return NextResponse.json({ connected: false });
   }
 }
