@@ -10,7 +10,10 @@ import type {
 } from "@/utils/personalization/taste-engine";
 
 const ACCESS_COOKIE = "ryuflix_tmdb_access_token";
+const SESSION_COOKIE = "ryuflix_tmdb_session_id";
 const ACCOUNT_COOKIE = "ryuflix_tmdb_account_id";
+const USERNAME_COOKIE = "ryuflix_tmdb_username";
+const NAME_COOKIE = "ryuflix_tmdb_name";
 
 const MAX_PAGES = 100;
 const ENRICH_LIMIT = 40;
@@ -80,43 +83,15 @@ type EnrichedItem = TasteItem & {
   origin_country?: string[];
 };
 
-async function tmdbV4<T>(
+async function tmdbRequest<T>(
   endpoint: string,
-  token: string,
-): Promise<T> {
-  const response = await fetch(
-    `https://api.themoviedb.org/4${endpoint}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    },
-  );
-
-  const raw = await response.text();
-
-  if (!response.ok) {
-    throw new Error(
-      `TMDB v4 ${response.status}: ${raw.slice(0, 500)}`,
-    );
-  }
-
-  return raw
-    ? (JSON.parse(raw) as T)
-    : ({} as T);
-}
-
-async function tmdbV3<T>(
-  endpoint: string,
-  token: string,
+  accessToken: string,
 ): Promise<T> {
   const response = await fetch(
     `https://api.themoviedb.org/3${endpoint}`,
     {
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${accessToken}`,
         Accept: "application/json",
       },
       cache: "no-store",
@@ -127,18 +102,24 @@ async function tmdbV3<T>(
 
   if (!response.ok) {
     throw new Error(
-      `TMDB v3 ${response.status}: ${raw.slice(0, 500)}`,
+      `TMDB ${response.status}: ${raw.slice(0, 700)}`,
     );
   }
 
-  return raw
-    ? (JSON.parse(raw) as T)
-    : ({} as T);
+  try {
+    return raw
+      ? (JSON.parse(raw) as T)
+      : ({} as T);
+  } catch {
+    throw new Error(
+      "TMDB returned an invalid JSON response.",
+    );
+  }
 }
 
 async function getAllPages(
   endpoint: string,
-  token: string,
+  accessToken: string,
 ) {
   const results: TMDBItem[] = [];
 
@@ -150,26 +131,25 @@ async function getAllPages(
     page <= totalPages &&
     page <= MAX_PAGES
   ) {
-    const separator =
-      endpoint.includes("?")
-        ? "&"
-        : "?";
+    const separator = endpoint.includes("?")
+      ? "&"
+      : "?";
 
     const data =
-      await tmdbV4<TMDBPage<TMDBItem>>(
-        `${endpoint}${separator}page=${page}&language=en-US`,
-        token,
+      await tmdbRequest<TMDBPage<TMDBItem>>(
+        `${endpoint}${separator}page=${page}`,
+        accessToken,
       );
 
-    results.push(
-      ...(data.results ?? []),
+    const pageResults =
+      data.results ?? [];
+
+    results.push(...pageResults);
+
+    totalPages = Math.max(
+      1,
+      data.total_pages ?? 1,
     );
-
-    totalPages =
-      Math.max(
-        1,
-        data.total_pages ?? 1,
-      );
 
     totalResults =
       data.total_results ??
@@ -197,8 +177,7 @@ function mergeItems(
     const key =
       `${item.mediaType}:${item.id}`;
 
-    const existing =
-      map.get(key);
+    const existing = map.get(key);
 
     if (!existing) {
       map.set(key, {
@@ -230,9 +209,7 @@ function mergeItems(
     });
   }
 
-  return Array.from(
-    map.values(),
-  );
+  return Array.from(map.values());
 }
 
 function signalScore(
@@ -242,15 +219,16 @@ function signalScore(
 
   if (
     typeof item.userRating ===
-      "number"
+    "number"
   ) {
-    score += Math.abs(
-      item.userRating - 5,
-    );
+    score +=
+      Math.abs(
+        item.userRating - 5,
+      ) * 2;
   }
 
   if (item.favorite) {
-    score += 5;
+    score += 10;
   }
 
   if (item.watchlist) {
@@ -262,7 +240,7 @@ function signalScore(
 
 async function enrich(
   item: TasteItem,
-  token: string,
+  accessToken: string,
 ) {
   try {
     const endpoint =
@@ -271,9 +249,9 @@ async function enrich(
         : `/tv/${item.id}?append_to_response=credits,keywords`;
 
     const data =
-      await tmdbV3<EnrichedItem>(
+      await tmdbRequest<EnrichedItem>(
         endpoint,
-        token,
+        accessToken,
       );
 
     return {
@@ -294,12 +272,7 @@ async function enrich(
       genre_ids:
         item.genre_ids,
     };
-  } catch (error) {
-    console.error(
-      `TMDB enrichment failed for ${item.mediaType}:${item.id}`,
-      error,
-    );
-
+  } catch {
     return null;
   }
 }
@@ -311,12 +284,17 @@ export async function POST() {
     const accessToken =
       cookieStore.get(
         ACCESS_COOKIE,
-      )?.value;
+      )?.value ?? null;
+
+    const sessionId =
+      cookieStore.get(
+        SESSION_COOKIE,
+      )?.value ?? null;
 
     const accountId =
       cookieStore.get(
         ACCOUNT_COOKIE,
-      )?.value;
+      )?.value ?? null;
 
     if (!accessToken) {
       return NextResponse.json(
@@ -328,31 +306,47 @@ export async function POST() {
       );
     }
 
-    if (!accountId) {
+    if (!sessionId || !accountId) {
       return NextResponse.json(
         {
           error:
-            "TMDB is connected, but its account identifier is missing. Disconnect and reconnect TMDB.",
+            "The TMDB connection is incomplete. Disconnect and reconnect TMDB.",
+        },
+        { status: 401 },
+      );
+    }
+
+    if (!/^\d+$/.test(accountId)) {
+      return NextResponse.json(
+        {
+          error:
+            "The stored TMDB account ID is invalid. Disconnect and reconnect TMDB.",
         },
         { status: 401 },
       );
     }
 
     /*
-     * Verify the authenticated account first.
+     * Validate the actual account/session first.
      */
-    const verification =
-      await tmdbV4<
-        TMDBPage<TMDBItem>
-      >(
-        `/account/${encodeURIComponent(
-          accountId,
-        )}/movie/rated?page=1&language=en-US&sort_by=created_at.desc`,
+    const account =
+      await tmdbRequest<{
+        id: number;
+        username?: string;
+        name?: string;
+      }>(
+        `/account/${accountId}?session_id=${encodeURIComponent(
+          sessionId,
+        )}`,
         accessToken,
       );
 
     /*
-     * Fetch every collection.
+     * Fetch the actual user collections.
+     *
+     * These are the documented TMDB v3 account
+     * endpoints and are authenticated with the
+     * user's session_id.
      */
     const [
       ratedMovies,
@@ -363,59 +357,57 @@ export async function POST() {
       watchlistTV,
     ] = await Promise.all([
       getAllPages(
-        `/account/${encodeURIComponent(
-          accountId,
-        )}/movie/rated?sort_by=created_at.desc`,
+        `/account/${accountId}/rated/movies?session_id=${encodeURIComponent(
+          sessionId,
+        )}&language=en-US&sort_by=created_at.desc`,
         accessToken,
       ),
 
       getAllPages(
-        `/account/${encodeURIComponent(
-          accountId,
-        )}/tv/rated?sort_by=created_at.desc`,
+        `/account/${accountId}/rated/tv?session_id=${encodeURIComponent(
+          sessionId,
+        )}&language=en-US&sort_by=created_at.desc`,
         accessToken,
       ),
 
       getAllPages(
-        `/account/${encodeURIComponent(
-          accountId,
-        )}/movie/favorites?sort_by=created_at.desc`,
+        `/account/${accountId}/favorite/movies?session_id=${encodeURIComponent(
+          sessionId,
+        )}&language=en-US&sort_by=created_at.desc`,
         accessToken,
       ),
 
       getAllPages(
-        `/account/${encodeURIComponent(
-          accountId,
-        )}/tv/favorites?sort_by=created_at.desc`,
+        `/account/${accountId}/favorite/tv?session_id=${encodeURIComponent(
+          sessionId,
+        )}&language=en-US&sort_by=created_at.desc`,
         accessToken,
       ),
 
       getAllPages(
-        `/account/${encodeURIComponent(
-          accountId,
-        )}/movie/watchlist?sort_by=created_at.desc`,
+        `/account/${accountId}/watchlist/movies?session_id=${encodeURIComponent(
+          sessionId,
+        )}&language=en-US&sort_by=created_at.desc`,
         accessToken,
       ),
 
       getAllPages(
-        `/account/${encodeURIComponent(
-          accountId,
-        )}/tv/watchlist?sort_by=created_at.desc`,
+        `/account/${accountId}/watchlist/tv?session_id=${encodeURIComponent(
+          sessionId,
+        )}&language=en-US&sort_by=created_at.desc`,
         accessToken,
       ),
     ]);
 
-    /*
-     * Convert each collection into the taste-engine
-     * format.
-     */
     const ratedMovieItems: TasteItem[] =
       ratedMovies.results.map(
         (item) => ({
           ...item,
           mediaType: "movie",
           userRating:
-            item.rating ?? null,
+            typeof item.rating === "number"
+              ? item.rating
+              : null,
         }),
       );
 
@@ -425,7 +417,9 @@ export async function POST() {
           ...item,
           mediaType: "tv",
           userRating:
-            item.rating ?? null,
+            typeof item.rating === "number"
+              ? item.rating
+              : null,
         }),
       );
 
@@ -476,7 +470,7 @@ export async function POST() {
       ]);
 
     /*
-     * Pick the strongest signals for deep metadata.
+     * Deep-analyze the strongest signals.
      */
     const strongest =
       [...allItems]
@@ -485,7 +479,10 @@ export async function POST() {
             signalScore(b) -
             signalScore(a),
         )
-        .slice(0, ENRICH_LIMIT);
+        .slice(
+          0,
+          ENRICH_LIMIT,
+        );
 
     const enriched: EnrichedItem[] = [];
 
@@ -500,7 +497,7 @@ export async function POST() {
           i + BATCH_SIZE,
         );
 
-      const results =
+      const batchResults =
         await Promise.all(
           batch.map(
             (item) =>
@@ -511,7 +508,7 @@ export async function POST() {
           ),
         );
 
-      for (const item of results) {
+      for (const item of batchResults) {
         if (item) {
           enriched.push(item);
         }
@@ -547,10 +544,13 @@ export async function POST() {
         new Date().toISOString(),
 
       account: {
-        id: accountId,
-        objectId: accountId,
-        username: null,
-        name: null,
+        id: account.id,
+        username:
+          account.username ??
+          null,
+        name:
+          account.name ??
+          null,
       },
 
       totals: {
@@ -573,13 +573,6 @@ export async function POST() {
           watchlistTV.totalResults,
       },
 
-      verification: {
-        ratedMovies:
-          verification.total_results ??
-          verification.results?.length ??
-          0,
-      },
-
       samples: {
         ratedMovies:
           ratedMovies.results
@@ -588,7 +581,8 @@ export async function POST() {
               (item) => ({
                 id: item.id,
                 title:
-                  item.title ?? null,
+                  item.title ??
+                  null,
                 rating:
                   item.vote_average ??
                   null,
@@ -608,7 +602,8 @@ export async function POST() {
               (item) => ({
                 id: item.id,
                 title:
-                  item.name ?? null,
+                  item.name ??
+                  null,
                 rating:
                   item.vote_average ??
                   null,
@@ -645,4 +640,4 @@ export async function POST() {
       },
     );
   }
-    }
+}
