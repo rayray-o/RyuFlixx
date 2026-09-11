@@ -7,6 +7,7 @@ import {
   IoCheckmarkCircle,
   IoLockClosedOutline,
   IoLogOutOutline,
+  IoRefreshOutline,
 } from "react-icons/io5";
 import { SiLetterboxd } from "react-icons/si";
 
@@ -21,24 +22,75 @@ type TMDBStatus = {
   account?: TMDBAccount;
 };
 
+type TMDBImportResult = {
+  importedAt: string;
+  account: TMDBAccount;
+  totals: {
+    ratedMovies: number;
+    ratedTV: number;
+    favoritesMovies: number;
+    favoritesTV: number;
+    watchlistMovies: number;
+    watchlistTV: number;
+  };
+  samples: {
+    ratedMovies: {
+      id: number;
+      title: string | null;
+      rating: number | null;
+      userRating: number | null;
+      releaseDate: string | null;
+    }[];
+    ratedTV: {
+      id: number;
+      title: string | null;
+      rating: number | null;
+      userRating: number | null;
+      releaseDate: string | null;
+    }[];
+  };
+};
+
 const PersonalizePage = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [tmdb, setTmdb] = useState<TMDBStatus>({
-    connected: false,
-  });
-  const [tmdbLoading, setTmdbLoading] = useState(true);
-  const [disconnecting, setDisconnecting] = useState(false);
+  const [selectedFiles, setSelectedFiles] =
+    useState<File[]>([]);
+
+  const [tmdb, setTmdb] =
+    useState<TMDBStatus>({
+      connected: false,
+    });
+
+  const [tmdbLoading, setTmdbLoading] =
+    useState(true);
+
+  const [disconnecting, setDisconnecting] =
+    useState(false);
+
+  const [importing, setImporting] =
+    useState(false);
+
+  const [importResult, setImportResult] =
+    useState<TMDBImportResult | null>(null);
+
+  const [importError, setImportError] =
+    useState<string | null>(null);
 
   const loadTMDBStatus = async () => {
     try {
-      const response = await fetch("/api/tmdb/status", {
-        cache: "no-store",
-      });
+      const response = await fetch(
+        "/api/tmdb/status",
+        {
+          cache: "no-store",
+        },
+      );
 
       if (!response.ok) {
-        setTmdb({ connected: false });
+        setTmdb({
+          connected: false,
+        });
+
         return;
       }
 
@@ -46,7 +98,10 @@ const PersonalizePage = () => {
 
       setTmdb(data);
     } catch (error) {
-      console.error("Failed to load TMDB status:", error);
+      console.error(
+        "Failed to load TMDB status:",
+        error,
+      );
 
       setTmdb({
         connected: false,
@@ -60,37 +115,92 @@ const PersonalizePage = () => {
     loadTMDBStatus();
   }, []);
 
-  const handleFiles = (files: FileList | null) => {
+  const handleFiles = (
+    files: FileList | null,
+  ) => {
     if (!files) return;
 
-    const validFiles = Array.from(files).filter((file) => {
-      const name = file.name.toLowerCase();
+    const validFiles = Array.from(files).filter(
+      (file) => {
+        const name =
+          file.name.toLowerCase();
 
-      return name.endsWith(".csv") || name.endsWith(".json");
-    });
+        return (
+          name.endsWith(".csv") ||
+          name.endsWith(".json")
+        );
+      },
+    );
 
     setSelectedFiles(validFiles);
   };
 
   const connectTMDB = () => {
-    window.location.href = "/api/tmdb/connect";
+    window.location.href =
+      "/api/tmdb/connect";
   };
 
   const disconnectTMDB = async () => {
     setDisconnecting(true);
+    setImportResult(null);
 
     try {
-      await fetch("/api/tmdb/disconnect", {
-        method: "POST",
-      });
+      await fetch(
+        "/api/tmdb/disconnect",
+        {
+          method: "POST",
+        },
+      );
 
       setTmdb({
         connected: false,
       });
     } catch (error) {
-      console.error("Failed to disconnect TMDB:", error);
+      console.error(
+        "Failed to disconnect TMDB:",
+        error,
+      );
     } finally {
       setDisconnecting(false);
+    }
+  };
+
+  const importTMDB = async () => {
+    setImporting(true);
+    setImportError(null);
+
+    try {
+      const response = await fetch(
+        "/api/tmdb/import",
+        {
+          method: "POST",
+          cache: "no-store",
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ??
+            "Failed to import TMDB data.",
+        );
+      }
+
+      setImportResult(data);
+    } catch (error) {
+      console.error(
+        "Failed to import TMDB data:",
+        error,
+      );
+
+      setImportError(
+        error instanceof Error
+          ? error.message
+          : "Failed to import TMDB data.",
+      );
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -100,6 +210,7 @@ const PersonalizePage = () => {
         {/* Hero */}
         <section className="relative overflow-hidden rounded-3xl border border-default-200 bg-background/70 p-6 shadow-2xl backdrop-blur-xl sm:p-10">
           <div className="pointer-events-none absolute -right-24 -top-24 size-64 rounded-full bg-primary/10 blur-3xl" />
+
           <div className="pointer-events-none absolute -bottom-32 -left-20 size-72 rounded-full bg-primary/5 blur-3xl" />
 
           <div className="relative flex flex-col gap-5">
@@ -117,18 +228,23 @@ const PersonalizePage = () => {
               </h1>
 
               <p className="mt-4 max-w-2xl text-sm leading-7 text-default-500 sm:text-base">
-                Connect your movie accounts and import your existing ratings,
-                watch history and watchlists. RyuFlix will use that information
-                to build a much more personal discovery experience.
+                Connect your movie accounts and
+                import your existing ratings,
+                watch history and watchlists.
+                RyuFlix will use that information
+                to build a much more personal
+                discovery experience.
               </p>
             </div>
           </div>
         </section>
 
-        {/* Connected accounts */}
+        {/* Accounts */}
         <section className="flex flex-col gap-4">
           <div>
-            <h2 className="text-xl font-semibold">Your accounts</h2>
+            <h2 className="text-xl font-semibold">
+              Your accounts
+            </h2>
 
             <p className="mt-1 text-sm text-default-500">
               Connect services you already use.
@@ -145,10 +261,13 @@ const PersonalizePage = () => {
                   </div>
 
                   <div>
-                    <h3 className="font-semibold">TMDB</h3>
+                    <h3 className="font-semibold">
+                      TMDB
+                    </h3>
 
                     <p className="text-sm text-default-500">
-                      Ratings, favourites & watchlists
+                      Ratings, favourites &
+                      watchlists
                     </p>
                   </div>
                 </div>
@@ -169,19 +288,20 @@ const PersonalizePage = () => {
                 )}
               </div>
 
-              {tmdb.connected && tmdb.account && (
-                <div className="mt-5 rounded-xl bg-default-100/60 px-4 py-3">
-                  <p className="text-xs text-default-500">
-                    Connected account
-                  </p>
+              {tmdb.connected &&
+                tmdb.account && (
+                  <div className="mt-5 rounded-xl bg-default-100/60 px-4 py-3">
+                    <p className="text-xs text-default-500">
+                      Connected account
+                    </p>
 
-                  <p className="mt-1 font-semibold">
-                    {tmdb.account.username ||
-                      tmdb.account.name ||
-                      `TMDB #${tmdb.account.id}`}
-                  </p>
-                </div>
-              )}
+                    <p className="mt-1 font-semibold">
+                      {tmdb.account.username ||
+                        tmdb.account.name ||
+                        `TMDB #${tmdb.account.id}`}
+                    </p>
+                  </div>
+                )}
 
               {!tmdb.connected ? (
                 <button
@@ -193,18 +313,44 @@ const PersonalizePage = () => {
                   Connect TMDB
                 </button>
               ) : (
-                <button
-                  type="button"
-                  onClick={disconnectTMDB}
-                  disabled={disconnecting}
-                  className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-default-100 text-sm font-semibold text-default-700 transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <IoLogOutOutline className="size-5" />
+                <div className="mt-6 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={importTMDB}
+                    disabled={importing}
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <IoRefreshOutline
+                      className={
+                        importing
+                          ? "size-5 animate-spin"
+                          : "size-5"
+                      }
+                    />
 
-                  {disconnecting
-                    ? "Disconnecting..."
-                    : "Disconnect TMDB"}
-                </button>
+                    {importing
+                      ? "Importing your taste..."
+                      : importResult
+                        ? "Refresh TMDB data"
+                        : "Import my TMDB taste"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={disconnectTMDB}
+                    disabled={
+                      disconnecting ||
+                      importing
+                    }
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-default-100 text-sm font-semibold text-default-700 transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <IoLogOutOutline className="size-5" />
+
+                    {disconnecting
+                      ? "Disconnecting..."
+                      : "Disconnect TMDB"}
+                  </button>
+                </div>
               )}
             </div>
 
@@ -217,27 +363,37 @@ const PersonalizePage = () => {
                   </div>
 
                   <div>
-                    <h3 className="font-semibold">Letterboxd</h3>
+                    <h3 className="font-semibold">
+                      Letterboxd
+                    </h3>
 
                     <p className="text-sm text-default-500">
-                      Import your existing movie data
+                      Import your existing movie
+                      data
                     </p>
                   </div>
                 </div>
 
-                {selectedFiles.length > 0 && (
+                {selectedFiles.length >
+                  0 && (
                   <IoCheckmarkCircle className="size-5 text-success" />
                 )}
               </div>
 
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() =>
+                  fileInputRef.current?.click()
+                }
                 className="mt-6 h-11 w-full rounded-xl bg-foreground text-sm font-semibold text-background transition-opacity hover:opacity-90"
               >
-                {selectedFiles.length > 0
+                {selectedFiles.length >
+                0
                   ? `${selectedFiles.length} file${
-                      selectedFiles.length === 1 ? "" : "s"
+                      selectedFiles.length ===
+                      1
+                        ? ""
+                        : "s"
                     } selected`
                   : "Import Letterboxd data"}
               </button>
@@ -249,14 +405,179 @@ const PersonalizePage = () => {
                 accept=".csv,.json"
                 className="hidden"
                 onChange={(event) =>
-                  handleFiles(event.target.files)
+                  handleFiles(
+                    event.target.files,
+                  )
                 }
               />
             </div>
           </div>
         </section>
 
-        {/* Import area */}
+        {/* TMDB import results */}
+        {importError && (
+          <section className="rounded-2xl border border-danger/30 bg-danger/5 p-5">
+            <p className="font-semibold text-danger">
+              TMDB import failed
+            </p>
+
+            <p className="mt-1 text-sm text-danger/80">
+              {importError}
+            </p>
+          </section>
+        )}
+
+        {importResult && (
+          <section className="rounded-3xl border border-primary/20 bg-background/60 p-6 backdrop-blur-xl sm:p-8">
+            <div className="flex flex-col gap-6">
+              <div>
+                <p className="text-sm font-medium uppercase tracking-[0.2em] text-primary">
+                  Taste data found
+                </p>
+
+                <h2 className="mt-2 text-2xl font-semibold">
+                  Your TMDB profile is ready.
+                </h2>
+
+                <p className="mt-1 text-sm text-default-500">
+                  This is the first snapshot RyuFlix
+                  pulled from your account.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {[
+                  [
+                    "Rated movies",
+                    importResult.totals
+                      .ratedMovies,
+                  ],
+                  [
+                    "Rated TV",
+                    importResult.totals
+                      .ratedTV,
+                  ],
+                  [
+                    "Movie favourites",
+                    importResult.totals
+                      .favoritesMovies,
+                  ],
+                  [
+                    "TV favourites",
+                    importResult.totals
+                      .favoritesTV,
+                  ],
+                  [
+                    "Movie watchlist",
+                    importResult.totals
+                      .watchlistMovies,
+                  ],
+                  [
+                    "TV watchlist",
+                    importResult.totals
+                      .watchlistTV,
+                  ],
+                ].map(
+                  ([label, value]) => (
+                    <div
+                      key={label}
+                      className="rounded-2xl border border-default-200 bg-default-50/40 p-4"
+                    >
+                      <p className="text-2xl font-bold">
+                        {value}
+                      </p>
+
+                      <p className="mt-1 text-xs text-default-500">
+                        {label}
+                      </p>
+                    </div>
+                  ),
+                )}
+              </div>
+
+              {(importResult.samples
+                .ratedMovies.length >
+                0 ||
+                importResult.samples
+                  .ratedTV.length >
+                  0) && (
+                <div className="grid gap-6 md:grid-cols-2">
+                  {importResult.samples
+                    .ratedMovies.length >
+                    0 && (
+                    <div>
+                      <h3 className="mb-3 font-semibold">
+                        Recent movie ratings
+                      </h3>
+
+                      <div className="flex flex-col gap-2">
+                        {importResult.samples.ratedMovies
+                          .slice(0, 5)
+                          .map((movie) => (
+                            <div
+                              key={movie.id}
+                              className="flex items-center justify-between gap-3 rounded-xl bg-default-100/60 px-4 py-3"
+                            >
+                              <span className="truncate text-sm">
+                                {movie.title}
+                              </span>
+
+                              <span className="shrink-0 rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
+                                {movie.userRating ??
+                                  "—"}
+                                /10
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {importResult.samples
+                    .ratedTV.length >
+                    0 && (
+                    <div>
+                      <h3 className="mb-3 font-semibold">
+                        Recent TV ratings
+                      </h3>
+
+                      <div className="flex flex-col gap-2">
+                        {importResult.samples.ratedTV
+                          .slice(0, 5)
+                          .map((show) => (
+                            <div
+                              key={show.id}
+                              className="flex items-center justify-between gap-3 rounded-xl bg-default-100/60 px-4 py-3"
+                            >
+                              <span className="truncate text-sm">
+                                {show.title}
+                              </span>
+
+                              <span className="shrink-0 rounded-lg bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
+                                {show.userRating ??
+                                  "—"}
+                                /10
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <p className="text-xs text-default-400">
+                Snapshot imported{" "}
+                {new Date(
+                  importResult.importedAt,
+                ).toLocaleString()}
+                .
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* Letterboxd import area */}
         <section className="rounded-3xl border border-default-200 bg-background/60 p-6 backdrop-blur-xl sm:p-8">
           <div className="flex flex-col gap-6">
             <div>
@@ -265,14 +586,18 @@ const PersonalizePage = () => {
               </h2>
 
               <p className="mt-1 text-sm leading-6 text-default-500">
-                Have a Letterboxd export? Select its CSV or JSON files here.
-                Your files stay in this browser during this stage.
+                Have a Letterboxd export?
+                Select its CSV or JSON files
+                here. Your files stay in this
+                browser during this stage.
               </p>
             </div>
 
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() =>
+                fileInputRef.current?.click()
+              }
               className="flex min-h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-default-300 bg-default-50/40 px-6 text-center transition-colors hover:border-primary/50 hover:bg-primary/5"
             >
               <div className="mb-4 flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -280,37 +605,45 @@ const PersonalizePage = () => {
               </div>
 
               <p className="font-semibold">
-                {selectedFiles.length > 0
+                {selectedFiles.length >
+                0
                   ? `${selectedFiles.length} files ready`
                   : "Choose your Letterboxd export"}
               </p>
 
               <p className="mt-2 max-w-md text-xs leading-5 text-default-500">
-                CSV and JSON files are accepted.
+                CSV and JSON files are
+                accepted.
               </p>
             </button>
 
-            {selectedFiles.length > 0 && (
+            {selectedFiles.length >
+              0 && (
               <div className="rounded-2xl bg-default-100/70 p-4">
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-default-500">
                   Selected files
                 </p>
 
                 <div className="flex flex-col gap-2">
-                  {selectedFiles.map((file) => (
-                    <div
-                      key={`${file.name}-${file.lastModified}`}
-                      className="flex items-center justify-between gap-3 rounded-xl bg-background/70 px-4 py-3"
-                    >
-                      <span className="truncate text-sm">
-                        {file.name}
-                      </span>
+                  {selectedFiles.map(
+                    (file) => (
+                      <div
+                        key={`${file.name}-${file.lastModified}`}
+                        className="flex items-center justify-between gap-3 rounded-xl bg-background/70 px-4 py-3"
+                      >
+                        <span className="truncate text-sm">
+                          {file.name}
+                        </span>
 
-                      <span className="shrink-0 text-xs text-default-400">
-                        {(file.size / 1024).toFixed(1)} KB
-                      </span>
-                    </div>
-                  ))}
+                        <span className="shrink-0 text-xs text-default-400">
+                          {(
+                            file.size / 1024
+                          ).toFixed(1)}{" "}
+                          KB
+                        </span>
+                      </div>
+                    ),
+                  )}
                 </div>
               </div>
             )}
@@ -330,9 +663,11 @@ const PersonalizePage = () => {
               </h2>
 
               <p className="mt-1 text-sm leading-6 text-default-500">
-                We won't reduce your taste to a single genre. Your imported
-                data will eventually be combined with TMDB metadata to build a
-                much richer profile.
+                We won't reduce your taste to a
+                single genre. Your imported data
+                will eventually be combined with
+                TMDB metadata to build a much
+                richer profile.
               </p>
             </div>
           </div>
@@ -364,8 +699,10 @@ const PersonalizePage = () => {
           <IoLockClosedOutline className="size-4 shrink-0" />
 
           <span>
-            Your TMDB authorization token is kept in a secure HttpOnly
-            browser cookie and is never exposed to page JavaScript.
+            Your TMDB authorization token is kept
+            in a secure HttpOnly browser cookie
+            and is never exposed to page
+            JavaScript.
           </span>
         </div>
       </div>
