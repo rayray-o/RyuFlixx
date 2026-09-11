@@ -12,6 +12,8 @@ import type {
 const TMDB_COOKIE =
   "ryuflix_tmdb_access_token";
 
+const MAX_PAGES_PER_COLLECTION = 100;
+
 type TMDBPage<T> = {
   page?: number;
   total_pages?: number;
@@ -27,6 +29,7 @@ type TMDBItem = {
   release_date?: string;
   first_air_date?: string;
   genre_ids?: number[];
+  rating?: number;
 };
 
 type TasteItem = TMDBItem & {
@@ -75,12 +78,19 @@ type EnrichedItem = TasteItem & {
   origin_country?: string[];
 };
 
+type TMDBAccount = {
+  id?: number;
+  account_object_id?: string;
+  username?: string;
+  name?: string;
+};
+
 async function tmdbRequest<T>(
   endpoint: string,
   accessToken: string,
 ): Promise<T> {
   const response = await fetch(
-    `https://api.themoviedb.org/3${endpoint}`,
+    `https://api.themoviedb.org/4${endpoint}`,
     {
       headers: {
         Authorization:
@@ -91,42 +101,99 @@ async function tmdbRequest<T>(
     },
   );
 
-  if (!response.ok) {
-    const errorText =
-      await response.text();
+  const rawText =
+    await response.text();
 
+  if (!response.ok) {
     throw new Error(
-      `TMDB request failed (${response.status}): ${errorText}`,
+      `TMDB request failed (${response.status}): ${rawText}`,
     );
   }
 
-  return response.json();
+  try {
+    return rawText
+      ? (JSON.parse(rawText) as T)
+      : ({} as T);
+  } catch {
+    throw new Error(
+      "TMDB returned an invalid JSON response.",
+    );
+  }
 }
 
-async function getCollection(
+/**
+ * Fetch every page of a TMDB v4 collection.
+ *
+ * TMDB exposes `page` and `total_pages`
+ * on these account collection endpoints.
+ */
+async function getAllPages(
   endpoint: string,
   accessToken: string,
 ) {
-  const data =
-    await tmdbRequest<
-      TMDBPage<TMDBItem>
-    >(
-      endpoint,
-      accessToken,
+  const results: TMDBItem[] = [];
+
+  let page = 1;
+  let totalPages = 1;
+  let totalResults = 0;
+
+  while (
+    page <=
+      totalPages &&
+    page <=
+      MAX_PAGES_PER_COLLECTION
+  ) {
+    const separator =
+      endpoint.includes("?")
+        ? "&"
+        : "?";
+
+    const data =
+      await tmdbRequest<
+        TMDBPage<TMDBItem>
+      >(
+        `${endpoint}${separator}page=${page}&language=en-US`,
+        accessToken,
+      );
+
+    const pageResults =
+      data.results ?? [];
+
+    results.push(
+      ...pageResults,
     );
 
+    totalPages =
+      Math.max(
+        1,
+        data.total_pages ?? 1,
+      );
+
+    totalResults =
+      data.total_results ??
+      results.length;
+
+    if (
+      page >=
+      totalPages
+    ) {
+      break;
+    }
+
+    page += 1;
+  }
+
   return {
-    results:
-      data.results ?? [],
-
-    totalResults:
-      data.total_results ?? 0,
-
-    totalPages:
-      data.total_pages ?? 0,
+    results,
+    totalResults,
+    totalPages,
   };
 }
 
+/**
+ * Deeply enrich a title with
+ * genres, keywords, cast and crew.
+ */
 async function enrichItem(
   item: TasteItem,
   accessToken: string,
@@ -173,6 +240,10 @@ async function enrichItem(
   }
 }
 
+/**
+ * Merge duplicate titles coming from
+ * ratings, favorites and watchlists.
+ */
 function dedupeItems(
   items: TasteItem[],
 ) {
@@ -229,15 +300,43 @@ function dedupeItems(
   );
 }
 
+/**
+ * Give the titles with the strongest
+ * taste signals priority for enrichment.
+ */
+function enrichmentScore(
+  item: TasteItem,
+) {
+  let score = 0;
+
+  if (
+    item.userRating != null
+  ) {
+    score +=
+      Math.abs(
+        item.userRating - 5,
+      );
+  }
+
+  if (item.favorite) {
+    score += 5;
+  }
+
+  if (item.watchlist) {
+    score += 1;
+  }
+
+  return score;
+}
+
 export async function POST() {
   try {
     /*
-     * RyuFlix has no account system.
+     * RyuFlix does not have its own
+     * account/login system.
      *
-     * The only authentication needed
-     * here is the user's TMDB OAuth
-     * access token stored in the
-     * HttpOnly TMDB cookie.
+     * The user's TMDB OAuth token is
+     * stored in this HttpOnly cookie.
      */
     const cookieStore =
       await cookies();
@@ -260,24 +359,42 @@ export async function POST() {
     }
 
     /*
-     * Verify the TMDB connection.
+     * Verify the TMDB access token
+     * and retrieve the v4 account object ID.
      */
     const account =
-      await tmdbRequest<{
-        id: number;
-        username?: string;
-        name?: string;
-      }>(
+      await tmdbRequest<
+        TMDBAccount
+      >(
         "/account",
         accessToken,
       );
 
-    const accountId =
-      account.id;
+    const accountObjectId =
+      account.account_object_id;
+
+    if (
+      !accountObjectId
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "TMDB connected successfully, but TMDB did not return an account object ID.",
+        },
+        {
+          status: 502,
+        },
+      );
+    }
 
     /*
-     * Pull the user's TMDB
-     * collections.
+     * IMPORTANT:
+     *
+     * These are TMDB v4 account endpoints.
+     * We use account_object_id rather than
+     * the old numeric v3 account ID.
+     *
+     * Each collection is fully paginated.
      */
     const [
       ratedMovies,
@@ -287,37 +404,53 @@ export async function POST() {
       movieWatchlist,
       tvWatchlist,
     ] = await Promise.all([
-      getCollection(
-        `/account/${accountId}/rated/movies?sort_by=created_at.desc`,
+      getAllPages(
+        `/account/${encodeURIComponent(
+          accountObjectId,
+        )}/movie/rated?sort_by=created_at.desc`,
         accessToken,
       ),
 
-      getCollection(
-        `/account/${accountId}/rated/tv?sort_by=created_at.desc`,
+      getAllPages(
+        `/account/${encodeURIComponent(
+          accountObjectId,
+        )}/tv/rated?sort_by=created_at.desc`,
         accessToken,
       ),
 
-      getCollection(
-        `/account/${accountId}/favorite/movies?sort_by=created_at.desc`,
+      getAllPages(
+        `/account/${encodeURIComponent(
+          accountObjectId,
+        )}/movie/favorites?sort_by=created_at.desc`,
         accessToken,
       ),
 
-      getCollection(
-        `/account/${accountId}/favorite/tv?sort_by=created_at.desc`,
+      getAllPages(
+        `/account/${encodeURIComponent(
+          accountObjectId,
+        )}/tv/favorites?sort_by=created_at.desc`,
         accessToken,
       ),
 
-      getCollection(
-        `/account/${accountId}/watchlist/movies?sort_by=created_at.desc`,
+      getAllPages(
+        `/account/${encodeURIComponent(
+          accountObjectId,
+        )}/movie/watchlist?sort_by=created_at.desc`,
         accessToken,
       ),
 
-      getCollection(
-        `/account/${accountId}/watchlist/tv?sort_by=created_at.desc`,
+      getAllPages(
+        `/account/${encodeURIComponent(
+          accountObjectId,
+        )}/tv/watchlist?sort_by=created_at.desc`,
         accessToken,
       ),
     ]);
 
+    /*
+     * Convert TMDB collections into the
+     * common Taste Engine format.
+     */
     const ratedMovieItems:
       TasteItem[] =
       ratedMovies.results.map(
@@ -328,11 +461,7 @@ export async function POST() {
             "movie",
 
           userRating:
-            (
-              movie as TMDBItem & {
-                rating?: number;
-              }
-            ).rating ??
+            movie.rating ??
             null,
         }),
       );
@@ -347,11 +476,7 @@ export async function POST() {
             "tv",
 
           userRating:
-            (
-              show as TMDBItem & {
-                rating?: number;
-              }
-            ).rating ??
+            show.rating ??
             null,
         }),
       );
@@ -413,7 +538,8 @@ export async function POST() {
       );
 
     /*
-     * Merge duplicate titles.
+     * Merge titles appearing in multiple
+     * collections.
      */
     const allItems =
       dedupeItems([
@@ -426,46 +552,17 @@ export async function POST() {
       ]);
 
     /*
-     * Deeply enrich the strongest
-     * taste signals.
+     * Only deeply enrich the strongest
+     * 30 signals so a huge TMDB library
+     * doesn't cause hundreds of API calls.
      */
     const strongestItems =
       [...allItems]
-        .sort((a, b) => {
-          const score =
-            (item: TasteItem) => {
-              let value = 0;
-
-              if (
-                item.userRating != null
-              ) {
-                value +=
-                  Math.abs(
-                    item.userRating -
-                      5,
-                  );
-              }
-
-              if (
-                item.favorite
-              ) {
-                value += 5;
-              }
-
-              if (
-                item.watchlist
-              ) {
-                value += 1;
-              }
-
-              return value;
-            };
-
-          return (
-            score(b) -
-            score(a)
-          );
-        })
+        .sort(
+          (a, b) =>
+            enrichmentScore(b) -
+            enrichmentScore(a),
+        )
         .slice(0, 30);
 
     const enrichedResults:
@@ -474,6 +571,10 @@ export async function POST() {
         | null
       )[] = [];
 
+    /*
+     * Process enrichment in batches
+     * instead of firing all requests at once.
+     */
     const batchSize =
       5;
 
@@ -489,7 +590,7 @@ export async function POST() {
           i + batchSize,
         );
 
-      const results =
+      const batchResults =
         await Promise.all(
           batch.map(
             (item) =>
@@ -501,7 +602,7 @@ export async function POST() {
         );
 
       enrichedResults.push(
-        ...results,
+        ...batchResults,
       );
     }
 
@@ -514,8 +615,7 @@ export async function POST() {
       );
 
     /*
-     * Build the actual RyuFlix
-     * taste profile.
+     * Build the RyuFlix taste profile.
      */
     const tasteProfile:
       TasteProfile =
@@ -542,12 +642,8 @@ export async function POST() {
       });
 
     /*
-     * Nothing is saved to Supabase.
-     *
-     * The browser will receive this
-     * profile and store it locally.
+     * Small sample for debugging/display.
      */
-
     const ratedMovieSamples =
       ratedMovies.results
         .slice(0, 10)
@@ -567,11 +663,7 @@ export async function POST() {
                 : null,
 
             userRating:
-              (
-                movie as TMDBItem & {
-                  rating?: number;
-                }
-              ).rating ??
+              movie.rating ??
               null,
 
             releaseDate:
@@ -599,11 +691,7 @@ export async function POST() {
                 : null,
 
             userRating:
-              (
-                show as TMDBItem & {
-                  rating?: number;
-                }
-              ).rating ??
+              show.rating ??
               null,
 
             releaseDate:
@@ -618,7 +706,11 @@ export async function POST() {
 
       account: {
         id:
-          account.id,
+          account.id ??
+          null,
+
+        objectId:
+          accountObjectId,
 
         username:
           account.username ??
@@ -649,6 +741,26 @@ export async function POST() {
           tvWatchlist.totalResults,
       },
 
+      pagination: {
+        ratedMoviesPages:
+          ratedMovies.totalPages,
+
+        ratedTVPages:
+          ratedTV.totalPages,
+
+        favoritesMoviesPages:
+          favoriteMovies.totalPages,
+
+        favoritesTVPages:
+          favoriteTV.totalPages,
+
+        watchlistMoviesPages:
+          movieWatchlist.totalPages,
+
+        watchlistTVPages:
+          tvWatchlist.totalPages,
+      },
+
       samples: {
         ratedMovies:
           ratedMovieSamples,
@@ -656,6 +768,9 @@ export async function POST() {
         ratedTV:
           ratedTVSamples,
       },
+
+      enrichedItems:
+        enrichedItems.length,
 
       tasteProfile,
     });
@@ -677,4 +792,4 @@ export async function POST() {
       },
     );
   }
-      }
+        }
