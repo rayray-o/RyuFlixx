@@ -383,6 +383,10 @@ export default function RyuFlixCursor() {
     };
   }, []);
 
+  const glow = isTv
+    ? "rgba(255,181,27,0.58)"
+    : "rgba(22,131,255,0.58)";
+
   return (
     <>
       <div
@@ -394,15 +398,18 @@ export default function RyuFlixCursor() {
           left-0
           top-0
           z-[99999]
-          h-[36px]
-          w-[36px]
+          h-[38px]
+          w-[38px]
           rounded-full
         "
         style={{
-          border: `1px solid ${accent}`,
+          border: `1.5px solid ${accent}`,
+          background: "rgba(255,255,255,0.025)",
           boxShadow: `
-            0 0 7px ${accent}66,
-            0 0 18px ${accent}33
+            0 0 0 1px rgba(255,255,255,0.12),
+            0 0 8px ${accent},
+            0 0 20px ${accent},
+            0 0 38px ${glow}
           `,
           opacity: 0,
           willChange: "transform, opacity",
@@ -423,11 +430,12 @@ export default function RyuFlixCursor() {
           rounded-full
         "
         style={{
-          backgroundColor: accent,
+          backgroundColor: "#ffffff",
           boxShadow: `
-            0 0 6px ${accent},
-            0 0 14px ${accent}aa,
-            0 0 22px ${accent}44
+            0 0 0 2px ${accent},
+            0 0 8px ${accent},
+            0 0 18px ${accent},
+            0 0 30px ${glow}
           `,
           opacity: 0,
           willChange: "transform, opacity",
@@ -435,4 +443,4 @@ export default function RyuFlixCursor() {
       />
     </>
   );
-            }
+        }
