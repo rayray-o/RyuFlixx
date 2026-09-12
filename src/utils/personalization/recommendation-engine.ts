@@ -135,64 +135,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function timeoutFetch(
-  url: string,
-  options?: RequestInit,
-): Promise<Response> {
-  const controller = new AbortController();
-
-  const timeout = window.setTimeout(() => {
-    controller.abort();
-  }, REQUEST_TIMEOUT);
-
-  return fetch(url, {
-    ...options,
-    signal: controller.signal,
-    headers: {
-      Authorization: `Bearer ${env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN}`,
-      accept: "application/json",
-      ...(options?.headers ?? {}),
-    },
-  }).finally(() => {
-    window.clearTimeout(timeout);
-  });
-}
-
-async function tmdb<T>(
-  path: string,
-  params?: Record<string, string | number | undefined>,
-): Promise<T | null> {
-  try {
-    const searchParams = new URLSearchParams();
-
-    Object.entries(params ?? {}).forEach(
-      ([key, value]) => {
-        if (
-          value !== undefined &&
-          value !== null &&
-          String(value).length > 0
-        ) {
-          searchParams.set(key, String(value));
-        }
-      },
-    );
-
-    const query = searchParams.toString();
-
-    const response = await timeoutFetch(
-      `${TMDB_BASE_URL}${path}${query ? `?${query}` : ""}`,
-    );
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return (await response.json()) as T;
-  } catch {
-    return null;
-  }
-}
-
 function profileSignals(
   values: unknown,
 ): ProfileSignal[] {
@@ -201,23 +143,32 @@ function profileSignals(
   }
 
   return values
-    .map((value) => {
-      if (!value || typeof value !== "object") {
+    .map((value): ProfileSignal | null => {
+      if (
+        !value ||
+        typeof value !== "object"
+      ) {
         return null;
       }
 
       const item =
         value as Record<string, unknown>;
 
+      const name = string(item.name);
+
+      if (!name) {
+        return null;
+      }
+
       return {
-        name: string(item.name),
+        name,
         score: number(item.score),
         id: number(item.id),
       };
     })
     .filter(
       (value): value is ProfileSignal =>
-        Boolean(value?.name),
+        value !== null,
     );
 }
 
@@ -1068,14 +1019,6 @@ export async function getPersonalizedRecommendations(
       ),
   );
 
-  /*
-   * TMDB can occasionally return no personalized
-   * candidates because of filters/rate limits.
-   *
-   * Do not make the For You row disappear.
-   * Fall back to a broad, high-quality pool and
-   * still rank it using the user's taste profile.
-   */
   if (
     candidates.length <
     Math.min(8, limit)
@@ -1111,12 +1054,6 @@ export async function getPersonalizedRecommendations(
     return [];
   }
 
-  /*
-   * First ranking pass is immediate.
-   * This means the engine always has a usable
-   * candidate pool even if detailed TMDB requests
-   * fail or time out.
-   */
   const basicRanked =
     candidates
       .map((candidate) => ({
@@ -1133,12 +1070,6 @@ export async function getPersonalizedRecommendations(
           number(a._score),
       );
 
-  /*
-   * Only enrich the strongest candidates.
-   * 12 detailed requests are enough to identify
-   * directors, actors and keywords without turning
-   * the homepage into a giant API waterfall.
-   */
   const enrichmentPool =
     basicRanked.slice(
       0,
@@ -1187,4 +1118,4 @@ export async function getPersonalizedRecommendations(
     ranked,
     limit,
   );
-  }
+    }
