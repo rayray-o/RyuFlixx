@@ -1,7 +1,12 @@
 "use client";
 
 import { PlayersProps } from "@/types";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import AdFreeIframe from "@/adblocker/AdFreeIframes";
 
 interface WatchPlayerProps {
@@ -9,26 +14,43 @@ interface WatchPlayerProps {
 
   selectedServer: number;
 
-  onServerChange: (index: number) => void;
+  onServerChange: (
+    index: number,
+  ) => void;
 
   getCurrentTime?: () => number;
 
   flushProgress?: () => void;
 
-  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  iframeRef?: React.RefObject<
+    HTMLIFrameElement | null
+  >;
 
   title?: string;
 }
 
-function addResumePosition(source: string, position: number) {
-  if (!Number.isFinite(position) || position <= 0) {
+/*
+ * Add/update startAt without destroying
+ * existing query parameters.
+ */
+function addResumePosition(
+  source: string,
+  position: number,
+) {
+  if (
+    !Number.isFinite(position) ||
+    position <= 0
+  ) {
     return source;
   }
 
   try {
     const url = new URL(source);
 
-    url.searchParams.set("startAt", Math.floor(position).toString());
+    url.searchParams.set(
+      "startAt",
+      Math.floor(position).toString(),
+    );
 
     return url.toString();
   } catch {
@@ -36,7 +58,9 @@ function addResumePosition(source: string, position: number) {
   }
 }
 
-const WatchPlayer: React.FC<WatchPlayerProps> = ({
+const WatchPlayer: React.FC<
+  WatchPlayerProps
+> = ({
   servers,
   selectedServer,
   onServerChange,
@@ -45,47 +69,75 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
   iframeRef,
   title = "Video Player",
 }) => {
+  /*
+   * Keep the selected server safely inside
+   * the available server array.
+   */
   const safeIndex =
     servers.length > 0
       ? Math.min(
-          Math.max(selectedServer, 0),
+          Math.max(
+            selectedServer,
+            0,
+          ),
           servers.length - 1,
         )
       : 0;
 
-  const currentServer = useMemo(
-    () => servers[safeIndex],
-    [servers, safeIndex],
+  const currentServer =
+    useMemo(
+      () =>
+        servers[safeIndex],
+      [servers, safeIndex],
+    );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  /*
+   * Position captured immediately before
+   * switching providers.
+   */
+  const [
+    handoffPosition,
+    setHandoffPosition,
+  ] = useState<number | null>(
+    null,
   );
 
-  const [loading, setLoading] = useState(true);
-
-  const [handoffPosition, setHandoffPosition] =
-    useState<number | null>(null);
-
   const internalIframeRef =
-    useRef<HTMLIFrameElement | null>(null);
+    useRef<HTMLIFrameElement | null>(
+      null,
+    );
 
+  /*
+   * Keep both the internal ref and the
+   * parent's playerFrameRef synchronized.
+   */
   const setIframeRef = (
     element: HTMLIFrameElement | null,
   ) => {
-    internalIframeRef.current = element;
+    internalIframeRef.current =
+      element;
 
     if (iframeRef) {
-      iframeRef.current = element;
+      iframeRef.current =
+        element;
     }
   };
 
   /*
-   * Reset handoff when the actual server list/content changes.
+   * When the actual movie/episode changes,
+   * don't carry a previous provider handoff
+   * position into the new content.
    */
   useEffect(() => {
     setHandoffPosition(null);
   }, [servers.length]);
 
   /*
-   * Every time the selected provider changes,
-   * show the connection overlay again.
+   * Every provider change gets its own
+   * loading state.
    */
   useEffect(() => {
     setLoading(true);
@@ -101,6 +153,10 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     );
   }
 
+  /*
+   * Only add startAt when the user actually
+   * switched providers during playback.
+   */
   const iframeSource =
     handoffPosition !== null
       ? addResumePosition(
@@ -139,10 +195,13 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
                 {currentServer.title}
               </span>
 
-              {handoffPosition !== null && (
+              {handoffPosition !==
+                null && (
                 <span className="text-[10px] text-white/30">
                   Resuming at{" "}
-                  {Math.floor(handoffPosition)}
+                  {Math.floor(
+                    handoffPosition,
+                  )}
                   s
                 </span>
               )}
@@ -156,61 +215,74 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
           Server
         </span>
 
-        {servers.map((server, index) => {
-          const active = index === safeIndex;
+        {servers.map(
+          (server, index) => {
+            const active =
+              index === safeIndex;
 
-          return (
-            <button
-              key={`${server.title}-${index}`}
-              type="button"
-              aria-pressed={active}
-              onClick={() => {
-                if (active) {
-                  return;
-                }
+            return (
+              <button
+                key={`${server.title}-${index}`}
+                type="button"
+                aria-pressed={active}
+                onClick={() => {
+                  if (active) {
+                    return;
+                  }
 
-                /*
-                 * Capture the freshest playback position
-                 * before destroying the current iframe.
-                 */
-                const position = Math.max(
-                  0,
-                  getCurrentTime?.() ?? 0,
-                );
+                  /*
+                   * Capture the freshest playback
+                   * position before the old iframe
+                   * is destroyed.
+                   */
+                  const position =
+                    Math.max(
+                      0,
+                      getCurrentTime?.() ??
+                        0,
+                    );
 
-                flushProgress?.();
+                  flushProgress?.();
 
-                setHandoffPosition(position);
-                setLoading(true);
+                  setHandoffPosition(
+                    position,
+                  );
 
-                onServerChange(index);
-              }}
-              className={[
-                "rounded-xl border px-4 py-2 text-sm font-medium",
-                "transition-colors duration-150",
-                "focus:outline-none focus:ring-2 focus:ring-white/30",
-                active
-                  ? "border-white/30 bg-white/15 text-white shadow-lg"
-                  : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
-              ].join(" ")}
-            >
-              <span className="flex items-center gap-2">
-                {server.title}
+                  setLoading(true);
 
-                {server.recommended && (
-                  <span className="text-[9px] uppercase tracking-wider text-white/40">
-                    Recommended
-                  </span>
-                )}
-              </span>
-            </button>
-          );
-        })}
+                  onServerChange(
+                    index,
+                  );
+                }}
+                className={[
+                  "rounded-xl border px-4 py-2 text-sm font-medium",
+                  "transition-colors duration-150",
+                  "focus:outline-none focus:ring-2 focus:ring-white/30",
+
+                  active
+                    ? "border-white/30 bg-white/15 text-white shadow-lg"
+                    : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
+                ].join(" ")}
+              >
+                <span className="flex items-center gap-2">
+                  {server.title}
+
+                  {server.recommended && (
+                    <span className="text-[9px] uppercase tracking-wider text-white/40">
+                      Recommended
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          },
+        )}
       </div>
     </section>
   );
 };
 
-WatchPlayer.displayName = "WatchPlayer";
+WatchPlayer.displayName =
+  "WatchPlayer";
 
 export default WatchPlayer;
