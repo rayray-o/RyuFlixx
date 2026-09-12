@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import { RyuFlixPlayer } from "@/components/ui/player/RyuFlixPlayer";
-import { IFRAME_SOURCES } from "@/adblocker/iframe-sources";
 import AdFreeIframe from "@/adblocker/AdFreeIframes";
 
 interface WatchPlayerProps {
@@ -20,31 +19,15 @@ interface WatchPlayerProps {
     index: number,
   ) => void;
 
-  /*
-   * Returns the latest playback position
-   * from usePlayerEvents.
-   */
   getCurrentTime?: () => number;
 
-  /*
-   * Immediately saves the latest playback
-   * position before destroying the old iframe.
-   */
   flushProgress?: () => void;
 
-  /*
-   * Gives the parent access to the active iframe.
-   * Used to reject stale postMessage events.
-   */
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
 
   title?: string;
 }
 
-/*
- * Add/update startAt without destroying any
- * existing query parameters.
- */
 function addResumePosition(
   source: string,
   position: number,
@@ -105,10 +88,6 @@ const WatchPlayer: React.FC<
   const [loading, setLoading] =
     useState(true);
 
-  /*
-   * Position captured at the exact moment
-   * the user switches server.
-   */
   const [
     handoffPosition,
     setHandoffPosition,
@@ -121,10 +100,6 @@ const WatchPlayer: React.FC<
       null,
     );
 
-  /*
-   * Use the parent's ref when supplied.
-   * Otherwise keep our own.
-   */
   const setIframeRef = (
     element: HTMLIFrameElement | null,
   ) => {
@@ -137,11 +112,6 @@ const WatchPlayer: React.FC<
     }
   };
 
-  /*
-   * Reset handoff state when the content
-   * itself changes, such as moving to another
-   * movie/episode.
-   */
   useEffect(() => {
     setHandoffPosition(null);
   }, [servers.length]);
@@ -150,13 +120,6 @@ const WatchPlayer: React.FC<
     setLoading(true);
   }, [currentServer?.source]);
 
-  /*
-   * ONLY the final server slot is the
-   * RyuFlix custom Video.js player.
-   *
-   * Every other server remains the
-   * original external iframe player.
-   */
   const isCustomPlayer =
     servers.length > 0 &&
     safeIndex === servers.length - 1;
@@ -193,11 +156,8 @@ const WatchPlayer: React.FC<
             }
             onTimeUpdate={() => {
               /*
-               * The existing RyuFlix progress system
-               * remains responsible for external players.
-               *
-               * This is only the authorized HLS
-               * Video.js test player.
+               * Existing RyuFlix progress
+               * handling remains untouched.
                */
             }}
             onEnded={() => {
@@ -206,30 +166,20 @@ const WatchPlayer: React.FC<
           />
         ) : (
           <>
-            {IFRAME_SOURCES.filter(
-              (f) => f.url,
-            ).map((f) => (
-              <AdFreeIframe
-                key={f.id}
-                src={f.url}
-                title={f.label}
-                height={f.height}
-              />
-            ))}
-
-            <iframe
-              ref={setIframeRef}
-              key={`${currentServer.title}-${iframeSource}`}
+            <AdFreeIframe
               src={iframeSource}
               title={`${title} — ${currentServer.title}`}
               className="absolute inset-0 block h-full w-full border-0"
-              allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
-              allowFullScreen
+              height="100%"
+              width="100%"
               loading="eager"
-              referrerPolicy="strict-origin-when-cross-origin"
-              onLoad={() =>
-                setLoading(false)
-              }
+            />
+
+            {!loading && null}
+
+            <div
+              className="pointer-events-none absolute inset-0 z-20"
+              aria-hidden="true"
             />
           </>
         )}
@@ -283,12 +233,6 @@ const WatchPlayer: React.FC<
                     return;
                   }
 
-                  /*
-                   * 1. Read the freshest position.
-                   * 2. Persist it immediately.
-                   * 3. Give that position to the new player.
-                   * 4. Then change the server.
-                   */
                   const position =
                     Math.max(
                       0,
