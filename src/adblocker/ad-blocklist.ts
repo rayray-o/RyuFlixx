@@ -1,92 +1,241 @@
 const LIST_URLS = [
-  'https://easylist.to/easylist/easylist.txt',
-  'https://easylist.to/easylist/easyprivacy.txt',
+  "https://easylist.to/easylist/easylist.txt",
+  "https://easylist.to/easylist/easyprivacy.txt",
 ];
 
-const MANUAL_DOMAINS = [
-  'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
-  'adsystem.com', 'amazon-adsystem.com', 'taboola.com', 'outbrain.com',
-  'propellerads.com', 'popads.net', 'popcash.net', 'adnxs.com',
-  'adsrvr.org', 'criteo.com', 'pubmatic.com', 'rubiconproject.com',
-  'openx.net', 'exoclick.com', 'juicyads.com', 'trafficjunky.com',
-  'adform.net', 'moatads.com', 'adcolony.com', 'mgid.com',
-  'revcontent.com', 'adsterra.com',
+const MANUAL_BLOCKED_DOMAINS = [
+  "doubleclick.net",
+  "googlesyndication.com",
+  "googleadservices.com",
+  "google-analytics.com",
+  "googletagmanager.com",
+  "adsystem.com",
+  "amazon-adsystem.com",
+  "taboola.com",
+  "outbrain.com",
+  "propellerads.com",
+  "popads.net",
+  "popcash.net",
+  "adnxs.com",
+  "adsrvr.org",
+  "criteo.com",
+  "pubmatic.com",
+  "rubiconproject.com",
+  "openx.net",
+  "exoclick.com",
+  "juicyads.com",
+  "trafficjunky.com",
+  "adform.net",
+  "moatads.com",
+  "adcolony.com",
+  "mgid.com",
+  "revcontent.com",
+  "adsterra.com",
 ];
 
-let domainSet: Set<string> | null = null;
-let cosmeticCSS: string | null = null;
-let lastFetch = 0;
+const MANUAL_BLOCKED_HINTS = [
+  "/ads/",
+  "/ad/",
+  "/advert/",
+  "/advertisement/",
+  "/advertising/",
+  "/banner/",
+  "/banners/",
+  "/popunder/",
+  "/popup/",
+  "/pop-up/",
+  "/clickout/",
+  "/redirect-ad/",
+  "/sponsor/",
+  "/sponsored/",
+  "ads.js",
+  "ad.js",
+  "adsbygoogle",
+  "doubleclick",
+  "googlesyndication",
+  "popunder",
+  "popads",
+  "popcash",
+];
+
+let blockedDomains: Set<string> | null = null;
+let blockedHints: string[] = MANUAL_BLOCKED_HINTS;
+let cosmeticCSS = "";
+let lastRefresh = 0;
+
 const CACHE_MS = 6 * 60 * 60 * 1000;
+
+function normaliseHost(host: string) {
+  return host.toLowerCase().replace(/^\.+|\.+$/g, "");
+}
+
+function isDomainMatch(host: string, domain: string) {
+  const cleanHost = normaliseHost(host);
+  const cleanDomain = normaliseHost(domain);
+
+  return (
+    cleanHost === cleanDomain ||
+    cleanHost.endsWith(`.${cleanDomain}`)
+  );
+}
 
 function parseList(raw: string) {
   const domains: string[] = [];
   const selectors: string[] = [];
 
-  raw.split('\n').forEach((line) => {
-    line = line.trim();
-    if (!line || line.startsWith('!') || line.startsWith('[') || line.startsWith('@@')) return;
+  for (const originalLine of raw.split(/\r?\n/)) {
+    const line = originalLine.trim();
 
-    const netMatch = line.match(/^\|\|([a-zA-Z0-9.-]+)\^/);
-    if (netMatch) {
-      domains.push(netMatch[1].toLowerCase());
-      return;
+    if (
+      !line ||
+      line.startsWith("!") ||
+      line.startsWith("[") ||
+      line.startsWith("@@")
+    ) {
+      continue;
     }
 
-    if (line.startsWith('##')) {
-      const sel = line.slice(2).trim();
-      if (sel && !sel.includes('##') && sel.length < 200) selectors.push(sel);
-    }
-  });
+    /*
+     * Basic EasyList network rules.
+     *
+     * Examples:
+     * ||example.com^
+     * ||ads.example.com^
+     */
+    const networkMatch = line.match(
+      /^\|\|([a-zA-Z0-9.-]+)\^/,
+    );
 
-  return { domains, selectors };
+    if (networkMatch) {
+      domains.push(
+        normaliseHost(networkMatch[1]),
+      );
+      continue;
+    }
+
+    /*
+     * Cosmetic rules.
+     *
+     * We deliberately only accept ordinary CSS selectors here.
+     * Extended uBO syntax is ignored rather than generating invalid CSS.
+     */
+    if (line.startsWith("##")) {
+      const selector = line.slice(2).trim();
+
+      if (
+        selector &&
+        !selector.includes("##") &&
+        selector.length <= 300 &&
+        !/[{};]/.test(selector)
+      ) {
+        selectors.push(selector);
+      }
+    }
+  }
+
+  return {
+    domains,
+    selectors,
+  };
 }
 
 async function refreshLists() {
-  const allDomains = new Set(MANUAL_DOMAINS);
-  const allSelectors: string[] = [];
+  const domains = new Set(
+    MANUAL_BLOCKED_DOMAINS.map(normaliseHost),
+  );
+
+  const selectors: string[] = [];
 
   await Promise.all(
     LIST_URLS.map(async (url) => {
       try {
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-        if (!res.ok) return;
-        const text = await res.text();
-        const { domains, selectors } = parseList(text);
-        domains.forEach((d) => allDomains.add(d));
-        allSelectors.push(...selectors);
-      } catch {}
-    })
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent":
+              "RyuFlix-AdBlock/1.0",
+          },
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const text = await response.text();
+
+        const parsed = parseList(text);
+
+        for (const domain of parsed.domains) {
+          domains.add(domain);
+        }
+
+        selectors.push(...parsed.selectors);
+      } catch {
+        /*
+         * A remote list being unavailable must never
+         * make the player unusable.
+         */
+      }
+    }),
   );
 
-  domainSet = allDomains;
-  const capped = Array.from(new Set(allSelectors)).slice(0, 8000);
-  cosmeticCSS = capped.length ? capped.join(',\n') + '\n{ display: none !important; }' : '';
-  lastFetch = Date.now();
+  blockedDomains = domains;
+
+  const uniqueSelectors = Array.from(
+    new Set(selectors),
+  ).slice(0, 8000);
+
+  cosmeticCSS =
+    uniqueSelectors.length > 0
+      ? `${uniqueSelectors.join(",\n")} {\n  display: none !important;\n}`
+      : "";
+
+  lastRefresh = Date.now();
 }
 
 async function ensureLoaded() {
-  if (!domainSet || Date.now() - lastFetch > CACHE_MS) {
+  if (
+    blockedDomains === null ||
+    Date.now() - lastRefresh > CACHE_MS
+  ) {
     await refreshLists();
   }
 }
 
-export async function isBlockedUrl(url: string): Promise<boolean> {
+export async function isBlockedUrl(
+  url: string,
+): Promise<boolean> {
   await ensureLoaded();
+
   try {
-    const host = new URL(url).hostname.toLowerCase();
-    let parts = host.split('.');
-    while (parts.length > 1) {
-      const candidate = parts.join('.');
-      if (domainSet!.has(candidate)) return true;
-      parts = parts.slice(1);
+    const parsed = new URL(url);
+    const host = normaliseHost(parsed.hostname);
+
+    for (const domain of blockedDomains ?? []) {
+      if (isDomainMatch(host, domain)) {
+        return true;
+      }
     }
-    return false;
+
+    const lowerUrl = parsed.href.toLowerCase();
+
+    return blockedHints.some((hint) =>
+      lowerUrl.includes(hint),
+    );
   } catch {
     return false;
   }
 }
 
-export async function getCosmeticCSS(): Promise<string> {
+export async function getCosmeticCSS() {
   await ensureLoaded();
-  return cosmeticCSS || '';
-    }
+  return cosmeticCSS;
+}
+
+export async function getBlockedDomains() {
+  await ensureLoaded();
+
+  return Array.from(
+    blockedDomains ?? [],
+  );
+}
