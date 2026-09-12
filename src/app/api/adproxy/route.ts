@@ -516,16 +516,16 @@ function injectRuntimeBlocker(
   const script =
     buildRuntimeBlocker();
 
-  if (/<\\/head>/i.test(html)) {
+  if (/<\/head>/i.test(html)) {
     return html.replace(
-      /<\\/head>/i,
+      /<\/head>/i,
       `${script}</head>`,
     );
   }
 
-  if (/<\\/body>/i.test(html)) {
+  if (/<\/body>/i.test(html)) {
     return html.replace(
-      /<\\/body>/i,
+      /<\/body>/i,
       `${script}</body>`,
     );
   }
