@@ -1,17 +1,13 @@
-import {
-  NextRequest,
-  NextResponse,
-} from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import {
-  getCosmeticCSS,
   isBlockedUrl,
 } from "@/adblocker/ad-blocklist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ALLOWED_PROVIDER_HOSTS = new Set([
+const PROVIDER_HOSTS = new Set([
   "player.videasy.to",
   "vsembed.ru",
   "vidsrc-me.ru",
@@ -31,7 +27,7 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "vidsrc-me.ir",
 ]);
 
-const PRIVATE_HOSTS = new Set([
+const BLOCKED_HOSTS = new Set([
   "localhost",
   "localhost.localdomain",
   "metadata",
@@ -52,10 +48,36 @@ const BLOCKED_PORTS = new Set([
   "9200",
 ]);
 
+const AD_HINTS = [
+  "doubleclick",
+  "googlesyndication",
+  "googleadservices",
+  "googletagmanager",
+  "adsystem",
+  "amazon-adsystem",
+  "taboola",
+  "outbrain",
+  "propellerads",
+  "popads",
+  "popcash",
+  "adnxs",
+  "adsrvr",
+  "criteo",
+  "pubmatic",
+  "rubiconproject",
+  "openx",
+  "exoclick",
+  "juicyads",
+  "trafficjunky",
+  "adform",
+  "moatads",
+  "mgid",
+  "revcontent",
+  "adsterra",
+];
+
 function normaliseHost(host: string) {
-  return host
-    .toLowerCase()
-    .replace(/\.$/, "");
+  return host.toLowerCase().replace(/\.$/, "");
 }
 
 function isPrivateIpv4(host: string) {
@@ -76,19 +98,34 @@ function isPrivateIpv4(host: string) {
   const [a, b] = parts;
 
   return (
+    a === 0 ||
     a === 10 ||
     a === 127 ||
-    a === 0 ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168)
   );
 }
 
-function isSafeDestination(url: URL) {
+function isPrivateIpv6(host: string) {
+  const clean = host
+    .toLowerCase()
+    .replace(/^\[/, "")
+    .replace(/\]$/, "");
+
+  return (
+    clean === "::1" ||
+    clean === "::" ||
+    clean.startsWith("fe80:") ||
+    clean.startsWith("fc") ||
+    clean.startsWith("fd")
+  );
+}
+
+function isPublicDestination(url: URL) {
   if (
-    url.protocol !== "https:" &&
-    url.protocol !== "http:"
+    url.protocol !== "http:" &&
+    url.protocol !== "https:"
   ) {
     return false;
   }
@@ -104,11 +141,9 @@ function isSafeDestination(url: URL) {
     return false;
   }
 
-  const host = normaliseHost(
-    url.hostname,
-  );
+  const host = normaliseHost(url.hostname);
 
-  if (PRIVATE_HOSTS.has(host)) {
+  if (BLOCKED_HOSTS.has(host)) {
     return false;
   }
 
@@ -116,142 +151,147 @@ function isSafeDestination(url: URL) {
     return false;
   }
 
-  /*
-   * IPv6 loopback / local / link-local.
-   */
-  if (
-    host === "::1" ||
-    host === "[::1]" ||
-    host.startsWith("fe80:")
-  ) {
+  if (isPrivateIpv6(host)) {
     return false;
   }
 
-  return ALLOWED_PROVIDER_HOSTS.has(host);
+  return true;
+}
+
+function isProviderHost(host: string) {
+  const clean = normaliseHost(host);
+
+  if (PROVIDER_HOSTS.has(clean)) {
+    return true;
+  }
+
+  for (const provider of PROVIDER_HOSTS) {
+    if (clean.endsWith(`.${provider}`)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isObviousAdUrl(value: string) {
+  const lower = value.toLowerCase();
+
+  return AD_HINTS.some((hint) =>
+    lower.includes(hint),
+  );
 }
 
 function blockedResponse() {
   return new NextResponse(null, {
     status: 204,
     headers: {
-      "Cache-Control":
+      "cache-control":
         "no-store, no-cache, must-revalidate",
     },
   });
 }
 
-function proxyUrl(url: string) {
-  return `/api/adproxy?url=${encodeURIComponent(url)}`;
+function makeProxyUrl(
+  target: string,
+  root: string,
+) {
+  return `/api/adproxy?url=${encodeURIComponent(
+    target,
+  )}&root=${encodeURIComponent(root)}`;
 }
 
-function rewriteHtml(
+/*
+ * Only rewrite actual resource-bearing elements.
+ *
+ * We deliberately DO NOT rewrite every href on the page.
+ * Provider navigation, CSS URLs and player links are often
+ * sensitive to their original URL/origin.
+ */
+function rewriteResourceUrls(
   html: string,
   baseUrl: string,
+  rootHost: string,
 ) {
-  /*
-   * Remove obvious blocked external resources
-   * before they reach the browser.
-   */
-  html = html.replace(
-    /<(script|iframe|img|video|audio|source|object)[^>]+(?:src|data)=(["'])(.*?)\2[^>]*>[\s\S]*?<\/\1>/gi,
-    (full, tag, quote, value) => {
-      try {
-        const absolute = new URL(
-          value,
-          baseUrl,
-        ).href;
-
-        /*
-         * Synchronous filtering here is intentionally
-         * limited to the manually-known domains.
-         *
-         * The request itself is still checked by the
-         * proxy when the browser requests it.
-         */
-        const lower = absolute.toLowerCase();
-
-        const obviousAd =
-          [
-            "doubleclick",
-            "googlesyndication",
-            "googleadservices",
-            "adsystem",
-            "taboola",
-            "outbrain",
-            "popads",
-            "popcash",
-            "adnxs",
-            "criteo",
-            "pubmatic",
-            "rubiconproject",
-            "openx",
-            "exoclick",
-            "juicyads",
-            "mgid",
-            "revcontent",
-            "adsterra",
-          ].some((hint) =>
-            lower.includes(hint),
-          );
-
-        return obviousAd ? "" : full;
-      } catch {
-        return full;
-      }
+  const attributes = [
+    {
+      tag: "script",
+      attribute: "src",
     },
-  );
-
-  /*
-   * Rewrite resource URLs so nested provider resources
-   * come back through this same controlled proxy.
-   */
-  const resourceAttributes = [
-    "src",
-    "href",
-    "poster",
-    "data",
+    {
+      tag: "iframe",
+      attribute: "src",
+    },
+    {
+      tag: "img",
+      attribute: "src",
+    },
+    {
+      tag: "video",
+      attribute: "src",
+    },
+    {
+      tag: "audio",
+      attribute: "src",
+    },
+    {
+      tag: "source",
+      attribute: "src",
+    },
+    {
+      tag: "object",
+      attribute: "data",
+    },
   ];
 
-  for (const attribute of resourceAttributes) {
-    const expression = new RegExp(
-      `(${attribute}\\s*=\\s*)(["'])(https?:\\\\/\\\\/[^"']+|\\\\/\\\\/[^"']+|[^"'#][^"']*)\\\\2`,
+  for (const {
+    tag,
+    attribute,
+  } of attributes) {
+    const regex = new RegExp(
+      `<${tag}\\b([^>]*?\\s${attribute}\\s*=\\s*)(["'])(.*?)\\2([^>]*)>`,
       "gi",
     );
 
     html = html.replace(
-      expression,
+      regex,
       (
         full,
         prefix,
         quote,
         value,
+        suffix,
       ) => {
         try {
           const absolute = new URL(
             value,
             baseUrl,
-          ).href;
+          );
 
-          /*
-           * Don't proxy data/blob/javascript URLs.
-           */
           if (
-            absolute.startsWith(
-              "data:",
-            ) ||
-            absolute.startsWith(
-              "blob:",
-            ) ||
-            absolute.startsWith(
-              "javascript:",
-            )
+            absolute.protocol !== "http:" &&
+            absolute.protocol !== "https:"
           ) {
             return full;
           }
 
-          return `${prefix}${quote}${proxyUrl(
-            absolute,
-          )}${quote}`;
+          if (
+            isObviousAdUrl(
+              absolute.href,
+            )
+          ) {
+            return "";
+          }
+
+          /*
+           * Resources from provider pages are sent through
+           * the proxy so nested iframe content can also be
+           * filtered.
+           */
+          return `<${tag}${prefix}${quote}${makeProxyUrl(
+            absolute.href,
+            rootHost,
+          )}${quote}${suffix}>`;
         } catch {
           return full;
         }
@@ -259,14 +299,7 @@ function rewriteHtml(
     );
   }
 
-  /*
-   * Inject the blocker before provider scripts
-   * are normally executed.
-   */
-  return html.replace(
-    /<\/head>/i,
-    `${buildRuntimeBlocker()}<\/head>`,
-  );
+  return html;
 }
 
 function buildRuntimeBlocker() {
@@ -275,46 +308,36 @@ function buildRuntimeBlocker() {
 (() => {
   "use strict";
 
-  const blockedHints = [
-    "doubleclick",
-    "googlesyndication",
-    "googleadservices",
-    "adsystem",
-    "taboola",
-    "outbrain",
-    "popads",
-    "popcash",
-    "adnxs",
-    "criteo",
-    "pubmatic",
-    "rubiconproject",
-    "openx",
-    "exoclick",
-    "juicyads",
-    "mgid",
-    "revcontent",
-    "adsterra"
-  ];
+  const blockedHints = ${JSON.stringify(
+    AD_HINTS,
+  )};
 
-  function blocked(value) {
+  function isBlocked(value) {
+    if (!value) return false;
+
     try {
       const url = new URL(
         String(value),
         location.href
       );
 
-      const haystack =
-        (url.hostname + url.pathname + url.search)
-          .toLowerCase();
+      const haystack = (
+        url.hostname +
+        url.pathname +
+        url.search
+      ).toLowerCase();
 
       return blockedHints.some(
-        hint => haystack.includes(hint)
+        (hint) => haystack.includes(hint)
       );
     } catch {
       return false;
     }
   }
 
+  /*
+   * Block fetch-based advertising and tracking.
+   */
   const originalFetch =
     window.fetch.bind(window);
 
@@ -324,31 +347,49 @@ function buildRuntimeBlocker() {
         ? input
         : input && input.url;
 
-    if (value && blocked(value)) {
+    if (value && isBlocked(value)) {
       return Promise.reject(
-        new TypeError("Blocked by RyuFlix")
+        new TypeError(
+          "Blocked by RyuFlix"
+        )
       );
     }
 
-    return originalFetch(input, init);
+    return originalFetch(
+      input,
+      init
+    );
   };
 
-  const originalOpen =
+  /*
+   * Block XHR advertising requests.
+   *
+   * Throwing before the original open() call is
+   * intentional: it prevents the request from
+   * ever being created.
+   */
+  const originalXhrOpen =
     XMLHttpRequest.prototype.open;
 
   XMLHttpRequest.prototype.open =
     function(method, url) {
-      if (url && blocked(url)) {
-        this.abort();
-        return;
+      if (url && isBlocked(url)) {
+        throw new DOMException(
+          "Blocked by RyuFlix",
+          "AbortError"
+        );
       }
 
-      return originalOpen.apply(
+      return originalXhrOpen.apply(
         this,
         arguments
       );
     };
 
+  /*
+   * Block obvious popup/ad destinations while
+   * leaving legitimate window.open behaviour alone.
+   */
   const originalWindowOpen =
     window.open;
 
@@ -357,14 +398,10 @@ function buildRuntimeBlocker() {
     target,
     features
   ) {
-    if (url && blocked(url)) {
+    if (url && isBlocked(url)) {
       return null;
     }
 
-    /*
-     * Don't blindly destroy every window.open call.
-     * Legitimate player behaviour can depend on it.
-     */
     return originalWindowOpen.call(
       window,
       url,
@@ -373,19 +410,24 @@ function buildRuntimeBlocker() {
     );
   };
 
+  /*
+   * Stop dynamically-created ad elements.
+   */
   const originalSetAttribute =
     Element.prototype.setAttribute;
 
   Element.prototype.setAttribute =
     function(name, value) {
-      const lower =
+      const attr =
         String(name).toLowerCase();
 
       if (
-        (lower === "src" ||
-          lower === "href" ||
-          lower === "data") &&
-        blocked(value)
+        (
+          attr === "src" ||
+          attr === "data"
+        ) &&
+        value &&
+        isBlocked(value)
       ) {
         return;
       }
@@ -397,52 +439,106 @@ function buildRuntimeBlocker() {
       );
     };
 
-  function sweep() {
+  /*
+   * Remove obvious cosmetic ad containers.
+   * Keep this deliberately conservative so player
+   * controls aren't accidentally deleted.
+   */
+  function removeAds() {
     const selectors = [
-      '[id*="ad-"]',
+      'ins.adsbygoogle',
+      '[id^="ad-"]',
       '[id^="ad_"]',
-      '[class*="ad-"]',
-      '[class*="ads-"]',
-      '[class*="advert"]',
-      '[class*="sponsor"]',
-      'ins.adsbygoogle'
+      '[id*="-ad-"]',
+      '[id*="_ad_"]',
+      '[class^="ad-"]',
+      '[class^="ads-"]',
+      '[class*="-ad-"]',
+      '[class*="-ads-"]',
+      '[class*="advertisement"]',
+      '[class*="advertising"]',
+      '[class*="popunder"]',
+      '[class*="popup-ad"]',
+      '[class*="sponsor-banner"]'
     ];
 
     for (const selector of selectors) {
       try {
         document
           .querySelectorAll(selector)
-          .forEach(el => el.remove());
+          .forEach((element) => {
+            element.remove();
+          });
       } catch {}
     }
   }
 
-  if (document.documentElement) {
-    new MutationObserver(sweep).observe(
+  function startObserver() {
+    if (!document.documentElement) {
+      return;
+    }
+
+    const observer =
+      new MutationObserver(
+        removeAds
+      );
+
+    observer.observe(
       document.documentElement,
       {
         childList: true,
         subtree: true
       }
     );
+
+    removeAds();
   }
 
-  document.addEventListener(
-    "DOMContentLoaded",
-    sweep
-  );
-
-  sweep();
+  if (
+    document.readyState ===
+    "loading"
+  ) {
+    document.addEventListener(
+      "DOMContentLoaded",
+      startObserver,
+      { once: true }
+    );
+  } else {
+    startObserver();
+  }
 })();
 </script>`;
 }
 
-function copyResponseHeaders(
-  source: Response,
+function injectRuntimeBlocker(
+  html: string,
+) {
+  const script =
+    buildRuntimeBlocker();
+
+  if (/<\\/head>/i.test(html)) {
+    return html.replace(
+      /<\\/head>/i,
+      `${script}</head>`,
+    );
+  }
+
+  if (/<\\/body>/i.test(html)) {
+    return html.replace(
+      /<\\/body>/i,
+      `${script}</body>`,
+    );
+  }
+
+  return `${script}${html}`;
+}
+
+function copyHeaders(
+  response: Response,
 ) {
   const headers = new Headers();
 
-  const allowed = [
+  const names = [
     "content-type",
     "content-length",
     "content-range",
@@ -453,9 +549,9 @@ function copyResponseHeaders(
     "expires",
   ];
 
-  for (const name of allowed) {
+  for (const name of names) {
     const value =
-      source.headers.get(name);
+      response.headers.get(name);
 
     if (value) {
       headers.set(name, value);
@@ -468,15 +564,21 @@ function copyResponseHeaders(
 export async function GET(
   request: NextRequest,
 ) {
-  const rawTarget =
+  const targetParam =
     request.nextUrl.searchParams.get(
       "url",
     );
 
-  if (!rawTarget) {
+  const rootParam =
+    request.nextUrl.searchParams.get(
+      "root",
+    );
+
+  if (!targetParam) {
     return NextResponse.json(
       {
-        error: "Missing url parameter",
+        error:
+          "Missing url parameter",
       },
       { status: 400 },
     );
@@ -485,17 +587,18 @@ export async function GET(
   let target: URL;
 
   try {
-    target = new URL(rawTarget);
+    target = new URL(targetParam);
   } catch {
     return NextResponse.json(
       {
-        error: "Invalid target URL",
+        error:
+          "Invalid target URL",
       },
       { status: 400 },
     );
   }
 
-  if (!isSafeDestination(target)) {
+  if (!isPublicDestination(target)) {
     return NextResponse.json(
       {
         error:
@@ -505,25 +608,51 @@ export async function GET(
     );
   }
 
+  /*
+   * The first request MUST be one of your
+   * configured video providers.
+   *
+   * Nested resources are allowed only when
+   * the request carries the provider root.
+   */
+  const targetIsProvider =
+    isProviderHost(target.hostname);
+
+  if (!rootParam && !targetIsProvider) {
+    return NextResponse.json(
+      {
+        error:
+          "Initial destination is not an allowed provider",
+      },
+      { status: 403 },
+    );
+  }
+
   if (
-    await isBlockedUrl(
-      target.href,
-    )
+    rootParam &&
+    !isProviderHost(rootParam)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Invalid provider root",
+      },
+      { status: 403 },
+    );
+  }
+
+  /*
+   * Block known advertising/tracking targets
+   * before making the upstream request.
+   */
+  if (
+    isObviousAdUrl(target.href) ||
+    (await isBlockedUrl(target.href))
   ) {
     return blockedResponse();
   }
 
   try {
-    const incomingRange =
-      request.headers.get(
-        "range",
-      );
-
-    const incomingAccept =
-      request.headers.get(
-        "accept",
-      );
-
     const headers: Record<
       string,
       string
@@ -533,29 +662,34 @@ export async function GET(
           "user-agent",
         ) ??
         "Mozilla/5.0",
+      Accept:
+        request.headers.get(
+          "accept",
+        ) ??
+        "*/*",
     };
 
-    if (incomingRange) {
-      headers.Range = incomingRange;
+    const range =
+      request.headers.get(
+        "range",
+      );
+
+    if (range) {
+      headers.Range = range;
     }
 
-    if (incomingAccept) {
-      headers.Accept =
-        incomingAccept;
-    }
-
-    const response = await fetch(
-      target.href,
-      {
-        headers,
-        redirect: "manual",
-        cache: "no-store",
-      },
-    );
+    const response =
+      await fetch(
+        target.href,
+        {
+          headers,
+          redirect: "manual",
+          cache: "no-store",
+        },
+      );
 
     /*
-     * Re-check redirects instead of allowing the provider
-     * to bounce the browser outside the proxy.
+     * Handle provider redirects ourselves.
      */
     if (
       response.status >= 300 &&
@@ -576,13 +710,14 @@ export async function GET(
         );
       }
 
-      const redirected = new URL(
-        location,
-        target.href,
-      );
+      const redirected =
+        new URL(
+          location,
+          target.href,
+        );
 
       if (
-        !isSafeDestination(
+        !isPublicDestination(
           redirected,
         )
       ) {
@@ -590,17 +725,27 @@ export async function GET(
       }
 
       if (
-        await isBlockedUrl(
+        isObviousAdUrl(
           redirected.href,
-        )
+        ) ||
+        (await isBlockedUrl(
+          redirected.href,
+        ))
       ) {
         return blockedResponse();
       }
 
+      const rootHost =
+        rootParam ||
+        normaliseHost(
+          target.hostname,
+        );
+
       return NextResponse.redirect(
         new URL(
-          proxyUrl(
+          makeProxyUrl(
             redirected.href,
+            rootHost,
           ),
           request.url,
         ),
@@ -612,35 +757,45 @@ export async function GET(
         "content-type",
       ) ?? "";
 
+    /*
+     * HTML provider page:
+     *
+     * 1. Remove obvious ad resource tags.
+     * 2. Keep ordinary navigation untouched.
+     * 3. Proxy nested iframe/media/resource elements.
+     * 4. Inject runtime network blocking.
+     */
     if (
       contentType
         .toLowerCase()
         .includes("text/html")
     ) {
-      const html =
+      let html =
         await response.text();
 
-      const rewritten =
-        rewriteHtml(
-          html,
-          target.href,
+      const rootHost =
+        rootParam ||
+        normaliseHost(
+          target.hostname,
         );
 
-      const css =
-        await getCosmeticCSS();
+      html =
+        rewriteResourceUrls(
+          html,
+          target.href,
+          rootHost,
+        );
 
-      const finalHtml =
-        css.trim()
-          ? rewritten.replace(
-              /<\/head>/i,
-              `<style>${css}</style></head>`,
-            )
-          : rewritten;
+      html =
+        injectRuntimeBlocker(
+          html,
+        );
 
       return new NextResponse(
-        finalHtml,
+        html,
         {
-          status: response.status,
+          status:
+            response.status,
           headers: {
             "content-type":
               "text/html; charset=utf-8",
@@ -654,14 +809,21 @@ export async function GET(
     }
 
     /*
-     * Pass media, HLS, JS, CSS, images, fonts, etc.
-     * through without converting them to text.
+     * EVERYTHING ELSE passes through as a stream.
+     *
+     * This is important for:
+     * - JavaScript
+     * - CSS
+     * - images
+     * - fonts
+     * - HLS playlists
+     * - video segments
+     * - other provider resources
+     *
+     * We do not convert them into ArrayBuffers.
      */
-    const body =
-      await response.arrayBuffer();
-
     const responseHeaders =
-      copyResponseHeaders(
+      copyHeaders(
         response,
       );
 
@@ -671,14 +833,20 @@ export async function GET(
     );
 
     return new NextResponse(
-      body,
+      response.body,
       {
-        status: response.status,
+        status:
+          response.status,
         headers:
           responseHeaders,
       },
     );
-  } catch {
+  } catch (error) {
+    console.error(
+      "[RyuFlix adproxy]",
+      error,
+    );
+
     return NextResponse.json(
       {
         error:
@@ -687,4 +855,4 @@ export async function GET(
       { status: 502 },
     );
   }
-     }
+            }
