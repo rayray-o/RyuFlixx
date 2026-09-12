@@ -5,6 +5,10 @@ import {
   getLocalWatchlist,
   getWatchHistory,
 } from "@/utils/localStorage";
+import {
+  getBehavioralSignal,
+  getBehavioralSummary,
+} from "@/utils/personalization/behavioral-memory";
 import type { ContentType } from "@/types";
 import type { TasteProfile } from "@/utils/personalization/taste-engine";
 
@@ -511,6 +515,28 @@ function basicScore(
   profile: TasteProfile,
 ): number {
   let score = 0;
+
+  const behavioralSignal =
+    getBehavioralSignal(
+      item.id,
+      item.mediaType,
+    );
+
+  score += clamp(
+    behavioralSignal,
+    -18,
+    24,
+  );
+
+  const behavioralSummary =
+    getBehavioralSummary();
+
+  if (
+    behavioralSummary.preferredMediaType ===
+    item.mediaType
+  ) {
+    score += 5;
+  }
 
   const positiveGenres =
     new Set(
@@ -1176,4 +1202,4 @@ export async function getPersonalizedRecommendations(
     ranked,
     limit,
   );
-  }
+          }
