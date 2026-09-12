@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import AdFreeIframe from "@/adblocker/AdFreeIframes";
+import { RyuFlixPlayer } from "@/components/ui/player/RyuFlixPlayer";
 
 interface WatchPlayerProps {
   servers: PlayersProps[];
@@ -18,19 +18,29 @@ interface WatchPlayerProps {
     index: number,
   ) => void;
 
+  /*
+   * Returns the latest playback position
+   * from usePlayerEvents.
+   */
   getCurrentTime?: () => number;
 
+  /*
+   * Immediately saves the latest playback
+   * position before destroying the old iframe.
+   */
   flushProgress?: () => void;
 
-  iframeRef?: React.RefObject<
-    HTMLIFrameElement | null
-  >;
+  /*
+   * Gives the parent access to the active iframe.
+   * Used to reject stale postMessage events.
+   */
+  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
 
   title?: string;
 }
 
 /*
- * Add/update startAt without destroying
+ * Add/update startAt without destroying any
  * existing query parameters.
  */
 function addResumePosition(
@@ -58,6 +68,9 @@ function addResumePosition(
   }
 }
 
+const RYUFLIX_TEST_HLS =
+  "https://stream.mux.com/BV3YZtogl89mg9VcNBhhnHm02Y34zI1nlMuMQfAbl3dM.m3u8";
+
 const WatchPlayer: React.FC<
   WatchPlayerProps
 > = ({
@@ -69,10 +82,6 @@ const WatchPlayer: React.FC<
   iframeRef,
   title = "Video Player",
 }) => {
-  /*
-   * Keep the selected server safely inside
-   * the available server array.
-   */
   const safeIndex =
     servers.length > 0
       ? Math.min(
@@ -95,8 +104,8 @@ const WatchPlayer: React.FC<
     useState(true);
 
   /*
-   * Position captured immediately before
-   * switching providers.
+   * Position captured at the exact moment
+   * the user switches server.
    */
   const [
     handoffPosition,
@@ -111,8 +120,8 @@ const WatchPlayer: React.FC<
     );
 
   /*
-   * Keep both the internal ref and the
-   * parent's playerFrameRef synchronized.
+   * Use the parent's ref when supplied.
+   * Otherwise keep our own.
    */
   const setIframeRef = (
     element: HTMLIFrameElement | null,
@@ -127,21 +136,28 @@ const WatchPlayer: React.FC<
   };
 
   /*
-   * When the actual movie/episode changes,
-   * don't carry a previous provider handoff
-   * position into the new content.
+   * Reset handoff state when the content
+   * itself changes, such as moving to another
+   * movie/episode.
    */
   useEffect(() => {
     setHandoffPosition(null);
   }, [servers.length]);
 
-  /*
-   * Every provider change gets its own
-   * loading state.
-   */
   useEffect(() => {
     setLoading(true);
   }, [currentServer?.source]);
+
+  /*
+   * ONLY the final server slot is the
+   * RyuFlix custom Video.js player.
+   *
+   * Every other server remains the
+   * original external iframe player.
+   */
+  const isCustomPlayer =
+    servers.length > 0 &&
+    safeIndex === servers.length - 1;
 
   if (!currentServer) {
     return (
@@ -153,10 +169,6 @@ const WatchPlayer: React.FC<
     );
   }
 
-  /*
-   * Only add startAt when the user actually
-   * switched providers during playback.
-   */
   const iframeSource =
     handoffPosition !== null
       ? addResumePosition(
@@ -168,46 +180,72 @@ const WatchPlayer: React.FC<
   return (
     <section className="w-full">
       <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
-        <AdFreeIframe
-          key={`${currentServer.title}-${iframeSource}`}
-          ref={setIframeRef}
-          src={iframeSource}
-          title={`${title} — ${currentServer.title}`}
-          className="absolute inset-0 block h-full w-full border-0"
-          height="100%"
-          width="100%"
-          loading="eager"
-          onLoad={() => {
-            setLoading(false);
-          }}
-        />
-
-        {loading && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-md">
-            <div className="flex flex-col items-center gap-3">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
-
-              <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/70">
-                Connecting
-              </span>
-
-              <span className="text-xs text-white/40">
-                {currentServer.title}
-              </span>
-
-              {handoffPosition !==
-                null && (
-                <span className="text-[10px] text-white/30">
-                  Resuming at{" "}
-                  {Math.floor(
-                    handoffPosition,
-                  )}
-                  s
-                </span>
-              )}
-            </div>
-          </div>
+        {isCustomPlayer ? (
+          <RyuFlixPlayer
+            src={RYUFLIX_TEST_HLS}
+            title={title}
+            resumeAt={
+              handoffPosition !== null
+                ? handoffPosition
+                : 0
+            }
+            onTimeUpdate={() => {
+              /*
+               * The existing RyuFlix progress system
+               * remains responsible for external players.
+               *
+               * This is only the authorized HLS
+               * Video.js test player.
+               */
+            }}
+            onEnded={() => {
+              flushProgress?.();
+            }}
+          />
+        ) : (
+          <iframe
+            ref={setIframeRef}
+            key={`${currentServer.title}-${iframeSource}`}
+            src={iframeSource}
+            title={`${title} — ${currentServer.title}`}
+            className="absolute inset-0 block h-full w-full border-0"
+            allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
+            allowFullScreen
+            loading="eager"
+            referrerPolicy="strict-origin-when-cross-origin"
+            onLoad={() =>
+              setLoading(false)
+            }
+          />
         )}
+
+        {!isCustomPlayer &&
+          loading && (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-md">
+              <div className="flex flex-col items-center gap-3">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+
+                <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/70">
+                  Connecting
+                </span>
+
+                <span className="text-xs text-white/40">
+                  {currentServer.title}
+                </span>
+
+                {handoffPosition !==
+                  null && (
+                  <span className="text-[10px] text-white/30">
+                    Resuming at{" "}
+                    {Math.floor(
+                      handoffPosition,
+                    )}
+                    s
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -231,9 +269,10 @@ const WatchPlayer: React.FC<
                   }
 
                   /*
-                   * Capture the freshest playback
-                   * position before the old iframe
-                   * is destroyed.
+                   * 1. Read the freshest position.
+                   * 2. Persist it immediately.
+                   * 3. Give that position to the new player.
+                   * 4. Then change the server.
                    */
                   const position =
                     Math.max(
