@@ -1,82 +1,17 @@
 "use client";
 
+import { env } from "@/utils/env";
 import {
   getLocalWatchlist,
   getWatchHistory,
 } from "@/utils/localStorage";
 import type { ContentType } from "@/types";
-import type { TasteProfile } from "./taste-engine";
+import type { TasteProfile } from "@/utils/personalization/taste-engine";
 
-const TMDB_TOKEN =
-  process.env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN;
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+const REQUEST_TIMEOUT = 6500;
 
-const TMDB_BASE =
-  "https://api.themoviedb.org/3";
-
-export type RecommendationItem = {
-  id: number;
-  adult: boolean;
-  backdrop_path: string | null;
-  poster_path: string | null;
-  genre_ids: number[];
-  overview: string;
-  popularity: number;
-  vote_average: number;
-  vote_count: number;
-
-  mediaType: ContentType;
-
-  title?: string;
-  name?: string;
-
-  release_date?: string;
-  first_air_date?: string;
-};
-
-type DetailedItem = RecommendationItem & {
-  genres?: {
-    id: number;
-    name: string;
-  }[];
-
-  keywords?: {
-    id: number;
-    name: string;
-  }[];
-
-  credits?: {
-    cast?: {
-      id: number;
-      name: string;
-      order?: number;
-    }[];
-
-    crew?: {
-      id: number;
-      name: string;
-      job?: string;
-      department?: string;
-    }[];
-  };
-
-  spoken_languages?: {
-    iso_639_1: string;
-    english_name?: string;
-  }[];
-
-  production_countries?: {
-    iso_3166_1: string;
-    name?: string;
-  }[];
-
-  origin_country?: string[];
-};
-
-type RankedItem = DetailedItem & {
-  _score: number;
-};
-
-const GENRE_IDS: Record<string, number> = {
+const MOVIE_GENRES: Record<string, number> = {
   Action: 28,
   Adventure: 12,
   Animation: 16,
@@ -95,110 +30,158 @@ const GENRE_IDS: Record<string, number> = {
   Thriller: 53,
   War: 10752,
   Western: 37,
-
-  "Action & Adventure": 10759,
-  Kids: 10762,
-  News: 10763,
-  Reality: 10764,
-  "Sci-Fi & Fantasy": 10765,
-  Soap: 10766,
-  Talk: 10767,
-  "War & Politics": 10768,
 };
 
-const GENRE_NAMES: Record<number, string> =
-  Object.fromEntries(
-    Object.entries(GENRE_IDS).map(
-      ([name, id]) => [id, name],
-    ),
-  );
+const TV_GENRES: Record<string, number> = {
+  Action: 10759,
+  Adventure: 10759,
+  Animation: 16,
+  Comedy: 35,
+  Crime: 80,
+  Documentary: 99,
+  Drama: 18,
+  Family: 10751,
+  Fantasy: 10765,
+  History: 36,
+  Horror: 9648,
+  Music: 10463,
+  Mystery: 9648,
+  Romance: 18,
+  "Science Fiction": 10765,
+  Thriller: 9648,
+  War: 10768,
+  Western: 37,
+};
 
-function normalize(value: string) {
-  return value.trim().toLowerCase();
+export interface RecommendationItem {
+  id: number;
+  mediaType: ContentType;
+  title?: string;
+  name?: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  vote_average?: number;
+  vote_count?: number;
+  popularity?: number;
+  release_date?: string;
+  first_air_date?: string;
+  genre_ids?: number[];
+  overview?: string;
+  original_language?: string;
 }
 
-function getSignal(
-  profile: TasteProfile,
-  category: keyof TasteProfile["preferences"],
-  key: string,
-) {
-  const map =
-    profile.preferences?.[category] as
-      | Record<string, number>
-      | undefined;
+interface Candidate extends RecommendationItem {
+  _score?: number;
+}
 
-  const value = map?.[key];
+interface DetailedCandidate extends Candidate {
+  genres?: Array<{
+    id: number;
+    name: string;
+  }>;
+  keywords?: {
+    keywords?: Array<{
+      id: number;
+      name: string;
+    }>;
+    results?: Array<{
+      id: number;
+      name: string;
+    }>;
+  };
+  credits?: {
+    cast?: Array<{
+      id: number;
+      name: string;
+    }>;
+    crew?: Array<{
+      id: number;
+      name: string;
+      job?: string;
+      department?: string;
+    }>;
+  };
+}
 
-  return typeof value === "number"
+interface DiscoverResponse {
+  results?: Array<Record<string, unknown>>;
+}
+
+interface ProfileSignal {
+  name?: string;
+  score?: number;
+  id?: number;
+}
+
+function number(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
     ? value
     : 0;
 }
 
-function yearOf(
-  item: RecommendationItem,
-) {
-  const date =
-    item.release_date ??
-    item.first_air_date;
-
-  if (!date) {
-    return null;
-  }
-
-  const year = Number(
-    date.slice(0, 4),
-  );
-
-  return Number.isFinite(year)
-    ? year
-    : null;
+function string(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
-function eraOf(
-  year: number | null,
-) {
-  if (
-    year === null ||
-    year < 1880
-  ) {
-    return null;
-  }
+function normalizeName(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, " ");
+}
 
-  if (year >= 2020) return "2020s";
-  if (year >= 2010) return "2010s";
-  if (year >= 2000) return "2000s";
-  if (year >= 1990) return "1990s";
-  if (year >= 1980) return "1980s";
-  if (year >= 1970) return "1970s";
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
-  return "Before 1970";
+function timeoutFetch(
+  url: string,
+  options?: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+
+  const timeout = window.setTimeout(() => {
+    controller.abort();
+  }, REQUEST_TIMEOUT);
+
+  return fetch(url, {
+    ...options,
+    signal: controller.signal,
+    headers: {
+      Authorization: `Bearer ${env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN}`,
+      accept: "application/json",
+      ...(options?.headers ?? {}),
+    },
+  }).finally(() => {
+    window.clearTimeout(timeout);
+  });
 }
 
 async function tmdb<T>(
   path: string,
-  params: Record<string, string> = {},
+  params?: Record<string, string | number | undefined>,
 ): Promise<T | null> {
-  if (!TMDB_TOKEN) {
-    return null;
-  }
-
   try {
-    const searchParams =
-      new URLSearchParams(params);
+    const searchParams = new URLSearchParams();
 
-    const response =
-      await fetch(
-        `${TMDB_BASE}${path}?${searchParams.toString()}`,
-        {
-          headers: {
-            Authorization:
-              `Bearer ${TMDB_TOKEN}`,
-            Accept:
-              "application/json",
-          },
-          cache: "no-store",
-        },
-      );
+    Object.entries(params ?? {}).forEach(
+      ([key, value]) => {
+        if (
+          value !== undefined &&
+          value !== null &&
+          String(value).length > 0
+        ) {
+          searchParams.set(key, String(value));
+        }
+      },
+    );
+
+    const query = searchParams.toString();
+
+    const response = await timeoutFetch(
+      `${TMDB_BASE_URL}${path}${query ? `?${query}` : ""}`,
+    );
 
     if (!response.ok) {
       return null;
@@ -210,663 +193,828 @@ async function tmdb<T>(
   }
 }
 
+function profileSignals(
+  values: unknown,
+): ProfileSignal[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values
+    .map((value) => {
+      if (!value || typeof value !== "object") {
+        return null;
+      }
+
+      const item =
+        value as Record<string, unknown>;
+
+      return {
+        name: string(item.name),
+        score: number(item.score),
+        id: number(item.id),
+      };
+    })
+    .filter(
+      (value): value is ProfileSignal =>
+        Boolean(value?.name),
+    );
+}
+
+function getGenreId(
+  name: string,
+  type: ContentType,
+): number | null {
+  const normalized = normalizeName(name);
+
+  const map =
+    type === "movie"
+      ? MOVIE_GENRES
+      : TV_GENRES;
+
+  for (const [genreName, id] of Object.entries(
+    map,
+  )) {
+    if (
+      normalizeName(genreName) ===
+      normalized
+    ) {
+      return id;
+    }
+  }
+
+  return null;
+}
+
+function getPreferredGenreIds(
+  profile: TasteProfile,
+  type: ContentType,
+): number[] {
+  const signals = profileSignals(
+    profile.topGenres,
+  );
+
+  return signals
+    .sort(
+      (a, b) =>
+        number(b.score) -
+        number(a.score),
+    )
+    .map((signal) =>
+      signal.id && signal.id > 0
+        ? signal.id
+        : getGenreId(
+            signal.name ?? "",
+            type,
+          ),
+    )
+    .filter(
+      (id): id is number =>
+        typeof id === "number" &&
+        id > 0,
+    )
+    .slice(0, 5);
+}
+
+function getPositiveNames(
+  profile: TasteProfile,
+  key:
+    | "topGenres"
+    | "topKeywords"
+    | "topDirectors"
+    | "topActors",
+): Set<string> {
+  return new Set(
+    profileSignals(profile[key])
+      .filter(
+        (signal) =>
+          number(signal.score) > 0,
+      )
+      .map((signal) =>
+        normalizeName(
+          signal.name ?? "",
+        ),
+      ),
+  );
+}
+
+function getNegativeNames(
+  profile: TasteProfile,
+  key:
+    | "topGenres"
+    | "topKeywords"
+    | "topDirectors"
+    | "topActors",
+): Set<string> {
+  return new Set(
+    profileSignals(profile[key])
+      .filter(
+        (signal) =>
+          number(signal.score) < 0,
+      )
+      .map((signal) =>
+        normalizeName(
+          signal.name ?? "",
+        ),
+      ),
+  );
+}
+
+function normalizeCandidate(
+  raw: Record<string, unknown>,
+  type: ContentType,
+): RecommendationItem | null {
+  const id = number(raw.id);
+
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    mediaType: type,
+    title:
+      typeof raw.title === "string"
+        ? raw.title
+        : undefined,
+    name:
+      typeof raw.name === "string"
+        ? raw.name
+        : undefined,
+    poster_path:
+      typeof raw.poster_path === "string"
+        ? raw.poster_path
+        : null,
+    backdrop_path:
+      typeof raw.backdrop_path === "string"
+        ? raw.backdrop_path
+        : null,
+    vote_average: number(
+      raw.vote_average,
+    ),
+    vote_count: number(
+      raw.vote_count,
+    ),
+    popularity: number(
+      raw.popularity,
+    ),
+    release_date:
+      typeof raw.release_date === "string"
+        ? raw.release_date
+        : undefined,
+    first_air_date:
+      typeof raw.first_air_date === "string"
+        ? raw.first_air_date
+        : undefined,
+    genre_ids: Array.isArray(
+      raw.genre_ids,
+    )
+      ? raw.genre_ids.filter(
+          (id): id is number =>
+            typeof id === "number",
+        )
+      : [],
+    overview:
+      typeof raw.overview === "string"
+        ? raw.overview
+        : undefined,
+    original_language:
+      typeof raw.original_language ===
+      "string"
+        ? raw.original_language
+        : undefined,
+  };
+}
+
 async function discover(
   type: ContentType,
-  params: Record<string, string>,
-  page: number,
-) {
-  const data =
-    await tmdb<{
-      results?: RecommendationItem[];
-    }>(
+  params: Record<
+    string,
+    string | number | undefined
+  >,
+): Promise<RecommendationItem[]> {
+  const response =
+    await tmdb<DiscoverResponse>(
       `/discover/${type}`,
       {
         language: "en-US",
         include_adult: "false",
-        include_video: "false",
-        page: String(page),
+        page: 1,
         ...params,
       },
     );
 
-  return (
-    data?.results ?? []
-  ).map((item) => ({
-    ...item,
-    mediaType: type,
-  }));
+  if (!response?.results) {
+    return [];
+  }
+
+  return response.results
+    .map((item) =>
+      normalizeCandidate(
+        item,
+        type,
+      ),
+    )
+    .filter(
+      (
+        item,
+      ): item is RecommendationItem =>
+        Boolean(item),
+    );
 }
 
-async function getDetails(
-  type: ContentType,
-  id: number,
-) {
-  return tmdb<DetailedItem>(
-    `/${type}/${id}`,
-    {
-      language: "en-US",
-      append_to_response:
-        "credits,keywords",
+function excludedIds(): Set<string> {
+  const excluded =
+    new Set<string>();
+
+  try {
+    const history =
+      getWatchHistory();
+
+    if (Array.isArray(history)) {
+      history.forEach((entry) => {
+        const item =
+          entry as unknown as Record<
+            string,
+            unknown
+          >;
+
+        const mediaType =
+          string(item.mediaType);
+
+        const mediaId =
+          number(item.mediaId);
+
+        if (
+          mediaType &&
+          mediaId
+        ) {
+          excluded.add(
+            `${mediaType}:${mediaId}`,
+          );
+        }
+      });
+    }
+  } catch {
+    // Local history should never break recommendations.
+  }
+
+  try {
+    const watchlist =
+      getLocalWatchlist();
+
+    if (Array.isArray(watchlist)) {
+      watchlist.forEach((entry) => {
+        const item =
+          entry as unknown as Record<
+            string,
+            unknown
+          >;
+
+        const mediaType =
+          string(item.mediaType);
+
+        const mediaId =
+          number(
+            item.mediaId ??
+              item.id,
+          );
+
+        if (
+          mediaType &&
+          mediaId
+        ) {
+          excluded.add(
+            `${mediaType}:${mediaId}`,
+          );
+        }
+      });
+    }
+  } catch {
+    // Local watchlist should never break recommendations.
+  }
+
+  return excluded;
+}
+
+function basicScore(
+  item: RecommendationItem,
+  profile: TasteProfile,
+): number {
+  let score = 0;
+
+  const positiveGenres =
+    new Set(
+      getPreferredGenreIds(
+        profile,
+        item.mediaType,
+      ),
+    );
+
+  const genreIds =
+    item.genre_ids ?? [];
+
+  for (const genreId of genreIds) {
+    if (positiveGenres.has(genreId)) {
+      score += 24;
+    }
+  }
+
+  const voteAverage =
+    number(item.vote_average);
+
+  const voteCount =
+    number(item.vote_count);
+
+  const popularity =
+    number(item.popularity);
+
+  if (voteAverage >= 8.5) {
+    score += 10;
+  } else if (voteAverage >= 7.5) {
+    score += 7;
+  } else if (voteAverage >= 6.5) {
+    score += 3;
+  }
+
+  if (voteCount > 5000) {
+    score += 5;
+  } else if (voteCount > 1000) {
+    score += 3;
+  } else if (voteCount > 250) {
+    score += 1;
+  }
+
+  score += clamp(
+    Math.log10(
+      Math.max(1, popularity),
+    ) * 2,
+    0,
+    8,
+  );
+
+  const preferredMediaType =
+    profile.summary
+      ?.preferredMediaType;
+
+  if (
+    preferredMediaType ===
+    item.mediaType
+  ) {
+    score += 8;
+  }
+
+  return score;
+}
+
+function detailedScore(
+  item: DetailedCandidate,
+  profile: TasteProfile,
+): number {
+  let score =
+    basicScore(
+      item,
+      profile,
+    );
+
+  const positiveGenres =
+    getPositiveNames(
+      profile,
+      "topGenres",
+    );
+
+  const negativeGenres =
+    getNegativeNames(
+      profile,
+      "topGenres",
+    );
+
+  const positiveKeywords =
+    getPositiveNames(
+      profile,
+      "topKeywords",
+    );
+
+  const negativeKeywords =
+    getNegativeNames(
+      profile,
+      "topKeywords",
+    );
+
+  const positiveDirectors =
+    getPositiveNames(
+      profile,
+      "topDirectors",
+    );
+
+  const negativeDirectors =
+    getNegativeNames(
+      profile,
+      "topDirectors",
+    );
+
+  const positiveActors =
+    getPositiveNames(
+      profile,
+      "topActors",
+    );
+
+  const negativeActors =
+    getNegativeNames(
+      profile,
+      "topActors",
+    );
+
+  for (const genre of
+    item.genres ?? []) {
+    const name =
+      normalizeName(
+        genre.name,
+      );
+
+    if (
+      positiveGenres.has(name)
+    ) {
+      score += 18;
+    }
+
+    if (
+      negativeGenres.has(name)
+    ) {
+      score -= 24;
+    }
+  }
+
+  const keywords = [
+    ...(item.keywords
+      ?.keywords ?? []),
+    ...(item.keywords
+      ?.results ?? []),
+  ];
+
+  for (const keyword of keywords) {
+    const name =
+      normalizeName(
+        keyword.name,
+      );
+
+    if (
+      positiveKeywords.has(name)
+    ) {
+      score += 14;
+    }
+
+    if (
+      negativeKeywords.has(name)
+    ) {
+      score -= 18;
+    }
+  }
+
+  const directors =
+    (item.credits?.crew ?? [])
+      .filter(
+        (person) =>
+          person.job ===
+            "Director" ||
+          person.department ===
+            "Directing",
+      );
+
+  for (const director of directors) {
+    const name =
+      normalizeName(
+        director.name,
+      );
+
+    if (
+      positiveDirectors.has(name)
+    ) {
+      score += 22;
+    }
+
+    if (
+      negativeDirectors.has(name)
+    ) {
+      score -= 28;
+    }
+  }
+
+  for (const actor of
+    (item.credits?.cast ?? []).slice(
+      0,
+      10,
+    )) {
+    const name =
+      normalizeName(
+        actor.name,
+      );
+
+    if (
+      positiveActors.has(name)
+    ) {
+      score += 8;
+    }
+
+    if (
+      negativeActors.has(name)
+    ) {
+      score -= 10;
+    }
+  }
+
+  const year = Number(
+    (
+      item.release_date ??
+      item.first_air_date ??
+      ""
+    ).slice(0, 4),
+  );
+
+  const preferredEra =
+    profile.summary
+      ?.preferredEra;
+
+  if (
+    preferredEra &&
+    year
+  ) {
+    const eraMatch =
+      preferredEra
+        .match(/\d{4}/)?.[0];
+
+    if (eraMatch) {
+      const preferredYear =
+        Number(eraMatch);
+
+      const distance =
+        Math.abs(
+          year -
+            preferredYear,
+        );
+
+      if (distance <= 5) {
+        score += 8;
+      } else if (
+        distance <= 10
+      ) {
+        score += 4;
+      }
+    }
+  }
+
+  return score;
+}
+
+function dedupe(
+  items: RecommendationItem[],
+): RecommendationItem[] {
+  const seen =
+    new Set<string>();
+
+  return items.filter(
+    (item) => {
+      const key =
+        `${item.mediaType}:${item.id}`;
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
     },
   );
 }
 
-function getTopGenres(
-  profile: TasteProfile,
-) {
-  const genres =
-    (profile.preferences?.genres ??
-      {}) as Record<
-      string,
-      number
-    >;
+function diversify(
+  items: Candidate[],
+  limit: number,
+): RecommendationItem[] {
+  const selected: Candidate[] = [];
+  const remaining = [...items];
 
-  return Object.entries(
-    genres,
-  )
-    .filter(
-      ([, score]) =>
-        typeof score === "number" &&
-        score > 0,
-    )
-    .sort(
-      (a, b) =>
-        b[1] - a[1],
-    )
-    .slice(0, 8)
-    .map(
-      ([name]) =>
-        GENRE_IDS[name],
-    )
-    .filter(
-      (
-        id,
-      ): id is number =>
-        Number.isInteger(id),
+  const genreCounts =
+    new Map<number, number>();
+
+  while (
+    selected.length < limit &&
+    remaining.length > 0
+  ) {
+    let bestIndex = 0;
+    let bestAdjusted =
+      -Infinity;
+
+    remaining.forEach(
+      (candidate, index) => {
+        let adjusted =
+          number(
+            candidate._score,
+          );
+
+        for (const genreId of
+          candidate.genre_ids ?? []) {
+          const count =
+            genreCounts.get(
+              genreId,
+            ) ?? 0;
+
+          if (count >= 3) {
+            adjusted -=
+              10;
+          } else if (
+            count >= 2
+          ) {
+            adjusted -=
+              4;
+          }
+        }
+
+        if (
+          adjusted >
+          bestAdjusted
+        ) {
+          bestAdjusted =
+            adjusted;
+          bestIndex = index;
+        }
+      },
     );
+
+    const chosen =
+      remaining.splice(
+        bestIndex,
+        1,
+      )[0];
+
+    if (!chosen) {
+      break;
+    }
+
+    selected.push(chosen);
+
+    for (const genreId of
+      chosen.genre_ids ?? []) {
+      genreCounts.set(
+        genreId,
+        (genreCounts.get(
+          genreId,
+        ) ?? 0) + 1,
+      );
+    }
+  }
+
+  return selected.map(
+    ({
+      _score: _ignored,
+      ...item
+    }) => item,
+  );
 }
 
-function buildQueries(
+async function enrich(
+  candidates: RecommendationItem[],
+): Promise<
+  Map<string, DetailedCandidate>
+> {
+  const result =
+    new Map<
+      string,
+      DetailedCandidate
+    >();
+
+  const responses =
+    await Promise.allSettled(
+      candidates.map(
+        async (candidate) => {
+          const details =
+            await tmdb<
+              DetailedCandidate
+            >(
+              `/${candidate.mediaType}/${candidate.id}`,
+              {
+                language:
+                  "en-US",
+                append_to_response:
+                  "credits,keywords",
+              },
+            );
+
+          if (!details) {
+            return null;
+          }
+
+          return {
+            ...candidate,
+            ...details,
+            mediaType:
+              candidate.mediaType,
+          };
+        },
+      ),
+    );
+
+  responses.forEach(
+    (response, index) => {
+      if (
+        response.status !==
+          "fulfilled" ||
+        !response.value
+      ) {
+        return;
+      }
+
+      const candidate =
+        candidates[index];
+
+      result.set(
+        `${candidate.mediaType}:${candidate.id}`,
+        response.value,
+      );
+    },
+  );
+
+  return result;
+}
+
+function buildDiscoverQueries(
   profile: TasteProfile,
   type: ContentType,
-) {
-  const queries:
-    Record<string, string>[] = [];
+): Array<
+  Record<
+    string,
+    string | number | undefined
+  >
+> {
+  const genres =
+    getPreferredGenreIds(
+      profile,
+      type,
+    );
 
-  /*
-   * Broad quality pools.
-   *
-   * These deliberately use low thresholds so a
-   * smaller/niche taste profile cannot produce zero
-   * candidates.
-   */
-  queries.push({
-    sort_by:
-      "popularity.desc",
-    "vote_count.gte":
-      type === "movie"
-        ? "20"
-        : "10",
-  });
+  const queries: Array<
+    Record<
+      string,
+      string | number | undefined
+    >
+  > = [];
+
+  if (genres.length > 0) {
+    queries.push({
+      with_genres:
+        genres
+          .slice(0, 3)
+          .join("|"),
+      sort_by:
+        "vote_average.desc",
+      "vote_count.gte":
+        type === "movie"
+          ? 150
+          : 100,
+      page: 1,
+    });
+
+    queries.push({
+      with_genres:
+        genres
+          .slice(0, 5)
+          .join("|"),
+      sort_by:
+        "popularity.desc",
+      "vote_count.gte":
+        type === "movie"
+          ? 100
+          : 75,
+      page: 1,
+    });
+  }
+
+  const strongestGenre =
+    genres[0];
+
+  if (strongestGenre) {
+    queries.push({
+      with_genres:
+        strongestGenre,
+      sort_by:
+        "popularity.desc",
+      "vote_average.gte":
+        6.5,
+      page: 1,
+    });
+  }
 
   queries.push({
     sort_by:
       "vote_average.desc",
     "vote_count.gte":
       type === "movie"
-        ? "50"
-        : "25",
+        ? 1000
+        : 500,
+    page: 1,
   });
 
-  const genres =
-    getTopGenres(profile);
-
-  for (
-    const genreId of genres.slice(
-      0,
-      6,
-    )
-  ) {
-    queries.push({
-      with_genres:
-        String(genreId),
-      sort_by:
-        "popularity.desc",
-      "vote_count.gte":
-        type === "movie"
-          ? "10"
-          : "5",
-    });
-
-    queries.push({
-      with_genres:
-        String(genreId),
-      sort_by:
-        "vote_average.desc",
-      "vote_count.gte":
-        type === "movie"
-          ? "30"
-          : "15",
-    });
-  }
-
-  const preferredEra =
-    profile.summary
-      ?.preferredEra;
-
-  if (preferredEra) {
-    const start =
-      Number(
-        preferredEra.slice(
-          0,
-          4,
-        ),
-      );
-
-    if (
-      Number.isFinite(start)
-    ) {
-      if (type === "movie") {
-        queries.push({
-          primary_release_date_gte:
-            `${start}-01-01`,
-          primary_release_date_lte:
-            `${start + 9}-12-31`,
-          sort_by:
-            "popularity.desc",
-          "vote_count.gte":
-            "10",
-        });
-      } else {
-        queries.push({
-          first_air_date_gte:
-            `${start}-01-01`,
-          first_air_date_lte:
-            `${start + 9}-12-31`,
-          sort_by:
-            "popularity.desc",
-          "vote_count.gte":
-            "5",
-        });
-      }
-    }
-  }
-
-  return queries;
-}
-
-function scoreBasic(
-  item: RecommendationItem,
-  profile: TasteProfile,
-) {
-  let score = 0;
-
-  let positiveGenres = 0;
-  let negativeGenres = 0;
-
-  for (
-    const genreId of
-      item.genre_ids ?? []
-  ) {
-    const name =
-      GENRE_NAMES[genreId];
-
-    if (!name) {
-      continue;
-    }
-
-    const signal =
-      getSignal(
-        profile,
-        "genres",
-        name,
-      );
-
-    if (signal > 0) {
-      positiveGenres++;
-      score +=
-        signal * 5;
-    }
-
-    if (signal < 0) {
-      negativeGenres++;
-      score +=
-        signal * 6;
-    }
-  }
-
-  const mediaSignal =
-    getSignal(
-      profile,
-      "mediaTypes",
-      item.mediaType,
-    );
-
-  score +=
-    mediaSignal * 2.5;
-
-  const year =
-    yearOf(item);
-
-  const era =
-    eraOf(year);
-
-  if (era) {
-    score +=
-      getSignal(
-        profile,
-        "eras",
-        era,
-      ) * 2;
-  }
-
-  /*
-   * Strong bonus when multiple preferred genres
-   * overlap.
-   */
-  if (
-    positiveGenres > 0
-  ) {
-    score +=
-      positiveGenres *
-      positiveGenres *
-      1.5;
-  }
-
-  /*
-   * Strong negative penalty.
-   */
-  score -=
-    negativeGenres * 10;
-
-  /*
-   * Quality.
-   */
-  score +=
-    Math.max(
-      0,
-      item.vote_average - 5,
-    ) * 1.4;
-
-  /*
-   * Community confidence.
-   */
-  const voteConfidence =
-    Math.min(
-      1,
-      item.vote_count /
-        (typeVoteTarget(
-          item.mediaType,
-        )),
-    );
-
-  score +=
-    voteConfidence * 2;
-
-  /*
-   * Popularity is only a weak supporting signal.
-   */
-  score +=
-    Math.log10(
-      Math.max(
-        10,
-        item.popularity + 10,
-      ),
-    ) * 0.3;
-
-  return score;
-}
-
-function typeVoteTarget(
-  type: ContentType,
-) {
-  return type === "movie"
-    ? 2500
-    : 1200;
-}
-
-function scoreDetailed(
-  item: DetailedItem,
-  profile: TasteProfile,
-) {
-  let score =
-    scoreBasic(
-      item,
-      profile,
-    );
-
-  let positiveMatches = 0;
-  let negativeMatches = 0;
-
-  const genres =
-    item.genres?.map(
-      (x) => x.name,
-    ) ?? [];
-
-  const keywords =
-    item.keywords?.map(
-      (x) => x.name,
-    ) ?? [];
-
-  const directors =
-    item.credits?.crew
-      ?.filter(
-        (person) =>
-          person.job ===
-            "Director" ||
-          person.department ===
-            "Directing",
-      )
-      .slice(0, 5)
-      .map(
-        (person) =>
-          person.name,
-      ) ?? [];
-
-  const actors =
-    item.credits?.cast
-      ?.slice(0, 15)
-      .map(
-        (person) =>
-          person.name,
-      ) ?? [];
-
-  const languages =
-    item.spoken_languages?.map(
-      (x) =>
-        x.english_name ??
-        x.iso_639_1,
-    ) ?? [];
-
-  const countries =
-    item.production_countries?.map(
-      (x) =>
-        x.name ??
-        x.iso_3166_1,
-    ) ??
-    item.origin_country ??
-    [];
-
-  for (
-    const genre of genres
-  ) {
-    const signal =
-      getSignal(
-        profile,
-        "genres",
-        genre,
-      );
-
-    if (signal > 0) {
-      positiveMatches++;
-      score +=
-        signal * 3;
-    }
-
-    if (signal < 0) {
-      negativeMatches++;
-      score +=
-        signal * 4;
-    }
-  }
-
-  for (
-    const keyword of
-      keywords
-  ) {
-    const signal =
-      getSignal(
-        profile,
-        "keywords",
-        keyword,
-      );
-
-    if (signal > 0) {
-      positiveMatches++;
-      score +=
-        signal * 3.2;
-    }
-
-    if (signal < 0) {
-      negativeMatches++;
-      score +=
-        signal * 4;
-    }
-  }
-
-  for (
-    const director of
-      directors
-  ) {
-    const signal =
-      getSignal(
-        profile,
-        "directors",
-        director,
-      );
-
-    if (signal > 0) {
-      positiveMatches++;
-      score +=
-        signal * 6;
-    }
-
-    if (signal < 0) {
-      negativeMatches++;
-      score +=
-        signal * 7;
-    }
-  }
-
-  for (
-    const actor of
-      actors
-  ) {
-    const signal =
-      getSignal(
-        profile,
-        "actors",
-        actor,
-      );
-
-    if (signal > 0) {
-      positiveMatches++;
-      score +=
-        signal * 2.2;
-    }
-
-    if (signal < 0) {
-      negativeMatches++;
-      score +=
-        signal * 3;
-    }
-  }
-
-  for (
-    const language of
-      languages
-  ) {
-    const signal =
-      getSignal(
-        profile,
-        "languages",
-        language,
-      );
-
-    score +=
-      signal * 1.5;
-  }
-
-  for (
-    const country of
-      countries
-  ) {
-    const signal =
-      getSignal(
-        profile,
-        "countries",
-        country,
-      );
-
-    score +=
-      signal * 0.9;
-  }
-
-  const year =
-    yearOf(item);
-
-  const era =
-    eraOf(year);
-
-  if (era) {
-    score +=
-      getSignal(
-        profile,
-        "eras",
-        era,
-      ) * 1.4;
-  }
-
-  /*
-   * Reward dense matches.
-   */
-  score +=
-    Math.min(
-      positiveMatches,
-      15,
-    ) **
-      2 *
-      0.7;
-
-  /*
-   * Punish multiple negative matches.
-   */
-  score -=
-    Math.min(
-      negativeMatches,
-      10,
-    ) * 8;
-
-  return score;
-}
-
-function diversityPenalty(
-  item: RankedItem,
-  selected: RankedItem[],
-) {
-  let penalty = 0;
-
-  const genres =
-    item.genres?.map(
-      (x) =>
-        normalize(x.name),
-    ) ??
-    item.genre_ids
-      .map(
-        (id) =>
-          GENRE_NAMES[id] &&
-          normalize(
-            GENRE_NAMES[id],
-          ),
-      )
-      .filter(
-        (
-          x,
-        ): x is string =>
-          Boolean(x),
-      );
-
-  const director =
-    item.credits?.crew?.find(
-      (person) =>
-        person.job ===
-        "Director",
-    );
-
-  for (
-    const existing of
-      selected
-  ) {
-    const existingGenres =
-      existing.genres?.map(
-        (x) =>
-          normalize(x.name),
-      ) ??
-      existing.genre_ids
-        .map(
-          (id) =>
-            GENRE_NAMES[id] &&
-            normalize(
-              GENRE_NAMES[id],
-            ),
-        )
-        .filter(
-          (
-            x,
-          ): x is string =>
-            Boolean(x),
-        );
-
-    const shared =
-      genres.filter(
-        (genre) =>
-          existingGenres.includes(
-            genre,
-          ),
-      ).length;
-
-    if (shared >= 2) {
-      penalty += 1.5;
-    } else if (
-      shared === 1
-    ) {
-      penalty += 0.35;
-    }
-
-    if (
-      director &&
-      existing.credits?.crew?.some(
-        (person) =>
-          person.job ===
-            "Director" &&
-          normalize(
-            person.name,
-          ) ===
-            normalize(
-              director.name,
-            ),
-      )
-    ) {
-      penalty += 1;
-    }
-  }
-
-  return penalty;
-}
-
-function getExcludedIds() {
-  const excluded =
-    new Set<string>();
-
-  for (
-    const item of
-      getWatchHistory()
-  ) {
-    excluded.add(
-      `${item.type}:${item.media_id}`,
-    );
-  }
-
-  for (
-    const item of
-      getLocalWatchlist()
-  ) {
-    excluded.add(
-      `${item.type}:${item.id}`,
-    );
-  }
-
-  return excluded;
+  return queries.slice(0, 4);
 }
 
 export async function getPersonalizedRecommendations(
@@ -876,261 +1024,153 @@ export async function getPersonalizedRecommendations(
 ): Promise<RecommendationItem[]> {
   if (
     !profile ||
-    !TMDB_TOKEN
+    typeof profile.confidence !==
+      "number"
   ) {
     return [];
   }
 
   const excluded =
-    getExcludedIds();
+    excludedIds();
 
   const queries =
-    buildQueries(
+    buildDiscoverQueries(
       profile,
       type,
     );
 
+  const personalizedResults =
+    await Promise.allSettled(
+      queries.map(
+        (query) =>
+          discover(
+            type,
+            query,
+          ),
+      ),
+    );
+
+  let candidates =
+    personalizedResults.flatMap(
+      (result) =>
+        result.status ===
+        "fulfilled"
+          ? result.value
+          : [],
+    );
+
+  candidates = dedupe(
+    candidates,
+  ).filter(
+    (item) =>
+      !excluded.has(
+        `${item.mediaType}:${item.id}`,
+      ),
+  );
+
   /*
-   * Generate candidates from several pages.
+   * TMDB can occasionally return no personalized
+   * candidates because of filters/rate limits.
    *
-   * More pages = much larger candidate pool
-   * before ranking.
-   */
-  const requests =
-    queries.flatMap(
-      (query) =>
-        [1, 2, 3].map(
-          (page) =>
-            discover(
-              type,
-              query,
-              page,
-            ),
-        ),
-    );
-
-  const batches =
-    await Promise.all(
-      requests,
-    );
-
-  const candidates =
-    new Map<
-      number,
-      RecommendationItem
-    >();
-
-  for (
-    const batch of
-      batches
-  ) {
-    for (
-      const item of
-        batch
-    ) {
-      if (
-        !Number.isFinite(
-          item.id,
-        )
-      ) {
-        continue;
-      }
-
-      /*
-       * Poster is preferred but NOT required.
-       * This prevents legitimate TMDB results from
-       * being thrown away too early.
-       */
-      const key =
-        `${type}:${item.id}`;
-
-      if (
-        excluded.has(key)
-      ) {
-        continue;
-      }
-
-      candidates.set(
-        item.id,
-        item,
-      );
-    }
-  }
-
-  /*
-   * If the normal personalized pools are empty,
-   * perform a broad safety-net query.
+   * Do not make the For You row disappear.
+   * Fall back to a broad, high-quality pool and
+   * still rank it using the user's taste profile.
    */
   if (
-    candidates.size === 0
+    candidates.length <
+    Math.min(8, limit)
   ) {
     const fallback =
-      await Promise.all([
-        discover(
-          type,
-          {
-            sort_by:
-              "popularity.desc",
-          },
-          1,
-        ),
-        discover(
-          type,
-          {
-            sort_by:
-              "vote_average.desc",
-            "vote_count.gte":
-              "10",
-          },
-          1,
-        ),
-        discover(
-          type,
-          {
-            sort_by:
-              "popularity.desc",
-          },
-          2,
-        ),
-      ]);
+      await discover(
+        type,
+        {
+          sort_by:
+            "popularity.desc",
+          "vote_count.gte":
+            type === "movie"
+              ? 250
+              : 150,
+          page: 1,
+        },
+      );
 
-    for (
-      const batch of
-        fallback
-    ) {
-      for (
-        const item of
-          batch
-      ) {
-        const key =
-          `${type}:${item.id}`;
-
-        if (
-          excluded.has(key)
-        ) {
-          continue;
-        }
-
-        candidates.set(
-          item.id,
-          item,
-        );
-      }
-    }
+    candidates = dedupe([
+      ...candidates,
+      ...fallback,
+    ]).filter(
+      (item) =>
+        !excluded.has(
+          `${item.mediaType}:${item.id}`,
+        ),
+    );
   }
 
   if (
-    candidates.size === 0
+    candidates.length === 0
   ) {
     return [];
   }
 
   /*
-   * First ranking pass.
+   * First ranking pass is immediate.
+   * This means the engine always has a usable
+   * candidate pool even if detailed TMDB requests
+   * fail or time out.
    */
-  let ranked: RankedItem[] =
-    Array.from(
-      candidates.values(),
-    )
-      .map(
-        (item) => ({
-          ...item,
-          _score:
-            scoreBasic(
-              item,
-              profile,
-            ),
-        }),
-      )
+  const basicRanked =
+    candidates
+      .map((candidate) => ({
+        ...candidate,
+        _score:
+          basicScore(
+            candidate,
+            profile,
+          ),
+      }))
       .sort(
         (a, b) =>
-          b._score -
-          a._score,
+          number(b._score) -
+          number(a._score),
       );
 
   /*
-   * Enrich a much larger pool than before.
-   *
-   * Details provide the strongest signals:
-   * keywords, directors, cast, languages, countries.
+   * Only enrich the strongest candidates.
+   * 12 detailed requests are enough to identify
+   * directors, actors and keywords without turning
+   * the homepage into a giant API waterfall.
    */
   const enrichmentPool =
-    ranked.slice(
+    basicRanked.slice(
       0,
       Math.min(
-        48,
-        ranked.length,
+        12,
+        basicRanked.length,
       ),
     );
 
-  const detailed =
-    new Map<
-      number,
-      DetailedItem
-    >();
+  const details =
+    await enrich(
+      enrichmentPool,
+    );
 
-  for (
-    let index = 0;
-    index <
-      enrichmentPool.length;
-    index += 8
-  ) {
-    const chunk =
-      enrichmentPool.slice(
-        index,
-        index + 8,
-      );
-
-    const results =
-      await Promise.all(
-        chunk.map(
-          (item) =>
-            getDetails(
-              type,
-              item.id,
-            ),
-        ),
-      );
-
-    for (
-      const detail of
-        results
-    ) {
-      if (detail) {
-        detailed.set(
-          detail.id,
-          detail,
-        );
-      }
-    }
-  }
-
-  /*
-   * Detailed re-ranking.
-   */
-  ranked =
-    ranked.map(
-      (item) => {
-        const detail =
-          detailed.get(
-            item.id,
+  const ranked =
+    basicRanked.map(
+      (candidate) => {
+        const detailed =
+          details.get(
+            `${candidate.mediaType}:${candidate.id}`,
           );
 
-        if (!detail) {
-          return item;
+        if (!detailed) {
+          return candidate;
         }
 
-        const merged = {
-          ...item,
-          ...detail,
-          mediaType: type,
-        };
-
         return {
-          ...merged,
+          ...candidate,
+          ...detailed,
           _score:
-            scoreDetailed(
-              merged,
+            detailedScore(
+              detailed,
               profile,
             ),
         };
@@ -1139,71 +1179,12 @@ export async function getPersonalizedRecommendations(
 
   ranked.sort(
     (a, b) =>
-      b._score -
-      a._score,
+      number(b._score) -
+      number(a._score),
   );
 
-  /*
-   * Diversity-aware final selection.
-   */
-  const selected:
-    RankedItem[] = [];
-
-  for (
-    const item of
-      ranked
-  ) {
-    if (
-      selected.length >=
-      limit
-    ) {
-      break;
-    }
-
-    const penalty =
-      diversityPenalty(
-        item,
-        selected,
-      );
-
-    selected.push({
-      ...item,
-      _score:
-        item._score -
-        penalty,
-    });
-  }
-
-  /*
-   * Final safety fallback.
-   *
-   * If something weird happens during scoring,
-   * return the strongest available candidates instead
-   * of producing an empty For You row.
-   */
-  if (
-    selected.length === 0
-  ) {
-    return ranked
-      .slice(0, limit)
-      .map(
-        ({
-          _score,
-          ...item
-        }) => item,
-      );
-  }
-
-  return selected
-    .sort(
-      (a, b) =>
-        b._score -
-        a._score,
-    )
-    .map(
-      ({
-        _score,
-        ...item
-      }) => item,
-    );
+  return diversify(
+    ranked,
+    limit,
+  );
   }
