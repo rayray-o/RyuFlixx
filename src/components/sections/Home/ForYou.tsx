@@ -11,14 +11,13 @@ import {
   type RecommendationItem,
 } from "@/utils/personalization/recommendation-engine";
 import { Skeleton } from "@heroui/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const PROFILE_KEY = "ryuflix_taste_profile";
 
 function readProfile(): TasteProfile | null {
   try {
-    const raw =
-      window.localStorage.getItem(PROFILE_KEY);
+    const raw = window.localStorage.getItem(PROFILE_KEY);
 
     if (!raw) {
       return null;
@@ -26,10 +25,7 @@ function readProfile(): TasteProfile | null {
 
     const parsed = JSON.parse(raw) as TasteProfile;
 
-    if (
-      !parsed ||
-      typeof parsed !== "object"
-    ) {
+    if (!parsed || typeof parsed !== "object") {
       return null;
     }
 
@@ -42,27 +38,44 @@ function readProfile(): TasteProfile | null {
 const ForYou: React.FC<{
   type: ContentType;
 }> = ({ type }) => {
-  const [items, setItems] = useState<
-    RecommendationItem[]
-  >([]);
+  const [items, setItems] = useState<RecommendationItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const [loading, setLoading] =
-    useState(false);
+  /*
+   * Prevent an older request from replacing a newer
+   * successful recommendation result.
+   */
+  const requestIdRef = useRef(0);
+
+  /*
+   * Once we have successfully displayed a personalized
+   * result, never destroy it just because a later request
+   * temporarily returns nothing.
+   */
+  const hasLoadedRecommendationsRef = useRef(false);
 
   useEffect(() => {
+    const requestId = ++requestIdRef.current;
     let cancelled = false;
 
     const load = async () => {
       const profile = readProfile();
 
-      if (
-        !profile ||
-        profile.confidence < 8
-      ) {
+      if (!profile || profile.confidence < 8) {
+        if (!cancelled && requestId === requestIdRef.current) {
+          setLoading(false);
+        }
+
         return;
       }
 
-      setLoading(true);
+      /*
+       * Only show the loading state if we don't already
+       * have a usable personalized result.
+       */
+      if (!hasLoadedRecommendationsRef.current) {
+        setLoading(true);
+      }
 
       try {
         const recommendations =
@@ -72,17 +85,40 @@ const ForYou: React.FC<{
             12,
           );
 
-        if (!cancelled) {
+        if (
+          cancelled ||
+          requestId !== requestIdRef.current
+        ) {
+          return;
+        }
+
+        /*
+         * CRITICAL:
+         *
+         * An empty response is NOT allowed to erase
+         * recommendations that have already loaded.
+         *
+         * This prevents the exact disappearing-row bug.
+         */
+        if (recommendations.length > 0) {
+          hasLoadedRecommendationsRef.current = true;
           setItems(recommendations);
         }
+
+        setLoading(false);
       } catch {
-        if (!cancelled) {
-          setItems([]);
+        if (
+          cancelled ||
+          requestId !== requestIdRef.current
+        ) {
+          return;
         }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+
+        /*
+         * Never erase working recommendations because
+         * TMDB temporarily failed or returned an error.
+         */
+        setLoading(false);
       }
     };
 
@@ -93,9 +129,17 @@ const ForYou: React.FC<{
     };
   }, [type]);
 
+  /*
+   * No personalized profile = no For You section.
+   *
+   * But once recommendations have successfully loaded,
+   * the section remains mounted permanently for this
+   * page session.
+   */
   if (
     !loading &&
-    items.length === 0
+    items.length === 0 &&
+    !hasLoadedRecommendationsRef.current
   ) {
     return null;
   }
@@ -109,7 +153,7 @@ const ForYou: React.FC<{
           </SectionTitle>
         </div>
 
-        {loading ? (
+        {loading && items.length === 0 ? (
           <Skeleton className="h-[250px] rounded-lg md:h-[300px]" />
         ) : (
           <Carousel>
