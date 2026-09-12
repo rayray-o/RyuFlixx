@@ -181,7 +181,7 @@ function parseProviderMessage(
     return null;
   }
 
-  const mediaType =
+    const mediaType: ContentType | null =
     data.mediaType === "tv" ||
     data.media_type === "tv"
       ? "tv"
