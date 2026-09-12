@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { RyuFlixPlayer } from "@/components/ui/player/RyuFlixPlayer";
+import AdFreeIframe from "@/adblocker/AdFreeIframes";
 
 interface WatchPlayerProps {
   servers: PlayersProps[];
@@ -41,7 +42,9 @@ function addResumePosition(
   }
 
   try {
-    const url = new URL(source);
+    const url = new URL(
+      source,
+    );
 
     url.searchParams.set(
       "startAt",
@@ -141,7 +144,8 @@ const WatchPlayer: React.FC<
 
   const isCustomPlayer =
     servers.length > 0 &&
-    safeIndex === servers.length - 1;
+    safeIndex ===
+      servers.length - 1;
 
   return (
     <section className="w-full">
@@ -167,16 +171,14 @@ const WatchPlayer: React.FC<
           />
         ) : (
           <>
-            <iframe
+            <AdFreeIframe
               ref={setIframeRef}
-              key={`${currentServer.title}-${iframeSource}`}
               src={iframeSource}
               title={`${title} — ${currentServer.title}`}
               className="absolute inset-0 block h-full w-full border-0"
-              allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
-              allowFullScreen
+              height="100%"
+              width="100%"
               loading="eager"
-              referrerPolicy="strict-origin-when-cross-origin"
               onLoad={() => {
                 setLoading(false);
               }}
@@ -192,7 +194,9 @@ const WatchPlayer: React.FC<
                   </span>
 
                   <span className="text-xs text-white/40">
-                    {currentServer.title}
+                    {
+                      currentServer.title
+                    }
                   </span>
 
                   {handoffPosition !==
@@ -218,7 +222,10 @@ const WatchPlayer: React.FC<
         </span>
 
         {servers.map(
-          (server, index) => {
+          (
+            server,
+            index,
+          ) => {
             const active =
               index === safeIndex;
 
@@ -226,7 +233,9 @@ const WatchPlayer: React.FC<
               <button
                 key={`${server.title}-${index}`}
                 type="button"
-                aria-pressed={active}
+                aria-pressed={
+                  active
+                }
                 onClick={() => {
                   if (active) {
                     return;
@@ -255,14 +264,15 @@ const WatchPlayer: React.FC<
                   "rounded-xl border px-4 py-2 text-sm font-medium",
                   "transition-colors duration-150",
                   "focus:outline-none focus:ring-2 focus:ring-white/30",
-
                   active
                     ? "border-white/30 bg-white/15 text-white shadow-lg"
                     : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
                 ].join(" ")}
               >
                 <span className="flex items-center gap-2">
-                  {server.title}
+                  {
+                    server.title
+                  }
 
                   {server.recommended && (
                     <span className="text-[9px] uppercase tracking-wider text-white/40">
