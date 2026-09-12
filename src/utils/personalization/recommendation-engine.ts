@@ -7,11 +7,8 @@ import {
 import type { ContentType } from "@/types";
 import type { TasteProfile } from "./taste-engine";
 
-const TMDB_TOKEN =
-  process.env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN;
-
-const TMDB_BASE =
-  "https://api.themoviedb.org/3";
+const TMDB_TOKEN = process.env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN;
+const TMDB_BASE = "https://api.themoviedb.org/3";
 
 export type RecommendationItem = {
   id: number;
@@ -32,64 +29,48 @@ export type RecommendationItem = {
   first_air_date?: string;
 };
 
-type DetailedItem =
-  RecommendationItem & {
-    genres?: {
+type DetailedItem = RecommendationItem & {
+  genres?: {
+    id: number;
+    name: string;
+  }[];
+
+  keywords?: {
+    id: number;
+    name: string;
+  }[];
+
+  credits?: {
+    cast?: {
       id: number;
       name: string;
+      order?: number;
     }[];
 
-    keywords?: {
+    crew?: {
       id: number;
       name: string;
+      job?: string;
+      department?: string;
     }[];
-
-    credits?: {
-      cast?: {
-        id: number;
-        name: string;
-        order?: number;
-      }[];
-
-      crew?: {
-        id: number;
-        name: string;
-        job?: string;
-        department?: string;
-      }[];
-    };
-
-    spoken_languages?: {
-      iso_639_1: string;
-      english_name?: string;
-    }[];
-
-    production_countries?: {
-      iso_3166_1: string;
-      name?: string;
-    }[];
-
-    origin_country?: string[];
   };
 
-/*
- * IMPORTANT:
- *
- * RankedItem must preserve ALL of DetailedItem.
- *
- * The previous version used:
- *
- *   RecommendationItem & { _score: number }
- *
- * which discarded `genres`, `credits`, etc.
- *
- * diversityScore() needs those fields, so the
- * ranked type must extend DetailedItem instead.
- */
-type RankedItem =
-  DetailedItem & {
-    _score: number;
-  };
+  spoken_languages?: {
+    iso_639_1: string;
+    english_name?: string;
+  }[];
+
+  production_countries?: {
+    iso_3166_1: string;
+    name?: string;
+  }[];
+
+  origin_country?: string[];
+};
+
+type RankedItem = DetailedItem & {
+  _score: number;
+};
 
 const GENRE_IDS: Record<string, number> = {
   Action: 28,
@@ -121,138 +102,96 @@ const GENRE_IDS: Record<string, number> = {
   "War & Politics": 10768,
 };
 
+const GENRE_NAMES: Record<number, string> = Object.fromEntries(
+  Object.entries(GENRE_IDS).map(([name, id]) => [id, name]),
+);
+
 function normalize(value: string) {
-  return value
-    .trim()
-    .toLowerCase();
+  return value.trim().toLowerCase();
 }
 
-function positive(
-  map: Record<string, number> | undefined,
-  key: string,
-) {
-  const value = map?.[key];
-
-  return typeof value === "number" &&
-    value > 0
-    ? value
-    : 0;
-}
-
-function negative(
-  map: Record<string, number> | undefined,
-  key: string,
-) {
-  const value = map?.[key];
-
-  return typeof value === "number" &&
-    value < 0
-    ? Math.abs(value)
-    : 0;
-}
-
-function profileMap(
+function getPositive(
   profile: TasteProfile,
-  key: keyof TasteProfile["preferences"],
+  category: keyof TasteProfile["preferences"],
+  key: string,
 ) {
-  return (
-    profile.preferences?.[key] ??
-    {}
-  );
+  const map = profile.preferences?.[category] as
+    | Record<string, number>
+    | undefined;
+
+  const value = map?.[key];
+
+  return typeof value === "number" && value > 0 ? value : 0;
 }
 
-function yearOf(
-  item: RecommendationItem,
+function getNegative(
+  profile: TasteProfile,
+  category: keyof TasteProfile["preferences"],
+  key: string,
 ) {
-  const date =
-    item.release_date ??
-    item.first_air_date;
+  const map = profile.preferences?.[category] as
+    | Record<string, number>
+    | undefined;
+
+  const value = map?.[key];
+
+  return typeof value === "number" && value < 0 ? Math.abs(value) : 0;
+}
+
+function yearOf(item: RecommendationItem) {
+  const date = item.release_date ?? item.first_air_date;
 
   if (!date) {
     return null;
   }
 
-  const year = Number(
-    date.slice(0, 4),
-  );
+  const year = Number(date.slice(0, 4));
 
-  return Number.isFinite(year)
-    ? year
-    : null;
+  return Number.isFinite(year) ? year : null;
 }
 
-function eraOf(
-  year: number | null,
-) {
-  if (
-    year === null ||
-    year < 1880
-  ) {
+function eraOf(year: number | null) {
+  if (year === null || year < 1880) {
     return null;
   }
 
-  if (year >= 2020) {
-    return "2020s";
-  }
-
-  if (year >= 2010) {
-    return "2010s";
-  }
-
-  if (year >= 2000) {
-    return "2000s";
-  }
-
-  if (year >= 1990) {
-    return "1990s";
-  }
-
-  if (year >= 1980) {
-    return "1980s";
-  }
-
-  if (year >= 1970) {
-    return "1970s";
-  }
+  if (year >= 2020) return "2020s";
+  if (year >= 2010) return "2010s";
+  if (year >= 2000) return "2000s";
+  if (year >= 1990) return "1990s";
+  if (year >= 1980) return "1980s";
+  if (year >= 1970) return "1970s";
 
   return "Before 1970";
 }
 
 async function tmdb<T>(
   path: string,
-  params: Record<string, string>,
-) {
+  params: Record<string, string> = {},
+): Promise<T | null> {
   if (!TMDB_TOKEN) {
     return null;
   }
 
-  const searchParams =
-    new URLSearchParams(params);
-
   try {
-    const response =
-      await fetch(
-        `${TMDB_BASE}${path}?${searchParams.toString()}`,
-        {
-          headers: {
-            Authorization:
-              `Bearer ${TMDB_TOKEN}`,
+    const searchParams = new URLSearchParams(params);
 
-            Accept:
-              "application/json",
-          },
-
-          cache: "no-store",
+    const response = await fetch(
+      `${TMDB_BASE}${path}?${searchParams.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${TMDB_TOKEN}`,
+          Accept: "application/json",
         },
-      );
+        cache: "no-store",
+      },
+    );
 
     if (!response.ok) {
       return null;
     }
 
-    return (
-      await response.json()
-    ) as T;
+    return (await response.json()) as T;
   } catch {
     return null;
   }
@@ -262,508 +201,460 @@ async function discover(
   type: ContentType,
   params: Record<string, string>,
 ) {
-  const data =
-    await tmdb<{
-      results?: RecommendationItem[];
-    }>(
-      `/discover/${type}`,
-      {
-        language: "en-US",
-        include_adult: "false",
-        include_video: "false",
-        page: "1",
-        ...params,
-      },
-    );
+  const data = await tmdb<{
+    results?: RecommendationItem[];
+  }>(`/discover/${type}`, {
+    language: "en-US",
+    include_adult: "false",
+    include_video: "false",
+    page: "1",
+    ...params,
+  });
 
-  return (
-    data?.results ?? []
-  ).map((item) => ({
+  return (data?.results ?? []).map((item) => ({
     ...item,
     mediaType: type,
   }));
 }
 
-async function detail(
+async function getDetails(
   type: ContentType,
   id: number,
 ) {
-  return tmdb<DetailedItem>(
-    `/${type}/${id}`,
-    {
-      language: "en-US",
-      append_to_response:
-        "credits,keywords",
-    },
-  );
+  return tmdb<DetailedItem>(`/${type}/${id}`, {
+    language: "en-US",
+    append_to_response: "credits,keywords",
+  });
 }
 
-function buildCandidateQueries(
+function getTopGenreIds(profile: TasteProfile) {
+  const genreScores =
+    (profile.preferences?.genres as Record<string, number> | undefined) ??
+    {};
+
+  return Object.entries(genreScores)
+    .filter(([, score]) => score > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([name]) => GENRE_IDS[name])
+    .filter((id): id is number => Number.isInteger(id));
+}
+
+function buildDiscoverQueries(
   profile: TasteProfile,
   type: ContentType,
 ) {
-  const genreMap =
-    profileMap(
-      profile,
-      "genres",
-    );
+  const queries: Record<string, string>[] = [];
 
-  const genres =
-    Object.entries(genreMap)
-      .filter(
-        ([, score]) =>
-          score > 0,
-      )
-      .sort(
-        (a, b) =>
-          b[1] - a[1],
-      )
-      .slice(0, 6)
-      .map(
-        ([name]) =>
-          GENRE_IDS[name],
-      )
-      .filter(
-        (
-          id,
-        ): id is number =>
-          Number.isInteger(id),
-      );
+  const topGenres = getTopGenreIds(profile);
 
-  const queries: Record<
-    string,
-    string
-  >[] = [];
-
+  /*
+   * General high-quality pool.
+   * This is only a candidate source — the ranking engine
+   * decides what actually reaches the user.
+   */
   queries.push({
-    sort_by:
-      "popularity.desc",
-
-    "vote_count.gte":
-      type === "movie"
-        ? "150"
-        : "80",
+    sort_by: "popularity.desc",
+    "vote_count.gte": type === "movie" ? "100" : "50",
   });
 
   queries.push({
-    sort_by:
-      "vote_average.desc",
-
-    "vote_count.gte":
-      type === "movie"
-        ? "500"
-        : "250",
+    sort_by: "vote_average.desc",
+    "vote_count.gte": type === "movie" ? "300" : "150",
   });
 
-  for (
-    const genre of
-      genres.slice(0, 4)
-  ) {
+  /*
+   * Dedicated pools for the strongest genres.
+   * This makes the candidate generator much more
+   * personalized than simply taking trending content.
+   */
+  for (const genreId of topGenres.slice(0, 5)) {
     queries.push({
-      with_genres:
-        String(genre),
+      with_genres: String(genreId),
+      sort_by: "popularity.desc",
+      "vote_count.gte": type === "movie" ? "50" : "30",
+    });
 
-      sort_by:
-        "popularity.desc",
-
-      "vote_count.gte":
-        type === "movie"
-          ? "100"
-          : "60",
+    queries.push({
+      with_genres: String(genreId),
+      sort_by: "vote_average.desc",
+      "vote_count.gte": type === "movie" ? "150" : "75",
     });
   }
 
-  const preferredEra =
-    profile.summary
-      ?.preferredEra;
+  const preferredEra = profile.summary?.preferredEra;
 
   if (preferredEra) {
-    const start =
-      Number(
-        preferredEra.slice(
-          0,
-          4,
-        ),
-      );
+    const start = Number(preferredEra.slice(0, 4));
 
-    if (
-      Number.isFinite(start)
-    ) {
-      if (
-        type === "movie"
-      ) {
+    if (Number.isFinite(start)) {
+      if (type === "movie") {
         queries.push({
-          primary_release_date_gte:
-            `${start}-01-01`,
-
-          primary_release_date_lte:
-            `${start + 9}-12-31`,
-
-          sort_by:
-            "popularity.desc",
-
-          "vote_count.gte":
-            "60",
+          primary_release_date_gte: `${start}-01-01`,
+          primary_release_date_lte: `${start + 9}-12-31`,
+          sort_by: "popularity.desc",
+          "vote_count.gte": "40",
         });
       } else {
         queries.push({
-          first_air_date_gte:
-            `${start}-01-01`,
-
-          first_air_date_lte:
-            `${start + 9}-12-31`,
-
-          sort_by:
-            "popularity.desc",
-
-          "vote_count.gte":
-            "40",
+          first_air_date_gte: `${start}-01-01`,
+          first_air_date_lte: `${start + 9}-12-31`,
+          sort_by: "popularity.desc",
+          "vote_count.gte": "25",
         });
       }
     }
   }
 
-  if (type === "movie") {
-    queries.push({
-      primary_release_date_gte:
-        "2020-01-01",
-
-      sort_by:
-        "popularity.desc",
-
-      "vote_count.gte":
-        "80",
-    });
-  } else {
-    queries.push({
-      first_air_date_gte:
-        "2020-01-01",
-
-      sort_by:
-        "popularity.desc",
-
-      "vote_count.gte":
-        "40",
-    });
-  }
-
   return queries;
 }
 
-function scoreCandidate(
+function scoreBasicCandidate(
+  item: RecommendationItem,
+  profile: TasteProfile,
+) {
+  let score = 0;
+
+  let positiveMatches = 0;
+  let negativeMatches = 0;
+
+  /*
+   * Genre matching is intentionally strong because
+   * discover results already contain genre_ids.
+   */
+  for (const genreId of item.genre_ids ?? []) {
+    const genreName = GENRE_NAMES[genreId];
+
+    if (!genreName) {
+      continue;
+    }
+
+    const positiveScore = getPositive(
+      profile,
+      "genres",
+      genreName,
+    );
+
+    const negativeScore = getNegative(
+      profile,
+      "genres",
+      genreName,
+    );
+
+    score += positiveScore * 4.2;
+    score -= negativeScore * 5.5;
+
+    if (positiveScore > 0) {
+      positiveMatches++;
+    }
+
+    if (negativeScore > 0) {
+      negativeMatches++;
+    }
+  }
+
+  /*
+   * Media type preference.
+   */
+  score +=
+    getPositive(
+      profile,
+      "mediaTypes",
+      item.mediaType,
+    ) * 2;
+
+  /*
+   * Era preference.
+   */
+  const era = eraOf(yearOf(item));
+
+  if (era) {
+    score +=
+      getPositive(
+        profile,
+        "eras",
+        era,
+      ) * 1.6;
+
+    score -=
+      getNegative(
+        profile,
+        "eras",
+        era,
+      ) * 2;
+  }
+
+  /*
+   * Multiple matching genres get a nonlinear bonus.
+   * Someone who likes Crime + Thriller + Mystery
+   * should get a candidate containing all three
+   * above a candidate matching only one.
+   */
+  if (positiveMatches > 0) {
+    score += positiveMatches * positiveMatches * 1.25;
+  }
+
+  /*
+   * Explicit negative signals are powerful.
+   */
+  score -= Math.min(negativeMatches, 5) * 8;
+
+  /*
+   * Quality is a supporting signal, not the main signal.
+   */
+  score +=
+    Math.max(
+      0,
+      item.vote_average - 6,
+    ) * 1.35;
+
+  const voteQuality = Math.min(
+    1,
+    item.vote_count /
+      (item.mediaType === "movie" ? 2500 : 1200),
+  );
+
+  score += voteQuality * 1.4;
+
+  /*
+   * Popularity prevents obscure garbage from dominating,
+   * but deliberately has a small weight so "popular"
+   * doesn't become the recommendation algorithm.
+   */
+  score +=
+    Math.log10(
+      Math.max(10, item.popularity + 10),
+    ) * 0.35;
+
+  /*
+   * Small recency preference.
+   */
+  const year = yearOf(item);
+
+  if (year !== null) {
+    score += Math.max(
+      0,
+      Math.min(
+        2.5,
+        (year - 2010) / 20,
+      ),
+    );
+  }
+
+  return score;
+}
+
+function scoreDetailedCandidate(
   item: DetailedItem,
   profile: TasteProfile,
 ) {
+  let score = scoreBasicCandidate(
+    item,
+    profile,
+  );
+
+  let positiveMatches = 0;
+  let negativeMatches = 0;
+
   const genres =
     item.genres?.map(
-      (genre) =>
-        genre.name,
+      (genre) => genre.name,
     ) ?? [];
 
   const keywords =
     item.keywords?.map(
-      (keyword) =>
-        keyword.name,
+      (keyword) => keyword.name,
     ) ?? [];
 
   const directors =
     item.credits?.crew
       ?.filter(
         (person) =>
-          person.job ===
-            "Director" ||
-          person.department ===
-            "Directing",
+          person.job === "Director" ||
+          person.department === "Directing",
       )
-      .slice(0, 3)
+      .slice(0, 5)
       .map(
-        (person) =>
-          person.name,
+        (person) => person.name,
       ) ?? [];
 
   const actors =
     item.credits?.cast
-      ?.slice(0, 12)
+      ?.slice(0, 15)
       .map(
-        (person) =>
-          person.name,
+        (person) => person.name,
       ) ?? [];
 
   const languages =
-    item.spoken_languages
-      ?.map(
-        (language) =>
-          language.english_name ??
-          language.iso_639_1,
-      ) ?? [];
+    item.spoken_languages?.map(
+      (language) =>
+        language.english_name ??
+        language.iso_639_1,
+    ) ?? [];
 
   const countries =
-    item.production_countries
-      ?.map(
-        (country) =>
-          country.name ??
-          country.iso_3166_1,
-      ) ??
+    item.production_countries?.map(
+      (country) =>
+        country.name ??
+        country.iso_3166_1,
+    ) ??
     item.origin_country ??
     [];
 
-  let score = 0;
-
-  let positiveMatches = 0;
-
-  let negativeMatches = 0;
-
-  for (
-    const genre of genres
-  ) {
-    const positiveScore =
-      positive(
-        profileMap(
-          profile,
-          "genres",
-        ),
-        genre,
-      );
-
-    const negativeScore =
-      negative(
-        profileMap(
-          profile,
-          "genres",
-        ),
-        genre,
-      );
-
-    score +=
-      positiveScore * 2.8;
-
-    score -=
-      negativeScore * 3.8;
-
-    if (
-      positiveScore > 0
-    ) {
-      positiveMatches++;
-    }
-
-    if (
-      negativeScore > 0
-    ) {
-      negativeMatches++;
-    }
-  }
-
-  for (
-    const keyword of keywords
-  ) {
-    const positiveScore =
-      positive(
-        profileMap(
-          profile,
-          "keywords",
-        ),
-        keyword,
-      );
-
-    const negativeScore =
-      negative(
-        profileMap(
-          profile,
-          "keywords",
-        ),
-        keyword,
-      );
-
-    score +=
-      positiveScore * 2.15;
-
-    score -=
-      negativeScore * 3;
-
-    if (
-      positiveScore > 0
-    ) {
-      positiveMatches++;
-    }
-
-    if (
-      negativeScore > 0
-    ) {
-      negativeMatches++;
-    }
-  }
-
-  for (
-    const director of directors
-  ) {
-    const positiveScore =
-      positive(
-        profileMap(
-          profile,
-          "directors",
-        ),
-        director,
-      );
-
-    const negativeScore =
-      negative(
-        profileMap(
-          profile,
-          "directors",
-        ),
-        director,
-      );
-
-    score +=
-      positiveScore * 4.2;
-
-    score -=
-      negativeScore * 4.5;
-
-    if (
-      positiveScore > 0
-    ) {
-      positiveMatches++;
-    }
-
-    if (
-      negativeScore > 0
-    ) {
-      negativeMatches++;
-    }
-  }
-
-  for (
-    const actor of actors
-  ) {
-    const positiveScore =
-      positive(
-        profileMap(
-          profile,
-          "actors",
-        ),
-        actor,
-      );
-
-    const negativeScore =
-      negative(
-        profileMap(
-          profile,
-          "actors",
-        ),
-        actor,
-      );
-
-    score +=
-      positiveScore * 1.65;
-
-    score -=
-      negativeScore * 2;
-
-    if (
-      positiveScore > 0
-    ) {
-      positiveMatches++;
-    }
-
-    if (
-      negativeScore > 0
-    ) {
-      negativeMatches++;
-    }
-  }
-
-  for (
-    const language of languages
-  ) {
-    score +=
-      positive(
-        profileMap(
-          profile,
-          "languages",
-        ),
-        language,
-      ) * 1.15;
-  }
-
-  for (
-    const country of countries
-  ) {
-    score +=
-      positive(
-        profileMap(
-          profile,
-          "countries",
-        ),
-        country,
-      ) * 0.75;
-  }
-
-  const era =
-    eraOf(
-      yearOf(item),
+  /*
+   * Genres.
+   */
+  for (const genre of genres) {
+    const positiveScore = getPositive(
+      profile,
+      "genres",
+      genre,
     );
 
-  if (era) {
+    const negativeScore = getNegative(
+      profile,
+      "genres",
+      genre,
+    );
+
+    score += positiveScore * 2.4;
+    score -= negativeScore * 3.2;
+
+    if (positiveScore > 0) {
+      positiveMatches++;
+    }
+
+    if (negativeScore > 0) {
+      negativeMatches++;
+    }
+  }
+
+  /*
+   * Keywords are extremely useful because they
+   * distinguish two movies with the same broad genre.
+   */
+  for (const keyword of keywords) {
+    const positiveScore = getPositive(
+      profile,
+      "keywords",
+      keyword,
+    );
+
+    const negativeScore = getNegative(
+      profile,
+      "keywords",
+      keyword,
+    );
+
+    score += positiveScore * 2.8;
+    score -= negativeScore * 3.5;
+
+    if (positiveScore > 0) {
+      positiveMatches++;
+    }
+
+    if (negativeScore > 0) {
+      negativeMatches++;
+    }
+  }
+
+  /*
+   * Directors are a very strong taste signal.
+   */
+  for (const director of directors) {
+    const positiveScore = getPositive(
+      profile,
+      "directors",
+      director,
+    );
+
+    const negativeScore = getNegative(
+      profile,
+      "directors",
+      director,
+    );
+
+    score += positiveScore * 5.5;
+    score -= negativeScore * 6;
+
+    if (positiveScore > 0) {
+      positiveMatches++;
+    }
+
+    if (negativeScore > 0) {
+      negativeMatches++;
+    }
+  }
+
+  /*
+   * Cast matters, but less than director/genre/keyword.
+   */
+  for (const actor of actors) {
+    const positiveScore = getPositive(
+      profile,
+      "actors",
+      actor,
+    );
+
+    const negativeScore = getNegative(
+      profile,
+      "actors",
+      actor,
+    );
+
+    score += positiveScore * 2.1;
+    score -= negativeScore * 2.5;
+
+    if (positiveScore > 0) {
+      positiveMatches++;
+    }
+
+    if (negativeScore > 0) {
+      negativeMatches++;
+    }
+  }
+
+  for (const language of languages) {
     score +=
-      positive(
-        profileMap(
-          profile,
-          "eras",
-        ),
-        era,
+      getPositive(
+        profile,
+        "languages",
+        language,
       ) * 1.4;
   }
 
-  score +=
-    positive(
-      profileMap(
+  for (const country of countries) {
+    score +=
+      getPositive(
         profile,
-        "mediaTypes",
-      ),
-      item.mediaType,
-    ) * 1.75;
+        "countries",
+        country,
+      ) * 0.9;
+  }
 
-  const voteQuality =
-    Math.min(
-      1,
-      item.vote_count /
-        (
-          item.mediaType ===
-          "movie"
-            ? 2500
-            : 1200
-        ),
-    );
+  const era = eraOf(yearOf(item));
 
-  score +=
-    Math.max(
-      0,
-      item.vote_average -
-        6.5,
-    ) * 1.35;
+  if (era) {
+    score +=
+      getPositive(
+        profile,
+        "eras",
+        era,
+      ) * 1.3;
+  }
 
-  score +=
-    voteQuality * 1.5;
+  /*
+   * Dense independent matches are worth more.
+   */
+  const matchDensity = Math.min(
+    positiveMatches,
+    12,
+  );
 
   score +=
-    Math.log10(
-      Math.max(
-        10,
-        item.popularity + 10,
-      ),
-    ) * 0.45;
-
-  const density =
-    Math.min(
-      positiveMatches,
-      10,
-    );
-
-  score +=
-    density *
-    density *
-    0.7;
+    matchDensity *
+    matchDensity *
+    0.8;
 
   score -=
     Math.min(
@@ -771,101 +662,107 @@ function scoreCandidate(
       8,
     ) * 7;
 
-  const year =
-    yearOf(item);
-
-  if (year !== null) {
-    const recency =
-      Math.max(
-        0,
-        Math.min(
-          2.5,
-          (year - 2010) /
-            20,
-        ),
-      );
-
-    score += recency;
-  }
-
   return score;
 }
 
-function diversityScore(
+function diversityPenalty(
   item: RankedItem,
   selected: RankedItem[],
 ) {
+  let penalty = 0;
+
   const itemGenres =
-    item.genres
-      ?.map(
-        (genre) =>
-          normalize(
-            genre.name,
-          ),
-      ) ?? [];
+    item.genres?.map(
+      (genre) =>
+        normalize(genre.name),
+    ) ??
+    (item.genre_ids ?? [])
+      .map(
+        (id) =>
+          GENRE_NAMES[id] &&
+          normalize(GENRE_NAMES[id]),
+      )
+      .filter(
+        (value): value is string =>
+          Boolean(value),
+      );
 
   const itemDirector =
     item.credits?.crew?.find(
       (person) =>
-        person.job ===
-        "Director",
+        person.job === "Director",
     );
 
-  let penalty = 0;
-
-  for (
-    const existing of selected
-  ) {
+  for (const existing of selected) {
     const existingGenres =
-      existing.genres
-        ?.map(
-          (genre) =>
-            normalize(
-              genre.name,
-            ),
-        ) ?? [];
+      existing.genres?.map(
+        (genre) =>
+          normalize(genre.name),
+      ) ??
+      (existing.genre_ids ?? [])
+        .map(
+          (id) =>
+            GENRE_NAMES[id] &&
+            normalize(GENRE_NAMES[id]),
+        )
+        .filter(
+          (value): value is string =>
+            Boolean(value),
+        );
 
-    const sharedGenre =
-      itemGenres.some(
+    const sharedGenres =
+      itemGenres.filter(
         (genre) =>
           existingGenres.includes(
             genre,
           ),
-      );
+      ).length;
 
-    if (sharedGenre) {
-      penalty += 0.8;
+    if (sharedGenres >= 2) {
+      penalty += 1.25;
+    } else if (sharedGenres === 1) {
+      penalty += 0.35;
     }
 
     if (
       itemDirector &&
       existing.credits?.crew?.some(
         (person) =>
-          person.job ===
-            "Director" &&
-          normalize(
-            person.name,
-          ) ===
-            normalize(
-              itemDirector.name,
-            ),
+          person.job === "Director" &&
+          normalize(person.name) ===
+            normalize(itemDirector.name),
       )
     ) {
-      penalty += 1.2;
+      penalty += 1.1;
     }
   }
 
   return penalty;
 }
 
-export async function
-  getPersonalizedRecommendations(
-    profile: TasteProfile,
-    type: ContentType,
-    limit = 12,
-  ): Promise<
-    RecommendationItem[]
-  > {
+function excludedIds() {
+  const excluded = new Set<string>();
+
+  for (const item of getWatchHistory()) {
+    excluded.add(
+      `${item.type}:${item.media_id}`,
+    );
+  }
+
+  for (const item of getLocalWatchlist()) {
+    excluded.add(
+      `${item.type}:${item.id}`,
+    );
+  }
+
+  return excluded;
+}
+
+export async function getPersonalizedRecommendations(
+  profile: TasteProfile,
+  type: ContentType,
+  limit = 12,
+): Promise<RecommendationItem[]> {
   if (
     !profile ||
     profile.confidence < 8
@@ -873,37 +770,20 @@ export async function
     return [];
   }
 
-  const history =
-    getWatchHistory();
-
-  const watchlist =
-    getLocalWatchlist();
-
-  const excluded =
-    new Set<string>();
-
-  for (
-    const item of history
-  ) {
-    excluded.add(
-      `${item.type}:${item.media_id}`,
-    );
-  }
-
-  for (
-    const item of watchlist
-  ) {
-    excluded.add(
-      `${item.type}:${item.id}`,
-    );
-  }
+  const excluded = excludedIds();
 
   const queries =
-    buildCandidateQueries(
+    buildDiscoverQueries(
       profile,
       type,
     );
 
+  /*
+   * Candidate generation.
+   *
+   * We intentionally run the discover requests in parallel,
+   * but we only retain a controlled pool.
+   */
   const batches =
     await Promise.all(
       queries.map(
@@ -921,23 +801,21 @@ export async function
       RecommendationItem
     >();
 
-  for (
-    const batch of batches
-  ) {
-    for (
-      const item of batch
-    ) {
+  for (const batch of batches) {
+    for (const item of batch) {
       const key =
         `${type}:${item.id}`;
 
-      if (
-        excluded.has(key)
-      ) {
+      if (excluded.has(key)) {
+        continue;
+      }
+
+      if (!item.poster_path) {
         continue;
       }
 
       if (
-        !item.poster_path
+        !Number.isFinite(item.id)
       ) {
         continue;
       }
@@ -949,52 +827,29 @@ export async function
     }
   }
 
-  const candidates =
-    Array.from(
-      candidateMap.values(),
-    ).slice(0, 100);
-
-  const details: DetailedItem[] =
-    [];
-
-  for (
-    let index = 0;
-    index < candidates.length;
-    index += 8
-  ) {
-    const chunk =
-      candidates.slice(
-        index,
-        index + 8,
-      );
-
-    const resolved =
-      await Promise.all(
-        chunk.map(
-          (candidate) =>
-            detail(
-              type,
-              candidate.id,
-            ),
-        ),
-      );
-
-    for (
-      const item of resolved
-    ) {
-      if (item) {
-        details.push(item);
-      }
-    }
+  /*
+   * If discover returned nothing, fail gracefully.
+   * The homepage itself must never break because
+   * personalization failed.
+   */
+  if (candidateMap.size === 0) {
+    return [];
   }
 
-  const ranked: RankedItem[] =
-    details
+  /*
+   * First-pass ranking works WITHOUT details.
+   *
+   * This is the important reliability change.
+   */
+  const basicRanked =
+    Array.from(
+      candidateMap.values(),
+    )
       .map(
         (item) => ({
           ...item,
           _score:
-            scoreCandidate(
+            scoreBasicCandidate(
               item,
               profile,
             ),
@@ -1006,12 +861,109 @@ export async function
           a._score,
       );
 
+  /*
+   * Only enrich the strongest 30 candidates.
+   *
+   * Even if every detail request fails, we still
+   * have the basic ranked candidates.
+   */
+  const enrichmentPool =
+    basicRanked.slice(
+      0,
+      Math.min(
+        30,
+        basicRanked.length,
+      ),
+    );
+
+  const detailedMap =
+    new Map<
+      number,
+      DetailedItem
+    >();
+
+  for (
+    let index = 0;
+    index < enrichmentPool.length;
+    index += 6
+  ) {
+    const chunk =
+      enrichmentPool.slice(
+        index,
+        index + 6,
+      );
+
+    const resolved =
+      await Promise.all(
+        chunk.map(
+          (candidate) =>
+            getDetails(
+              type,
+              candidate.id,
+            ),
+        ),
+      );
+
+    for (const detail of resolved) {
+      if (detail) {
+        detailedMap.set(
+          detail.id,
+          detail,
+        );
+      }
+    }
+  }
+
+  /*
+   * Re-score enriched candidates.
+   * Un-enriched candidates keep their reliable
+   * basic score.
+   */
+  const ranked: RankedItem[] =
+    basicRanked.map(
+      (candidate) => {
+        const detailed =
+          detailedMap.get(
+            candidate.id,
+          );
+
+        if (!detailed) {
+          return candidate;
+        }
+
+        return {
+          ...candidate,
+          ...detailed,
+          mediaType: type,
+          _score:
+            scoreDetailedCandidate(
+              {
+                ...candidate,
+                ...detailed,
+                mediaType: type,
+              },
+              profile,
+            ),
+        };
+      },
+    );
+
+  ranked.sort(
+    (a, b) =>
+      b._score -
+      a._score,
+  );
+
+  /*
+   * Final selection.
+   *
+   * We don't simply take the top 12 because that can
+   * produce twelve near-identical movies.
+   */
   const selected: RankedItem[] =
     [];
 
-  for (
-    const item of ranked
-  ) {
+  for (const item of ranked) {
     if (
       selected.length >=
       limit
@@ -1020,7 +972,7 @@ export async function
     }
 
     const penalty =
-      diversityScore(
+      diversityPenalty(
         item,
         selected,
       );
@@ -1028,15 +980,6 @@ export async function
     const adjustedScore =
       item._score -
       penalty;
-
-    if (
-      selected.length >= 4 &&
-      adjustedScore <
-        ranked[0]._score *
-          0.32
-    ) {
-      continue;
-    }
 
     selected.push({
       ...item,
@@ -1057,4 +1000,4 @@ export async function
         ...item
       }) => item,
     );
-  }
+      }
