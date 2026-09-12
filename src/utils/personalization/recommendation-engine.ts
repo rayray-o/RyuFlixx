@@ -32,47 +32,62 @@ export type RecommendationItem = {
   first_air_date?: string;
 };
 
-type DetailedItem = RecommendationItem & {
-  genres?: {
-    id: number;
-    name: string;
-  }[];
-
-  keywords?: {
-    id: number;
-    name: string;
-  }[];
-
-  credits?: {
-    cast?: {
+type DetailedItem =
+  RecommendationItem & {
+    genres?: {
       id: number;
       name: string;
-      order?: number;
     }[];
 
-    crew?: {
+    keywords?: {
       id: number;
       name: string;
-      job?: string;
-      department?: string;
     }[];
+
+    credits?: {
+      cast?: {
+        id: number;
+        name: string;
+        order?: number;
+      }[];
+
+      crew?: {
+        id: number;
+        name: string;
+        job?: string;
+        department?: string;
+      }[];
+    };
+
+    spoken_languages?: {
+      iso_639_1: string;
+      english_name?: string;
+    }[];
+
+    production_countries?: {
+      iso_3166_1: string;
+      name?: string;
+    }[];
+
+    origin_country?: string[];
   };
 
-  spoken_languages?: {
-    iso_639_1: string;
-    english_name?: string;
-  }[];
-
-  production_countries?: {
-    iso_3166_1: string;
-    name?: string;
-  }[];
-
-  origin_country?: string[];
-};
-
+/*
+ * IMPORTANT:
+ *
+ * RankedItem must preserve ALL of DetailedItem.
+ *
+ * The previous version used:
+ *
+ *   RecommendationItem & { _score: number }
+ *
+ * which discarded `genres`, `credits`, etc.
+ *
+ * diversityScore() needs those fields, so the
+ * ranked type must extend DetailedItem instead.
+ */
 type RankedItem =
-  RecommendationItem & {
+  DetailedItem & {
     _score: number;
   };
 
@@ -153,7 +168,9 @@ function yearOf(
     item.release_date ??
     item.first_air_date;
 
-  if (!date) return null;
+  if (!date) {
+    return null;
+  }
 
   const year = Number(
     date.slice(0, 4),
@@ -174,23 +191,29 @@ function eraOf(
     return null;
   }
 
-  if (year >= 2020)
+  if (year >= 2020) {
     return "2020s";
+  }
 
-  if (year >= 2010)
+  if (year >= 2010) {
     return "2010s";
+  }
 
-  if (year >= 2000)
+  if (year >= 2000) {
     return "2000s";
+  }
 
-  if (year >= 1990)
+  if (year >= 1990) {
     return "1990s";
+  }
 
-  if (year >= 1980)
+  if (year >= 1980) {
     return "1980s";
+  }
 
-  if (year >= 1970)
+  if (year >= 1970) {
     return "1970s";
+  }
 
   return "Before 1970";
 }
@@ -269,26 +292,12 @@ async function detail(
     `/${type}/${id}`,
     {
       language: "en-US",
-
       append_to_response:
         "credits,keywords",
     },
   );
 }
 
-/*
- * Candidate generation deliberately uses
- * several different discovery strategies.
- *
- * This is important:
- *
- * We don't simply ask TMDB for
- * "popular Action movies".
- *
- * We build a large candidate pool from
- * multiple independent paths, then rank
- * those candidates using the user's taste.
- */
 function buildCandidateQueries(
   profile: TasteProfile,
   type: ContentType,
@@ -326,9 +335,6 @@ function buildCandidateQueries(
     string
   >[] = [];
 
-  /*
-   * General high-quality pool.
-   */
   queries.push({
     sort_by:
       "popularity.desc",
@@ -349,9 +355,6 @@ function buildCandidateQueries(
         : "250",
   });
 
-  /*
-   * Individual strongest genres.
-   */
   for (
     const genre of
       genres.slice(0, 4)
@@ -370,9 +373,6 @@ function buildCandidateQueries(
     });
   }
 
-  /*
-   * Strongest era.
-   */
   const preferredEra =
     profile.summary
       ?.preferredEra;
@@ -423,12 +423,6 @@ function buildCandidateQueries(
     }
   }
 
-  /*
-   * Recent content.
-   *
-   * This is intentionally weak.
-   * Recency must never overpower taste.
-   */
   if (type === "movie") {
     queries.push({
       primary_release_date_gte:
@@ -456,19 +450,6 @@ function buildCandidateQueries(
   return queries;
 }
 
-/*
- * Score a candidate against the entire
- * taste profile.
- *
- * The important principle here is:
- *
- * one giant match should NOT automatically
- * beat five independent strong matches.
- *
- * A movie matching the user's genre,
- * keywords, director, actor, era and
- * language is a much stronger candidate.
- */
 function scoreCandidate(
   item: DetailedItem,
   profile: TasteProfile,
@@ -532,12 +513,6 @@ function scoreCandidate(
 
   let negativeMatches = 0;
 
-  /*
-   * GENRE
-   *
-   * Strong because genre is one of
-   * the most reliable broad taste signals.
-   */
   for (
     const genre of genres
   ) {
@@ -578,14 +553,6 @@ function scoreCandidate(
     }
   }
 
-  /*
-   * KEYWORDS
-   *
-   * Keywords are extremely useful
-   * for discovering the difference
-   * between two movies with the same
-   * genre.
-   */
   for (
     const keyword of keywords
   ) {
@@ -626,11 +593,6 @@ function scoreCandidate(
     }
   }
 
-  /*
-   * DIRECTOR
-   *
-   * High-value signal.
-   */
   for (
     const director of directors
   ) {
@@ -671,9 +633,6 @@ function scoreCandidate(
     }
   }
 
-  /*
-   * ACTORS
-   */
   for (
     const actor of actors
   ) {
@@ -714,9 +673,6 @@ function scoreCandidate(
     }
   }
 
-  /*
-   * LANGUAGE
-   */
   for (
     const language of languages
   ) {
@@ -730,9 +686,6 @@ function scoreCandidate(
       ) * 1.15;
   }
 
-  /*
-   * COUNTRY
-   */
   for (
     const country of countries
   ) {
@@ -746,9 +699,6 @@ function scoreCandidate(
       ) * 0.75;
   }
 
-  /*
-   * ERA
-   */
   const era =
     eraOf(
       yearOf(item),
@@ -765,9 +715,6 @@ function scoreCandidate(
       ) * 1.4;
   }
 
-  /*
-   * MOVIE VS TV
-   */
   score +=
     positive(
       profileMap(
@@ -777,16 +724,6 @@ function scoreCandidate(
       item.mediaType,
     ) * 1.75;
 
-  /*
-   * QUALITY
-   *
-   * TMDB quality is a supporting signal,
-   * not the primary recommendation signal.
-   *
-   * A highly-rated movie the user hates
-   * should NOT outrank a slightly lower-rated
-   * movie that perfectly matches their taste.
-   */
   const voteQuality =
     Math.min(
       1,
@@ -809,9 +746,6 @@ function scoreCandidate(
   score +=
     voteQuality * 1.5;
 
-  /*
-   * Popularity is deliberately weak.
-   */
   score +=
     Math.log10(
       Math.max(
@@ -820,15 +754,6 @@ function scoreCandidate(
       ),
     ) * 0.45;
 
-  /*
-   * MATCH DENSITY
-   *
-   * This is extremely important.
-   *
-   * A candidate matching six
-   * independent taste dimensions
-   * gets a meaningful bonus.
-   */
   const density =
     Math.min(
       positiveMatches,
@@ -840,23 +765,12 @@ function scoreCandidate(
     density *
     0.7;
 
-  /*
-   * Negative preferences are stronger
-   * than positive ones.
-   *
-   * If someone repeatedly dislikes
-   * something, don't keep feeding it
-   * because it happens to be popular.
-   */
   score -=
     Math.min(
       negativeMatches,
       8,
     ) * 7;
 
-  /*
-   * Small recency bonus.
-   */
   const year =
     yearOf(item);
 
@@ -891,21 +805,14 @@ function diversityScore(
       ) ?? [];
 
   const itemDirector =
-    item.credits?.crew
-      ?.find(
-        (person) =>
-          person.job ===
-          "Director",
-      );
+    item.credits?.crew?.find(
+      (person) =>
+        person.job ===
+        "Director",
+    );
 
   let penalty = 0;
 
-  /*
-   * Don't destroy a great recommendation
-   * just because it shares a genre.
-   *
-   * Diversity is a secondary layer.
-   */
   for (
     const existing of selected
   ) {
@@ -959,10 +866,6 @@ export async function
   ): Promise<
     RecommendationItem[]
   > {
-  /*
-   * Don't make recommendations from
-   * a practically empty profile.
-   */
   if (
     !profile ||
     profile.confidence < 8
@@ -970,12 +873,6 @@ export async function
     return [];
   }
 
-  /*
-   * Never recommend something the
-   * user is already watching,
-   * already watched or explicitly
-   * saved.
-   */
   const history =
     getWatchHistory();
 
@@ -1001,9 +898,6 @@ export async function
     );
   }
 
-  /*
-   * Generate a large candidate pool.
-   */
   const queries =
     buildCandidateQueries(
       profile,
@@ -1055,29 +949,14 @@ export async function
     }
   }
 
-  /*
-   * Keep a substantial pool.
-   *
-   * We intentionally do NOT rank
-   * based on the shallow discover
-   * response alone.
-   */
   const candidates =
     Array.from(
       candidateMap.values(),
     ).slice(0, 100);
 
-  /*
-   * Fetch deep metadata so ranking
-   * can actually understand the content.
-   */
   const details: DetailedItem[] =
     [];
 
-  /*
-   * Batched requests prevent a giant
-   * Promise.all from hammering TMDB.
-   */
   for (
     let index = 0;
     index < candidates.length;
@@ -1109,15 +988,11 @@ export async function
     }
   }
 
-  /*
-   * Deep ranking.
-   */
-  const ranked =
+  const ranked: RankedItem[] =
     details
       .map(
         (item) => ({
           ...item,
-
           _score:
             scoreCandidate(
               item,
@@ -1131,13 +1006,6 @@ export async function
           a._score,
       );
 
-  /*
-   * Final selection.
-   *
-   * Taste ranking comes FIRST.
-   * Diversity only prevents the
-   * final row from becoming repetitive.
-   */
   const selected: RankedItem[] =
     [];
 
@@ -1161,10 +1029,6 @@ export async function
       item._score -
       penalty;
 
-    /*
-     * Don't let diversity override
-     * an exceptional match.
-     */
     if (
       selected.length >= 4 &&
       adjustedScore <
