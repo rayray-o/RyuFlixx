@@ -12,21 +12,15 @@ interface AdFreeIframeProps {
   onLoad?: React.ReactEventHandler<HTMLIFrameElement>;
 }
 
-function proxiedSource(
-  source: string,
-) {
+function proxiedSource(source: string) {
   if (!source) {
     return source;
   }
 
   /*
-   * Already proxied.
+   * Don't proxy our own API URL twice.
    */
-  if (
-    source.startsWith(
-      "/api/adproxy",
-    )
-  ) {
+  if (source.startsWith("/api/adproxy")) {
     return source;
   }
 
@@ -51,46 +45,43 @@ function proxiedSource(
   }
 }
 
-const AdFreeIframe =
-  React.forwardRef<
-    HTMLIFrameElement,
-    AdFreeIframeProps
-  >(function AdFreeIframe(
-    {
-      src,
-      title,
-      className,
-      height = "100%",
-      width = "100%",
-      loading = "eager",
-      onLoad,
-    },
-    ref,
-  ) {
-    const finalSrc =
-      proxiedSource(src);
+const AdFreeIframe = React.forwardRef<
+  HTMLIFrameElement,
+  AdFreeIframeProps
+>(function AdFreeIframe(
+  {
+    src,
+    title,
+    className,
+    height = "100%",
+    width = "100%",
+    loading = "eager",
+    onLoad,
+  },
+  ref,
+) {
+  const finalSrc = proxiedSource(src);
 
-    return (
-      <iframe
-        ref={ref}
-        src={finalSrc}
-        title={title}
-        className={
-          className ??
-          "absolute inset-0 block h-full w-full border-0"
-        }
-        height={height}
-        width={width}
-        allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
-        allowFullScreen
-        loading={loading}
-        referrerPolicy="strict-origin-when-cross-origin"
-        onLoad={onLoad}
-      />
-    );
-  });
+  return (
+    <iframe
+      ref={ref}
+      src={finalSrc}
+      title={title}
+      className={
+        className ??
+        "absolute inset-0 block h-full w-full border-0"
+      }
+      height={height}
+      width={width}
+      allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
+      allowFullScreen
+      loading={loading}
+      referrerPolicy="strict-origin-when-cross-origin"
+      onLoad={onLoad}
+    />
+  );
+});
 
-AdFreeIframe.displayName =
-  "AdFreeIframe";
+AdFreeIframe.displayName = "AdFreeIframe";
 
 export default AdFreeIframe;
