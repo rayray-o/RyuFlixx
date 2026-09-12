@@ -1,6 +1,6 @@
 ## Contributing
 
-CINEXTMA is an open-source project, and we welcome contributions from the community. If you'd like to contribute, please follow these guidelines:
+Ryuflix is an open-source project, and we welcome contributions from the community. If you'd like to contribute, please follow these guidelines:
 
 1. 🍴 Fork the repository.
 2. ➕ Create a new branch for your feature or bug fix.
