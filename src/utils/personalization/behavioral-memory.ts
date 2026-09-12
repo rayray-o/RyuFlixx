@@ -12,8 +12,11 @@ const BEHAVIOR_STORAGE_KEY =
 const MAX_EVENTS = 500;
 
 export type BehavioralEventType =
+  | "opened"
   | "started"
   | "progress"
+  | "paused"
+  | "seeked"
   | "completed"
   | "abandoned"
   | "rewatched";
@@ -42,7 +45,10 @@ export interface BehavioralMemory {
   media: Record<
     string,
     {
+      opens: number;
       starts: number;
+      pauses: number;
+      seeks: number;
       completions: number;
       abandons: number;
       rewatches: number;
@@ -73,9 +79,7 @@ export interface BehavioralMemory {
 }
 
 function isBrowser(): boolean {
-  return (
-    typeof window !== "undefined"
-  );
+  return typeof window !== "undefined";
 }
 
 function createEmptyMemory(): BehavioralMemory {
@@ -121,8 +125,7 @@ function safelyParseMemory(
       parsed.version !== 1 ||
       !Array.isArray(parsed.events) ||
       !parsed.media ||
-      typeof parsed.media !==
-        "object"
+      typeof parsed.media !== "object"
     ) {
       return createEmptyMemory();
     }
@@ -131,8 +134,7 @@ function safelyParseMemory(
       ...createEmptyMemory(),
       ...parsed,
       preferences: {
-        ...createEmptyMemory()
-          .preferences,
+        ...createEmptyMemory().preferences,
         ...(parsed.preferences ?? {}),
       },
     };
@@ -161,20 +163,16 @@ function saveMemory(
   }
 
   try {
-    memory.events =
-      memory.events.slice(
-        -MAX_EVENTS,
-      );
+    memory.events = memory.events.slice(
+      -MAX_EVENTS,
+    );
 
     window.localStorage.setItem(
       BEHAVIOR_STORAGE_KEY,
       JSON.stringify(memory),
     );
   } catch {
-    /*
-     * Behavioral learning is optional.
-     * Storage failures must never break RyuFlix.
-     */
+    /* Behavioral learning is optional. */
   }
 }
 
@@ -230,9 +228,7 @@ function clamp(
 function progressFromHistory(
   item: LocalWatchHistory,
 ): number {
-  if (
-    item.completed
-  ) {
+  if (item.completed) {
     return 1;
   }
 
@@ -244,8 +240,7 @@ function progressFromHistory(
   }
 
   return clamp(
-    item.last_position /
-      item.duration,
+    item.last_position / item.duration,
     0,
     1,
   );
@@ -254,28 +249,20 @@ function progressFromHistory(
 function recencyWeight(
   timestamp: string,
 ): number {
-  const time =
-    new Date(timestamp).getTime();
+  const time = new Date(timestamp).getTime();
 
   if (!Number.isFinite(time)) {
     return 0.1;
   }
 
-  const age =
-    Math.max(
-      0,
-      Date.now() - time,
-    );
+  const age = Math.max(
+    0,
+    Date.now() - time,
+  );
 
   const days =
-    age /
-    (1000 * 60 * 60 * 24);
+    age / (1000 * 60 * 60 * 24);
 
-  /*
-   * Recent behavior matters more,
-   * while old behavior never becomes
-   * completely irrelevant.
-   */
   return Math.max(
     0.15,
     Math.exp(-days / 45),
@@ -295,116 +282,107 @@ function addEvent(
     event.episode,
   );
 
-  const existing =
-    memory.media[key] ?? {
-      starts: 0,
-      completions: 0,
-      abandons: 0,
-      rewatches: 0,
-      totalProgress: 0,
-      lastProgress: 0,
-      lastWatchedAt:
-        event.timestamp,
-    };
+  const existing = memory.media[key] ?? {
+    opens: 0,
+    starts: 0,
+    pauses: 0,
+    seeks: 0,
+    completions: 0,
+    abandons: 0,
+    rewatches: 0,
+    totalProgress: 0,
+    lastProgress: 0,
+    lastWatchedAt: event.timestamp,
+  };
 
-  const weight =
-    recencyWeight(
-      event.timestamp,
-    );
+  const weight = recencyWeight(
+    event.timestamp,
+  );
 
-  if (
-    event.event ===
-    "started"
-  ) {
-    existing.starts +=
-      weight;
+  if (event.event === "opened") {
+    existing.opens += weight;
+  }
+
+  if (event.event === "started") {
+    existing.starts += weight;
+  }
+
+  if (event.event === "paused") {
+    existing.pauses += weight;
+  }
+
+  if (event.event === "seeked") {
+    existing.seeks += weight;
+  }
+
+  if (event.event === "completed") {
+    existing.completions += weight;
+  }
+
+  if (event.event === "abandoned") {
+    existing.abandons += weight;
+  }
+
+  if (event.event === "rewatched") {
+    existing.rewatches += weight;
   }
 
   if (
-    event.event ===
-    "completed"
+    event.event === "progress" ||
+    event.event === "completed"
   ) {
-    existing.completions +=
-      weight;
+    existing.totalProgress +=
+      event.progress * weight;
   }
 
-  if (
-    event.event ===
-    "abandoned"
-  ) {
-    existing.abandons +=
-      weight;
-  }
+  existing.lastProgress = event.progress;
+  existing.lastWatchedAt = event.timestamp;
+
+  memory.media[key] = existing;
 
   if (
-    event.event ===
-    "rewatched"
+    event.event === "opened" ||
+    event.event === "started" ||
+    event.event === "progress" ||
+    event.event === "completed"
   ) {
-    existing.rewatches +=
-      weight;
-  }
-
-  existing.totalProgress +=
-    event.progress *
-    weight;
-
-  existing.lastProgress =
-    event.progress;
-
-  existing.lastWatchedAt =
-    event.timestamp;
-
-  memory.media[key] =
-    existing;
-
-  memory.preferences.mediaTypes[
-    event.mediaType
-  ] += weight;
-
-  memory.preferences.progressByMediaType[
-    event.mediaType
-  ] +=
-    event.progress *
-    weight;
-
-  if (
-    event.event ===
-    "completed"
-  ) {
-    memory.preferences
-      .completionByMediaType[
+    memory.preferences.mediaTypes[
       event.mediaType
     ] += weight;
+  }
+
+  if (event.event === "completed") {
+    memory.preferences.completionByMediaType[
+      event.mediaType
+    ] += weight;
+  }
+
+  if (
+    event.event === "progress" ||
+    event.event === "completed"
+  ) {
+    memory.preferences.progressByMediaType[
+      event.mediaType
+    ] +=
+      event.progress * weight;
   }
 }
 
 function buildEventsFromHistory(
   history: LocalWatchHistory[],
 ): BehavioralEvent[] {
-  const events: BehavioralEvent[] =
-    [];
+  const events: BehavioralEvent[] = [];
 
-  /*
-   * History contains the latest state
-   * of every movie/episode.
-   *
-   * We turn those states into stable
-   * behavioral signals.
-   */
   for (const item of history) {
     const progress =
-      progressFromHistory(
-        item,
-      );
+      progressFromHistory(item);
 
     const timestamp =
       item.updated_at;
 
     if (
       !timestamp ||
-      !Number.isFinite(
-        item.media_id,
-      )
+      !Number.isFinite(item.media_id)
     ) {
       continue;
     }
@@ -418,10 +396,6 @@ function buildEventsFromHistory(
       timestamp,
     };
 
-    /*
-     * Every history item represents
-     * at least one viewing start.
-     */
     events.push({
       ...base,
       event: "started",
@@ -435,14 +409,6 @@ function buildEventsFromHistory(
       ),
     });
 
-    /*
-     * Very small progress indicates
-     * an early abandonment.
-     *
-     * We intentionally use a low
-     * threshold so ordinary pauses
-     * don't become strong negatives.
-     */
     if (
       !item.completed &&
       progress > 0 &&
@@ -462,10 +428,6 @@ function buildEventsFromHistory(
       });
     }
 
-    /*
-     * A substantial partial watch is
-     * useful positive engagement.
-     */
     if (
       !item.completed &&
       progress >= 0.12
@@ -484,10 +446,6 @@ function buildEventsFromHistory(
       });
     }
 
-    /*
-     * Completed viewing is the strongest
-     * behavioral signal in this first layer.
-     */
     if (item.completed) {
       events.push({
         ...base,
@@ -508,18 +466,11 @@ function buildEventsFromHistory(
 }
 
 export function getBehavioralMemory(): BehavioralMemory {
-  const stored =
-    readMemory();
+  const stored = readMemory();
 
   const history =
     getWatchHistory();
 
-  /*
-   * Rebuild the behavioral layer from
-   * the current history so it naturally
-   * stays synchronized with existing
-   * RyuFlix progress.
-   */
   const rebuilt =
     createEmptyMemory();
 
@@ -528,18 +479,13 @@ export function getBehavioralMemory(): BehavioralMemory {
       history,
     );
 
-  for (const event of
-    historyEvents) {
+  for (const event of historyEvents) {
     addEvent(
       rebuilt,
       event,
     );
   }
 
-  /*
-   * Preserve explicit behavioral events
-   * that aren't derivable from history.
-   */
   const historyEventIds =
     new Set(
       historyEvents.map(
@@ -547,8 +493,7 @@ export function getBehavioralMemory(): BehavioralMemory {
       ),
     );
 
-  for (const event of
-    stored.events) {
+  for (const event of stored.events) {
     if (
       !historyEventIds.has(
         event.id,
@@ -561,9 +506,7 @@ export function getBehavioralMemory(): BehavioralMemory {
     }
   }
 
-  saveMemory(
-    rebuilt,
-  );
+  saveMemory(rebuilt);
 
   return rebuilt;
 }
@@ -585,28 +528,26 @@ export function recordBehavioralEvent(
     event.timestamp ||
     new Date().toISOString();
 
-  const completeEvent: BehavioralEvent =
-    {
-      ...event,
+  const completeEvent: BehavioralEvent = {
+    ...event,
+    timestamp,
+    id: eventId(
+      event.mediaId,
+      event.mediaType,
+      event.event,
       timestamp,
-      id: eventId(
-        event.mediaId,
-        event.mediaType,
-        event.event,
-        timestamp,
-        event.season,
-        event.episode,
-      ),
-    };
+      event.season,
+      event.episode,
+    ),
+  };
 
-  const duplicate =
+  if (
     memory.events.some(
       (existing) =>
         existing.id ===
         completeEvent.id,
-    );
-
-  if (duplicate) {
+    )
+  ) {
     return;
   }
 
@@ -615,9 +556,7 @@ export function recordBehavioralEvent(
     completeEvent,
   );
 
-  saveMemory(
-    memory,
-  );
+  saveMemory(memory);
 }
 
 export function getMediaBehavior(
@@ -655,23 +594,12 @@ export function getBehavioralSignal(
     return 0;
   }
 
-  /*
-   * Positive behavior:
-   *
-   * completion > progress > start
-   *
-   * Negative behavior:
-   *
-   * abandonment.
-   *
-   * Rewatching is particularly strong.
-   */
   const positive =
-    behavior.starts * 0.35 +
+    behavior.opens * 0.2 +
+    behavior.starts * 0.6 +
     behavior.completions * 2.8 +
     behavior.rewatches * 3.5 +
-    behavior.totalProgress *
-      0.45;
+    behavior.totalProgress * 0.45;
 
   const negative =
     behavior.abandons * 2.2;
@@ -693,23 +621,19 @@ export function getBehavioralSummary() {
 
   const movieCompletion =
     memory.preferences
-      .completionByMediaType
-      .movie;
+      .completionByMediaType.movie;
 
   const tvCompletion =
     memory.preferences
-      .completionByMediaType
-      .tv;
+      .completionByMediaType.tv;
 
   const movieProgress =
     memory.preferences
-      .progressByMediaType
-      .movie;
+      .progressByMediaType.movie;
 
   const tvProgress =
     memory.preferences
-      .progressByMediaType
-      .tv;
+      .progressByMediaType.tv;
 
   const preferredMediaType =
     movieActivity >
@@ -750,4 +674,4 @@ export function clearBehavioralMemory(): void {
   window.localStorage.removeItem(
     BEHAVIOR_STORAGE_KEY,
   );
-  }
+      }
