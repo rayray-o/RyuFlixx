@@ -1,13 +1,7 @@
 "use client";
 
 import { PlayersProps } from "@/types";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { RyuFlixPlayer } from "@/components/ui/player/RyuFlixPlayer";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AdFreeIframe from "@/adblocker/AdFreeIframes";
 
 interface WatchPlayerProps {
@@ -15,41 +9,26 @@ interface WatchPlayerProps {
 
   selectedServer: number;
 
-  onServerChange: (
-    index: number,
-  ) => void;
+  onServerChange: (index: number) => void;
 
   getCurrentTime?: () => number;
 
   flushProgress?: () => void;
 
-  iframeRef?: React.RefObject<
-    HTMLIFrameElement | null
-  >;
+  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
 
   title?: string;
 }
 
-function addResumePosition(
-  source: string,
-  position: number,
-) {
-  if (
-    !Number.isFinite(position) ||
-    position <= 0
-  ) {
+function addResumePosition(source: string, position: number) {
+  if (!Number.isFinite(position) || position <= 0) {
     return source;
   }
 
   try {
-    const url = new URL(
-      source,
-    );
+    const url = new URL(source);
 
-    url.searchParams.set(
-      "startAt",
-      Math.floor(position).toString(),
-    );
+    url.searchParams.set("startAt", Math.floor(position).toString());
 
     return url.toString();
   } catch {
@@ -57,12 +36,7 @@ function addResumePosition(
   }
 }
 
-const RYUFLIX_TEST_HLS =
-  "https://stream.mux.com/BV3YZtogl89mg9VcNBhhnHm02Y34zI1nlMuMQfAbl3dM.m3u8";
-
-const WatchPlayer: React.FC<
-  WatchPlayerProps
-> = ({
+const WatchPlayer: React.FC<WatchPlayerProps> = ({
   servers,
   selectedServer,
   onServerChange,
@@ -74,52 +48,45 @@ const WatchPlayer: React.FC<
   const safeIndex =
     servers.length > 0
       ? Math.min(
-          Math.max(
-            selectedServer,
-            0,
-          ),
+          Math.max(selectedServer, 0),
           servers.length - 1,
         )
       : 0;
 
-  const currentServer =
-    useMemo(
-      () =>
-        servers[safeIndex],
-      [servers, safeIndex],
-    );
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [
-    handoffPosition,
-    setHandoffPosition,
-  ] = useState<number | null>(
-    null,
+  const currentServer = useMemo(
+    () => servers[safeIndex],
+    [servers, safeIndex],
   );
 
+  const [loading, setLoading] = useState(true);
+
+  const [handoffPosition, setHandoffPosition] =
+    useState<number | null>(null);
+
   const internalIframeRef =
-    useRef<HTMLIFrameElement | null>(
-      null,
-    );
+    useRef<HTMLIFrameElement | null>(null);
 
   const setIframeRef = (
     element: HTMLIFrameElement | null,
   ) => {
-    internalIframeRef.current =
-      element;
+    internalIframeRef.current = element;
 
     if (iframeRef) {
-      iframeRef.current =
-        element;
+      iframeRef.current = element;
     }
   };
 
+  /*
+   * Reset handoff when the actual server list/content changes.
+   */
   useEffect(() => {
     setHandoffPosition(null);
   }, [servers.length]);
 
+  /*
+   * Every time the selected provider changes,
+   * show the connection overlay again.
+   */
   useEffect(() => {
     setLoading(true);
   }, [currentServer?.source]);
@@ -142,77 +109,45 @@ const WatchPlayer: React.FC<
         )
       : currentServer.source;
 
-  const isCustomPlayer =
-    servers.length > 0 &&
-    safeIndex ===
-      servers.length - 1;
-
   return (
     <section className="w-full">
       <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
-        {isCustomPlayer ? (
-          <RyuFlixPlayer
-            src={RYUFLIX_TEST_HLS}
-            title={title}
-            resumeAt={
-              handoffPosition !== null
-                ? handoffPosition
-                : 0
-            }
-            onTimeUpdate={() => {
-              /*
-               * Existing RyuFlix progress
-               * handling remains untouched.
-               */
-            }}
-            onEnded={() => {
-              flushProgress?.();
-            }}
-          />
-        ) : (
-          <>
-            <AdFreeIframe
-              ref={setIframeRef}
-              src={iframeSource}
-              title={`${title} — ${currentServer.title}`}
-              className="absolute inset-0 block h-full w-full border-0"
-              height="100%"
-              width="100%"
-              loading="eager"
-              onLoad={() => {
-                setLoading(false);
-              }}
-            />
+        <AdFreeIframe
+          key={`${currentServer.title}-${iframeSource}`}
+          ref={setIframeRef}
+          src={iframeSource}
+          title={`${title} — ${currentServer.title}`}
+          className="absolute inset-0 block h-full w-full border-0"
+          height="100%"
+          width="100%"
+          loading="eager"
+          onLoad={() => {
+            setLoading(false);
+          }}
+        />
 
-            {loading && (
-              <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-md">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+        {loading && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-md">
+            <div className="flex flex-col items-center gap-3">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
 
-                  <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/70">
-                    Connecting
-                  </span>
+              <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/70">
+                Connecting
+              </span>
 
-                  <span className="text-xs text-white/40">
-                    {
-                      currentServer.title
-                    }
-                  </span>
+              <span className="text-xs text-white/40">
+                {currentServer.title}
+              </span>
 
-                  {handoffPosition !==
-                    null && (
-                    <span className="text-[10px] text-white/30">
-                      Resuming at{" "}
-                      {Math.floor(
-                        handoffPosition,
-                      )}
-                      s
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </>
+              {handoffPosition !== null && (
+                <span className="text-[10px] text-white/30">
+                  Resuming at{" "}
+                  {Math.floor(handoffPosition)}
+                  s
+                </span>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
@@ -221,75 +156,61 @@ const WatchPlayer: React.FC<
           Server
         </span>
 
-        {servers.map(
-          (
-            server,
-            index,
-          ) => {
-            const active =
-              index === safeIndex;
+        {servers.map((server, index) => {
+          const active = index === safeIndex;
 
-            return (
-              <button
-                key={`${server.title}-${index}`}
-                type="button"
-                aria-pressed={
-                  active
+          return (
+            <button
+              key={`${server.title}-${index}`}
+              type="button"
+              aria-pressed={active}
+              onClick={() => {
+                if (active) {
+                  return;
                 }
-                onClick={() => {
-                  if (active) {
-                    return;
-                  }
 
-                  const position =
-                    Math.max(
-                      0,
-                      getCurrentTime?.() ??
-                        0,
-                    );
+                /*
+                 * Capture the freshest playback position
+                 * before destroying the current iframe.
+                 */
+                const position = Math.max(
+                  0,
+                  getCurrentTime?.() ?? 0,
+                );
 
-                  flushProgress?.();
+                flushProgress?.();
 
-                  setHandoffPosition(
-                    position,
-                  );
+                setHandoffPosition(position);
+                setLoading(true);
 
-                  setLoading(true);
+                onServerChange(index);
+              }}
+              className={[
+                "rounded-xl border px-4 py-2 text-sm font-medium",
+                "transition-colors duration-150",
+                "focus:outline-none focus:ring-2 focus:ring-white/30",
+                active
+                  ? "border-white/30 bg-white/15 text-white shadow-lg"
+                  : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
+              ].join(" ")}
+            >
+              <span className="flex items-center gap-2">
+                {server.title}
 
-                  onServerChange(
-                    index,
-                  );
-                }}
-                className={[
-                  "rounded-xl border px-4 py-2 text-sm font-medium",
-                  "transition-colors duration-150",
-                  "focus:outline-none focus:ring-2 focus:ring-white/30",
-                  active
-                    ? "border-white/30 bg-white/15 text-white shadow-lg"
-                    : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
-                ].join(" ")}
-              >
-                <span className="flex items-center gap-2">
-                  {
-                    server.title
-                  }
-
-                  {server.recommended && (
-                    <span className="text-[9px] uppercase tracking-wider text-white/40">
-                      Recommended
-                    </span>
-                  )}
-                </span>
-              </button>
-            );
-          },
-        )}
+                {server.recommended && (
+                  <span className="text-[9px] uppercase tracking-wider text-white/40">
+                    Recommended
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </section>
   );
 };
 
-WatchPlayer.displayName =
-  "WatchPlayer";
+WatchPlayer.displayName = "WatchPlayer";
 
 export default WatchPlayer;
