@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import { RyuFlixPlayer } from "@/components/ui/player/RyuFlixPlayer";
-import AdFreeIframe from "@/adblocker/AdFreeIframes";
 
 interface WatchPlayerProps {
   servers: PlayersProps[];
@@ -23,7 +22,9 @@ interface WatchPlayerProps {
 
   flushProgress?: () => void;
 
-  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  iframeRef?: React.RefObject<
+    HTMLIFrameElement | null
+  >;
 
   title?: string;
 }
@@ -120,10 +121,6 @@ const WatchPlayer: React.FC<
     setLoading(true);
   }, [currentServer?.source]);
 
-  const isCustomPlayer =
-    servers.length > 0 &&
-    safeIndex === servers.length - 1;
-
   if (!currentServer) {
     return (
       <section className="w-full">
@@ -141,6 +138,10 @@ const WatchPlayer: React.FC<
           handoffPosition,
         )
       : currentServer.source;
+
+  const isCustomPlayer =
+    servers.length > 0 &&
+    safeIndex === servers.length - 1;
 
   return (
     <section className="w-full">
@@ -166,51 +167,49 @@ const WatchPlayer: React.FC<
           />
         ) : (
           <>
-            <AdFreeIframe
+            <iframe
+              ref={setIframeRef}
+              key={`${currentServer.title}-${iframeSource}`}
               src={iframeSource}
               title={`${title} — ${currentServer.title}`}
               className="absolute inset-0 block h-full w-full border-0"
-              height="100%"
-              width="100%"
+              allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
+              allowFullScreen
               loading="eager"
+              referrerPolicy="strict-origin-when-cross-origin"
+              onLoad={() => {
+                setLoading(false);
+              }}
             />
 
-            {!loading && null}
+            {loading && (
+              <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-md">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
 
-            <div
-              className="pointer-events-none absolute inset-0 z-20"
-              aria-hidden="true"
-            />
+                  <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/70">
+                    Connecting
+                  </span>
+
+                  <span className="text-xs text-white/40">
+                    {currentServer.title}
+                  </span>
+
+                  {handoffPosition !==
+                    null && (
+                    <span className="text-[10px] text-white/30">
+                      Resuming at{" "}
+                      {Math.floor(
+                        handoffPosition,
+                      )}
+                      s
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </>
         )}
-
-        {!isCustomPlayer &&
-          loading && (
-            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-md">
-              <div className="flex flex-col items-center gap-3">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
-
-                <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/70">
-                  Connecting
-                </span>
-
-                <span className="text-xs text-white/40">
-                  {currentServer.title}
-                </span>
-
-                {handoffPosition !==
-                  null && (
-                  <span className="text-[10px] text-white/30">
-                    Resuming at{" "}
-                    {Math.floor(
-                      handoffPosition,
-                    )}
-                    s
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
