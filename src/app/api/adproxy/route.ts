@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isBlockedUrl, getCosmeticCSS } from '@/lib/ad-blocklist';
+import { isBlockedUrl, getCosmeticCSS } from '../../../adblocker/ad-blocklist';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,7 +7,6 @@ export const dynamic = 'force-dynamic';
 async function stripAds(html: string, baseUrl: string): Promise<string> {
   let out = html;
 
-  // Remove blocked <script src="...">
   const scriptMatches = [...out.matchAll(/<script[^>]+src=["']([^"']+)["'][^>]*>\s*<\/script>/gi)];
   for (const m of scriptMatches) {
     try {
@@ -16,7 +15,6 @@ async function stripAds(html: string, baseUrl: string): Promise<string> {
     } catch {}
   }
 
-  // Remove blocked nested <iframe src="...">
   const iframeMatches = [...out.matchAll(/<iframe[^>]+src=["']([^"']+)["'][^>]*>[\s\S]*?<\/iframe>/gi)];
   for (const m of iframeMatches) {
     try {
@@ -25,7 +23,6 @@ async function stripAds(html: string, baseUrl: string): Promise<string> {
     } catch {}
   }
 
-  // Rewrite relative paths so removed-context links still resolve correctly
   out = out.replace(/(src|href)=["'](?!https?:|data:|#|\/\/)([^"']+)["']/gi, (m, attr, path) => {
     try {
       return `${attr}="${new URL(path, baseUrl).href}"`;
@@ -51,7 +48,6 @@ function buildInjectScript(cosmeticCSS: string): string {
     } catch(e){ return false; }
   }
 
-  // Catch dynamically created ad script/iframe elements
   var origCreateElement = document.createElement.bind(document);
   document.createElement = function(tag){
     var el = origCreateElement(tag);
@@ -68,7 +64,6 @@ function buildInjectScript(cosmeticCSS: string): string {
     return el;
   };
 
-  // Catch fetch() calls to ad domains
   var origFetch = window.fetch;
   window.fetch = function(input, init){
     var url = typeof input === 'string' ? input : (input && input.url);
@@ -76,14 +71,12 @@ function buildInjectScript(cosmeticCSS: string): string {
     return origFetch.apply(this, arguments);
   };
 
-  // Catch XHR calls to ad domains
   var origOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url){
     if (looksBlocked(url)) { this.abort(); return; }
     return origOpen.apply(this, arguments);
   };
 
-  // Sweep for ad containers on mutation
   function sweep(){
     document.querySelectorAll('[id*="ad-"],[class*="ad-"],[class*="ads-"],ins.adsbygoogle,[class*="sponsor"]').forEach(function(el){
       el.remove();
@@ -93,7 +86,7 @@ function buildInjectScript(cosmeticCSS: string): string {
   document.addEventListener('DOMContentLoaded', sweep);
   sweep();
 
-  window.open = function(){ return null; }; // block popunders
+  window.open = function(){ return null; };
 })();
 </script>`;
 }
@@ -136,4 +129,4 @@ export async function GET(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'Failed to fetch target' }, { status: 502 });
   }
-    }
+}
