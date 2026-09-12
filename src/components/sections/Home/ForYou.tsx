@@ -11,34 +11,24 @@ import {
   type RecommendationItem,
 } from "@/utils/personalization/recommendation-engine";
 import { Skeleton } from "@heroui/react";
-import { useInViewport } from "@mantine/hooks";
 import { useEffect, useState } from "react";
 
-const PROFILE_KEY =
-  "ryuflix_taste_profile";
+const PROFILE_KEY = "ryuflix_taste_profile";
 
-function readProfile():
-  | TasteProfile
-  | null {
+function readProfile(): TasteProfile | null {
   try {
     const raw =
-      window.localStorage.getItem(
-        PROFILE_KEY,
-      );
+      window.localStorage.getItem(PROFILE_KEY);
 
     if (!raw) {
       return null;
     }
 
-    const parsed =
-      JSON.parse(
-        raw,
-      ) as TasteProfile;
+    const parsed = JSON.parse(raw) as TasteProfile;
 
     if (
       !parsed ||
-      typeof parsed !==
-        "object"
+      typeof parsed !== "object"
     ) {
       return null;
     }
@@ -52,103 +42,66 @@ function readProfile():
 const ForYou: React.FC<{
   type: ContentType;
 }> = ({ type }) => {
-  const {
-    ref,
-    inViewport,
-  } =
-    useInViewport({
-      once: true,
-    });
-
-  const [items, setItems] =
-    useState<
-      RecommendationItem[]
-    >([]);
+  const [items, setItems] = useState<
+    RecommendationItem[]
+  >([]);
 
   const [loading, setLoading] =
     useState(false);
 
   useEffect(() => {
-    if (!inViewport) {
-      return;
-    }
-
     let cancelled = false;
 
-    const load =
-      async () => {
-        const profile =
-          readProfile();
+    const load = async () => {
+      const profile = readProfile();
 
-        if (
-          !profile ||
-          profile.confidence < 8
-        ) {
-          return;
+      if (
+        !profile ||
+        profile.confidence < 8
+      ) {
+        return;
+      }
+
+      setLoading(true);
+
+      try {
+        const recommendations =
+          await getPersonalizedRecommendations(
+            profile,
+            type,
+            12,
+          );
+
+        if (!cancelled) {
+          setItems(recommendations);
         }
-
-        setLoading(true);
-
-        try {
-          const recommendations =
-            await getPersonalizedRecommendations(
-              profile,
-              type,
-              12,
-            );
-
-          if (!cancelled) {
-            setItems(
-              recommendations,
-            );
-          }
-        } catch {
-          if (!cancelled) {
-            setItems([]);
-          }
-        } finally {
-          if (!cancelled) {
-            setLoading(false);
-          }
+      } catch {
+        if (!cancelled) {
+          setItems([]);
         }
-      };
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
 
     void load();
 
     return () => {
       cancelled = true;
     };
-  }, [
-    inViewport,
-    type,
-  ]);
+  }, [type]);
 
-  /*
-   * If personalization isn't ready,
-   * the section simply doesn't exist.
-   *
-   * This keeps the homepage clean.
-   */
   if (
-    !inViewport ||
-    (
-      !loading &&
-      items.length === 0
-    )
+    !loading &&
+    items.length === 0
   ) {
-    return (
-      <section
-        ref={ref}
-        className="min-h-0"
-      />
-    );
+    return null;
   }
 
   return (
-    <section
-      ref={ref}
-      className="min-h-[250px] md:min-h-[300px]"
-    >
+    <section className="min-h-[250px] md:min-h-[300px]">
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <SectionTitle>
@@ -157,34 +110,25 @@ const ForYou: React.FC<{
         </div>
 
         {loading ? (
-          <Skeleton
-            className="h-[250px] rounded-lg md:h-[300px]"
-          />
+          <Skeleton className="h-[250px] rounded-lg md:h-[300px]" />
         ) : (
           <Carousel>
-            {items.map(
-              (item) => (
-                <div
-                  key={`${item.mediaType}-${item.id}`}
-                  className="embla__slide flex min-h-fit max-w-fit items-center px-1 py-2"
-                >
-                  {item.mediaType ===
-                  "movie" ? (
-                    <MoviePosterCard
-                      movie={
-                        item as never
-                      }
-                    />
-                  ) : (
-                    <TvShowPosterCard
-                      tv={
-                        item as never
-                      }
-                    />
-                  )}
-                </div>
-              ),
-            )}
+            {items.map((item) => (
+              <div
+                key={`${item.mediaType}-${item.id}`}
+                className="embla__slide flex min-h-fit max-w-fit items-center px-1 py-2"
+              >
+                {item.mediaType === "movie" ? (
+                  <MoviePosterCard
+                    movie={item as never}
+                  />
+                ) : (
+                  <TvShowPosterCard
+                    tv={item as never}
+                  />
+                )}
+              </div>
+            ))}
           </Carousel>
         )}
       </div>
