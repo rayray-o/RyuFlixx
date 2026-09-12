@@ -8,6 +8,8 @@ import {
   useState,
 } from "react";
 import { RyuFlixPlayer } from "@/components/ui/player/RyuFlixPlayer";
+import { IFRAME_SOURCES } from "@/adblocker/iframe-sources";
+import AdFreeIframe from "@/adblocker/AdFreeIframes";
 
 interface WatchPlayerProps {
   servers: PlayersProps[];
@@ -203,20 +205,33 @@ const WatchPlayer: React.FC<
             }}
           />
         ) : (
-          <iframe
-            ref={setIframeRef}
-            key={`${currentServer.title}-${iframeSource}`}
-            src={iframeSource}
-            title={`${title} — ${currentServer.title}`}
-            className="absolute inset-0 block h-full w-full border-0"
-            allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
-            allowFullScreen
-            loading="eager"
-            referrerPolicy="strict-origin-when-cross-origin"
-            onLoad={() =>
-              setLoading(false)
-            }
-          />
+          <>
+            {IFRAME_SOURCES.filter(
+              (f) => f.url,
+            ).map((f) => (
+              <AdFreeIframe
+                key={f.id}
+                src={f.url}
+                title={f.label}
+                height={f.height}
+              />
+            ))}
+
+            <iframe
+              ref={setIframeRef}
+              key={`${currentServer.title}-${iframeSource}`}
+              src={iframeSource}
+              title={`${title} — ${currentServer.title}`}
+              className="absolute inset-0 block h-full w-full border-0"
+              allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
+              allowFullScreen
+              loading="eager"
+              referrerPolicy="strict-origin-when-cross-origin"
+              onLoad={() =>
+                setLoading(false)
+              }
+            />
+          </>
         )}
 
         {!isCustomPlayer &&
