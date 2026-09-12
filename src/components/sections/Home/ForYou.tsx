@@ -35,24 +35,16 @@ function readProfile(): TasteProfile | null {
   }
 }
 
-const ForYou: React.FC<{
+interface ForYouProps {
   type: ContentType;
-}> = ({ type }) => {
+}
+
+const ForYou: React.FC<ForYouProps> = ({ type }) => {
   const [items, setItems] = useState<RecommendationItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasProfile, setHasProfile] = useState(false);
 
-  /*
-   * Prevent an older request from replacing a newer
-   * successful recommendation result.
-   */
   const requestIdRef = useRef(0);
-
-  /*
-   * Once we have successfully displayed a personalized
-   * result, never destroy it just because a later request
-   * temporarily returns nothing.
-   */
-  const hasLoadedRecommendationsRef = useRef(false);
 
   useEffect(() => {
     const requestId = ++requestIdRef.current;
@@ -61,21 +53,23 @@ const ForYou: React.FC<{
     const load = async () => {
       const profile = readProfile();
 
-      if (!profile || profile.confidence < 8) {
-        if (!cancelled && requestId === requestIdRef.current) {
+      if (
+        !profile ||
+        typeof profile.confidence !== "number" ||
+        profile.confidence < 1
+      ) {
+        if (
+          !cancelled &&
+          requestId === requestIdRef.current
+        ) {
+          setHasProfile(false);
           setLoading(false);
         }
 
         return;
       }
 
-      /*
-       * Only show the loading state if we don't already
-       * have a usable personalized result.
-       */
-      if (!hasLoadedRecommendationsRef.current) {
-        setLoading(true);
-      }
+      setHasProfile(true);
 
       try {
         const recommendations =
@@ -93,15 +87,12 @@ const ForYou: React.FC<{
         }
 
         /*
-         * CRITICAL:
+         * Never destroy an already-rendered row.
          *
-         * An empty response is NOT allowed to erase
-         * recommendations that have already loaded.
-         *
-         * This prevents the exact disappearing-row bug.
+         * If the engine returns nothing during a later
+         * refresh, the previous recommendations remain.
          */
         if (recommendations.length > 0) {
-          hasLoadedRecommendationsRef.current = true;
           setItems(recommendations);
         }
 
@@ -114,10 +105,6 @@ const ForYou: React.FC<{
           return;
         }
 
-        /*
-         * Never erase working recommendations because
-         * TMDB temporarily failed or returned an error.
-         */
         setLoading(false);
       }
     };
@@ -130,17 +117,10 @@ const ForYou: React.FC<{
   }, [type]);
 
   /*
-   * No personalized profile = no For You section.
-   *
-   * But once recommendations have successfully loaded,
-   * the section remains mounted permanently for this
-   * page session.
+   * No profile means personalization isn't available.
+   * In that case we don't show an empty section.
    */
-  if (
-    !loading &&
-    items.length === 0 &&
-    !hasLoadedRecommendationsRef.current
-  ) {
+  if (!hasProfile && !loading) {
     return null;
   }
 
@@ -155,7 +135,7 @@ const ForYou: React.FC<{
 
         {loading && items.length === 0 ? (
           <Skeleton className="h-[250px] rounded-lg md:h-[300px]" />
-        ) : (
+        ) : items.length > 0 ? (
           <Carousel>
             {items.map((item) => (
               <div
@@ -174,6 +154,16 @@ const ForYou: React.FC<{
               </div>
             ))}
           </Carousel>
+        ) : (
+          /*
+           * The section stays mounted while the engine is
+           * recovering instead of disappearing.
+           */
+          <div className="flex h-[250px] items-center justify-center rounded-lg bg-default-100/40 md:h-[300px]">
+            <span className="text-sm text-default-500">
+              Finding something for you...
+            </span>
+          </div>
         )}
       </div>
     </section>
