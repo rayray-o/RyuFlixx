@@ -135,6 +135,64 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function timeoutFetch(
+  url: string,
+  options?: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+
+  const timeout = window.setTimeout(() => {
+    controller.abort();
+  }, REQUEST_TIMEOUT);
+
+  return fetch(url, {
+    ...options,
+    signal: controller.signal,
+    headers: {
+      Authorization: `Bearer ${env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN}`,
+      accept: "application/json",
+      ...(options?.headers ?? {}),
+    },
+  }).finally(() => {
+    window.clearTimeout(timeout);
+  });
+}
+
+async function tmdb<T>(
+  path: string,
+  params?: Record<string, string | number | undefined>,
+): Promise<T | null> {
+  try {
+    const searchParams = new URLSearchParams();
+
+    Object.entries(params ?? {}).forEach(
+      ([key, value]) => {
+        if (
+          value !== undefined &&
+          value !== null &&
+          String(value).length > 0
+        ) {
+          searchParams.set(key, String(value));
+        }
+      },
+    );
+
+    const query = searchParams.toString();
+
+    const response = await timeoutFetch(
+      `${TMDB_BASE_URL}${path}${query ? `?${query}` : ""}`,
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return (await response.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 function profileSignals(
   values: unknown,
 ): ProfileSignal[] {
@@ -1118,4 +1176,4 @@ export async function getPersonalizedRecommendations(
     ranked,
     limit,
   );
-    }
+  }
