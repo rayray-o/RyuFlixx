@@ -1,5 +1,7 @@
 "use client";
 
+import React from "react";
+
 interface AdFreeIframeProps {
   src: string;
   title: string;
@@ -7,21 +9,28 @@ interface AdFreeIframeProps {
   height?: number | string;
   width?: number | string;
   loading?: "eager" | "lazy";
+  onLoad?: React.ReactEventHandler<HTMLIFrameElement>;
 }
 
-export default function AdFreeIframe({
-  src,
-  title,
-  className,
-  height = "100%",
-  width = "100%",
-  loading = "eager",
-}: AdFreeIframeProps) {
-  const proxied = `/api/adproxy?url=${encodeURIComponent(src)}`;
-
+const AdFreeIframe = React.forwardRef<
+  HTMLIFrameElement,
+  AdFreeIframeProps
+>(function AdFreeIframe(
+  {
+    src,
+    title,
+    className,
+    height = "100%",
+    width = "100%",
+    loading = "eager",
+    onLoad,
+  },
+  ref,
+) {
   return (
     <iframe
-      src={proxied}
+      ref={ref}
+      src={src}
       title={title}
       className={
         className ??
@@ -33,6 +42,12 @@ export default function AdFreeIframe({
       allowFullScreen
       loading={loading}
       referrerPolicy="strict-origin-when-cross-origin"
+      onLoad={onLoad}
     />
   );
-}
+});
+
+AdFreeIframe.displayName =
+  "AdFreeIframe";
+
+export default AdFreeIframe;
