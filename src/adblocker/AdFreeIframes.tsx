@@ -12,39 +12,6 @@ interface AdFreeIframeProps {
   onLoad?: React.ReactEventHandler<HTMLIFrameElement>;
 }
 
-function proxiedSource(source: string) {
-  if (!source) {
-    return source;
-  }
-
-  /*
-   * Don't proxy our own API URL twice.
-   */
-  if (source.startsWith("/api/adproxy")) {
-    return source;
-  }
-
-  try {
-    const url = new URL(
-      source,
-      window.location.href,
-    );
-
-    if (
-      url.protocol !== "http:" &&
-      url.protocol !== "https:"
-    ) {
-      return source;
-    }
-
-    return `/api/adproxy?url=${encodeURIComponent(
-      url.href,
-    )}`;
-  } catch {
-    return source;
-  }
-}
-
 const AdFreeIframe = React.forwardRef<
   HTMLIFrameElement,
   AdFreeIframeProps
@@ -60,12 +27,19 @@ const AdFreeIframe = React.forwardRef<
   },
   ref,
 ) {
-  const finalSrc = proxiedSource(src);
-
+  /*
+   * IMPORTANT:
+   *
+   * Providers are loaded directly.
+   *
+   * Do NOT send them through /api/adproxy.
+   * The providers are cross-origin applications and
+   * changing their origin breaks their player/runtime.
+   */
   return (
     <iframe
       ref={ref}
-      src={finalSrc}
+      src={src}
       title={title}
       className={
         className ??
@@ -73,7 +47,7 @@ const AdFreeIframe = React.forwardRef<
       }
       height={height}
       width={width}
-      allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
+      allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope; web-share"
       allowFullScreen
       loading={loading}
       referrerPolicy="strict-origin-when-cross-origin"
