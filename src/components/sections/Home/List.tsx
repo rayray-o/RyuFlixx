@@ -59,7 +59,13 @@ const HomePageList: React.FC =
           className="justify-center"
         />
 
-        <div className="relative flex min-h-32 flex-col gap-12">
+        <div
+          className={`relative flex min-h-32 flex-col ${
+            content === "tv"
+              ? "gap-4"
+              : "gap-12"
+          }`}
+        >
           {/*
            * ONE personalized row.
            *
