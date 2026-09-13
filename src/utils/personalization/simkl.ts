@@ -30,6 +30,16 @@ export type SimklSyncItem = {
   rating?: number;
   status?: string;
   watched?: boolean;
+
+  ids?: {
+    simkl?: number;
+    tmdb?: number | string;
+    imdb?: string;
+    tvdb?: number | string;
+    mal?: number | string;
+    [key: string]: unknown;
+  };
+
   [key: string]: unknown;
 };
 
@@ -38,6 +48,37 @@ export type SimklSyncResponse = {
   shows?: SimklSyncItem[];
   anime?: SimklSyncItem[];
   [key: string]: unknown;
+};
+
+type RawSimklItem = {
+  title?: string;
+  year?: number;
+  watched_at?: string;
+  last_watched_at?: string;
+  user_rating?: number | null;
+  rating?: number | null;
+  status?: string;
+  watched?: boolean;
+  [key: string]: unknown;
+};
+
+type RawSimklMediaObject = {
+  title?: string;
+  year?: number;
+  ids?: {
+    simkl?: number;
+    tmdb?: number | string;
+    imdb?: string;
+    tvdb?: number | string;
+    mal?: number | string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+};
+
+type RawSimklEntry = RawSimklItem & {
+  movie?: RawSimklMediaObject;
+  show?: RawSimklMediaObject;
 };
 
 function assertConfig() {
@@ -126,6 +167,72 @@ async function simklFetch<T>(
   return data as T;
 }
 
+function normalizeEntry(
+  entry: RawSimklEntry,
+  mediaType: "movie" | "tv",
+): SimklSyncItem {
+  const media =
+    mediaType === "movie"
+      ? entry.movie
+      : entry.show;
+
+  return {
+    ...entry,
+    title:
+      media?.title ??
+      entry.title,
+    year:
+      media?.year ??
+      entry.year,
+    ids:
+      media?.ids,
+  };
+}
+
+function normalizeLibraryResponse(
+  response: {
+    movies?: RawSimklEntry[];
+    shows?: RawSimklEntry[];
+    anime?: RawSimklEntry[];
+    [key: string]: unknown;
+  },
+  type: SimklMediaType,
+): SimklSyncResponse {
+  if (type === "movies") {
+    return {
+      movies: (response.movies ?? []).map(
+        (entry) =>
+          normalizeEntry(
+            entry,
+            "movie",
+          ),
+      ),
+    };
+  }
+
+  if (type === "shows") {
+    return {
+      shows: (response.shows ?? []).map(
+        (entry) =>
+          normalizeEntry(
+            entry,
+            "tv",
+          ),
+      ),
+    };
+  }
+
+  return {
+    anime: (response.anime ?? []).map(
+      (entry) =>
+        normalizeEntry(
+          entry,
+          "tv",
+        ),
+    ),
+  };
+}
+
 export async function getSimklActivities(
   accessToken: string,
 ) {
@@ -138,25 +245,55 @@ export async function getSimklActivities(
 export async function getInitialSimklLibrary(
   accessToken: string,
 ) {
-  const shows = await simklFetch<SimklSyncResponse>(
-    "/sync/shows",
-    accessToken,
-  );
+  /*
+   * Simkl's current API exposes the
+   * filtered initial-library endpoints
+   * under /sync/all-items/{type}.
+   *
+   * Keep the three library requests
+   * separate and sequential so the
+   * initial sync does not create a burst.
+   */
+  const rawShows =
+    await simklFetch<{
+      shows?: RawSimklEntry[];
+      [key: string]: unknown;
+    }>(
+      "/sync/all-items/shows",
+      accessToken,
+    );
 
-  const movies = await simklFetch<SimklSyncResponse>(
-    "/sync/movies",
-    accessToken,
-  );
+  const rawMovies =
+    await simklFetch<{
+      movies?: RawSimklEntry[];
+      [key: string]: unknown;
+    }>(
+      "/sync/all-items/movies",
+      accessToken,
+    );
 
-  const anime = await simklFetch<SimklSyncResponse>(
-    "/sync/anime",
-    accessToken,
-  );
+  const rawAnime =
+    await simklFetch<{
+      anime?: RawSimklEntry[];
+      [key: string]: unknown;
+    }>(
+      "/sync/all-items/anime",
+      accessToken,
+    );
 
   return {
-    shows,
-    movies,
-    anime,
+    shows: normalizeLibraryResponse(
+      rawShows,
+      "shows",
+    ),
+    movies: normalizeLibraryResponse(
+      rawMovies,
+      "movies",
+    ),
+    anime: normalizeLibraryResponse(
+      rawAnime,
+      "anime",
+    ),
   };
 }
 
@@ -165,7 +302,7 @@ export async function getSimklDelta(
   dateFrom: string,
 ) {
   return simklFetch<SimklSyncResponse>(
-    "/sync/all-items/",
+    "/sync/all-items",
     accessToken,
     {
       date_from: dateFrom,
