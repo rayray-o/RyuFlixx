@@ -88,7 +88,7 @@ export const TvShowOverviewSection: React.FC<TvShowOverviewSectionProps> = ({
                     TV
                   </Chip>
 
-                  {"adult" in tv && tv.adult && (
+                  {("adult" in tv ? Boolean(tv.adult) : false) && (
                     <Chip
                       color="danger"
                       variant="faded"
