@@ -372,7 +372,7 @@ export default function MangaParallaxBackground() {
       {isDesktop ? (
         <div className="absolute inset-0 overflow-hidden">
           <img
-            src="/Desktop-RyuFlix1.png"
+            src="/Desktop-RyuFlix.webp"
             alt=""
             className="absolute inset-0 h-full w-full object-cover"
             draggable={false}
