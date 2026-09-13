@@ -841,10 +841,7 @@ const PersonalizePage = () => {
                   <button
                     type="button"
                     onClick={importSimkl}
-                    disabled={
-                      importing !== null ||
-                      !tmdb.connected
-                    }
+                    disabled={importing !== null}
                     className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <IoRefreshOutline
@@ -860,13 +857,6 @@ const PersonalizePage = () => {
                       : "Import my Simkl taste"}
                   </button>
 
-                  {!tmdb.connected && (
-                    <p className="px-1 text-xs text-default-500">
-                      Connect TMDB too so RyuFlix can
-                      enrich Simkl titles with TMDB
-                      metadata.
-                    </p>
-                  )}
 
                   <button
                     type="button"
