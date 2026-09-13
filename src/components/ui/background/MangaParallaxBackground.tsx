@@ -368,16 +368,24 @@ export default function MangaParallaxBackground() {
         WebkitBackfaceVisibility: "hidden",
       }}
     >
-      {/* Only load/play the wallpaper that matches the device.
-          The old version mounted BOTH videos and merely hid one
-          with CSS, meaning both could still run in the background. */}
-      <VideoPair
-        src={
-          isDesktop
-            ? "/Desktop-RyuFlix.mp4"
-            : "/Phone-RyuFlix.mp4"
-        }
-      />
+      {/* Desktop = static PNG, Phone = animated MP4 */}
+      {isDesktop ? (
+        <div className="absolute inset-0 overflow-hidden">
+          <img
+            src="/Desktop-RyuFlix1.png"
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+            draggable={false}
+            style={{
+              pointerEvents: "none",
+              userSelect: "none",
+              WebkitUserSelect: "none",
+            }}
+          />
+        </div>
+      ) : (
+        <VideoPair src="/Phone-RyuFlix.mp4" />
+      )}
 
       {/* Main darkness */}
       <div
@@ -428,4 +436,4 @@ export default function MangaParallaxBackground() {
       />
     </div>
   );
-      }
+    }
