@@ -184,6 +184,10 @@ function normalizeEntry(
     year:
       media?.year ??
       entry.year,
+    user_rating:
+      entry.user_rating ?? undefined,
+    rating:
+      entry.rating ?? undefined,
     ids:
       media?.ids,
   };
