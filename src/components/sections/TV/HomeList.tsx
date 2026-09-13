@@ -54,12 +54,13 @@ const TvShowHomeList: React.FC<QueryList<TV>> = ({ query, name, param }) => {
           <Carousel
             classNames={{
               wrapper: "justify-start",
+              container: "gap-0",
             }}
           >
             {data?.results.map((tv) => (
               <div
                 key={tv.id}
-                className="embla__slide flex min-h-fit max-w-fit items-center px-1 py-1"
+                className="embla__slide !flex-none !basis-auto flex min-h-fit max-w-fit items-center px-1 py-1"
               >
                 <TvShowHomeCard tv={tv} />
               </div>
