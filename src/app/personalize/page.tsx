@@ -12,6 +12,7 @@ import {
 import { SiLetterboxd } from "react-icons/si";
 
 import type { TasteProfile } from "@/utils/personalization/taste-engine";
+import { mergeTasteProfiles } from "@/utils/personalization/taste-profile-merge";
 
 const TASTE_STORAGE_KEY = "ryuflix_taste_profile";
 
@@ -63,10 +64,14 @@ type TMDBImportResult = {
 };
 
 type StoredTasteProfile = {
-  provider: "tmdb";
+  provider: "tmdb" | "simkl" | "combined";
   importedAt: string;
   version: number;
   tasteProfile: TasteProfile;
+  sourceProfiles?: {
+    tmdb?: TasteProfile;
+    simkl?: TasteProfile;
+  };
 };
 
 const formatScore = (score: number) => {
@@ -144,11 +149,19 @@ const PersonalizePage = () => {
   const [tmdbLoading, setTmdbLoading] =
     useState(true);
 
+  const [simkl, setSimkl] =
+    useState<{ connected: boolean }>({
+      connected: false,
+    });
+
+  const [simklLoading, setSimklLoading] =
+    useState(true);
+
   const [disconnecting, setDisconnecting] =
-    useState(false);
+    useState<"tmdb" | "simkl" | null>(null);
 
   const [importing, setImporting] =
-    useState(false);
+    useState<"tmdb" | "simkl" | null>(null);
 
   const [importResult, setImportResult] =
     useState<TMDBImportResult | null>(null);
@@ -181,8 +194,10 @@ const PersonalizePage = () => {
 
       if (
         parsed &&
-        parsed.provider === "tmdb" &&
-        parsed.tasteProfile
+        parsed.tasteProfile &&
+        (parsed.provider === "tmdb" ||
+          parsed.provider === "simkl" ||
+          parsed.provider === "combined")
       ) {
         setSavedProfile(parsed);
       }
@@ -239,6 +254,51 @@ const PersonalizePage = () => {
     loadTMDBStatus();
   }, []);
 
+  const loadSimklStatus =
+    async () => {
+      try {
+        const response =
+          await fetch(
+            "/api/simkl/status",
+            {
+              cache: "no-store",
+            },
+          );
+
+        if (!response.ok) {
+          setSimkl({
+            connected: false,
+          });
+
+          return;
+        }
+
+        const data =
+          await response.json();
+
+        setSimkl({
+          connected: Boolean(
+            data.connected,
+          ),
+        });
+      } catch (error) {
+        console.error(
+          "Failed to load Simkl status:",
+          error,
+        );
+
+        setSimkl({
+          connected: false,
+        });
+      } finally {
+        setSimklLoading(false);
+      }
+    };
+
+  useEffect(() => {
+    loadSimklStatus();
+  }, []);
+
   const handleFiles = (
     files: FileList | null,
   ) => {
@@ -265,19 +325,31 @@ const PersonalizePage = () => {
       "/api/tmdb/connect";
   };
 
+  const connectSimkl = () => {
+    window.location.href =
+      "/api/simkl/connect";
+  };
+
   const disconnectTMDB =
     async () => {
-      setDisconnecting(true);
+      setDisconnecting("tmdb");
       setImportResult(null);
       setImportError(null);
 
       try {
-        await fetch(
-          "/api/tmdb/disconnect",
-          {
-            method: "POST",
-          },
-        );
+        const response =
+          await fetch(
+            "/api/tmdb/disconnect",
+            {
+              method: "POST",
+            },
+          );
+
+        if (!response.ok) {
+          throw new Error(
+            "Failed to disconnect TMDB.",
+          );
+        }
 
         setTmdb({
           connected: false,
@@ -288,25 +360,122 @@ const PersonalizePage = () => {
           error,
         );
       } finally {
-        setDisconnecting(false);
+        setDisconnecting(null);
       }
     };
 
-  const saveTasteProfile = (
-    result: TMDBImportResult,
+  const disconnectSimkl =
+    async () => {
+      setDisconnecting("simkl");
+      setImportResult(null);
+      setImportError(null);
+
+      try {
+        const response =
+          await fetch(
+            "/api/simkl/disconnect",
+            {
+              method: "POST",
+            },
+          );
+
+        if (!response.ok) {
+          throw new Error(
+            "Failed to disconnect Simkl.",
+          );
+        }
+
+        setSimkl({
+          connected: false,
+        });
+      } catch (error) {
+        console.error(
+          "Failed to disconnect Simkl:",
+          error,
+        );
+      } finally {
+        setDisconnecting(null);
+      }
+    };
+
+  const getSourceProfiles = () => {
+    const sources =
+      savedProfile?.sourceProfiles;
+
+    if (sources) {
+      return {
+        tmdb: sources.tmdb,
+        simkl: sources.simkl,
+      };
+    }
+
+    if (savedProfile?.provider === "tmdb") {
+      return {
+        tmdb:
+          savedProfile.tasteProfile,
+        simkl: undefined,
+      };
+    }
+
+    if (savedProfile?.provider === "simkl") {
+      return {
+        tmdb: undefined,
+        simkl:
+          savedProfile.tasteProfile,
+      };
+    }
+
+    return {
+      tmdb: undefined,
+      simkl: undefined,
+    };
+  };
+
+  const saveSourceTasteProfile = (
+    provider: "tmdb" | "simkl",
+    importedAt: string,
+    tasteProfile: TasteProfile,
   ) => {
+    const existing =
+      getSourceProfiles();
+
+    const sources = {
+      tmdb:
+        provider === "tmdb"
+          ? tasteProfile
+          : existing.tmdb,
+      simkl:
+        provider === "simkl"
+          ? tasteProfile
+          : existing.simkl,
+    };
+
+    const combined =
+      sources.tmdb && sources.simkl
+        ? mergeTasteProfiles(
+            sources.tmdb,
+            sources.simkl,
+          )
+        : sources.tmdb ??
+          sources.simkl ??
+          tasteProfile;
+
     const storedProfile:
       StoredTasteProfile = {
-      provider: "tmdb",
+      provider:
+        sources.tmdb && sources.simkl
+          ? "combined"
+          : provider,
 
-      importedAt:
-        result.importedAt,
+      importedAt,
 
       version:
-        result.tasteProfile.version,
+        combined.version,
 
       tasteProfile:
-        result.tasteProfile,
+        combined,
+
+      sourceProfiles: sources,
     };
 
     window.localStorage.setItem(
@@ -322,7 +491,7 @@ const PersonalizePage = () => {
   };
 
   const importTMDB = async () => {
-    setImporting(true);
+    setImporting("tmdb");
     setImportError(null);
 
     try {
@@ -348,8 +517,10 @@ const PersonalizePage = () => {
       const result =
         data as TMDBImportResult;
 
-      saveTasteProfile(
-        result,
+      saveSourceTasteProfile(
+        "tmdb",
+        result.importedAt,
+        result.tasteProfile,
       );
 
       setImportResult(
@@ -367,7 +538,58 @@ const PersonalizePage = () => {
           : "Failed to import TMDB data.",
       );
     } finally {
-      setImporting(false);
+      setImporting(null);
+    }
+  };
+
+  const importSimkl = async () => {
+    setImporting("simkl");
+    setImportError(null);
+
+    try {
+      const response =
+        await fetch(
+          "/api/simkl/import",
+          {
+            method: "POST",
+            cache: "no-store",
+          },
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ??
+            "Failed to import Simkl data.",
+        );
+      }
+
+      const result =
+        data as {
+          importedAt: string;
+          tasteProfile: TasteProfile;
+        };
+
+      saveSourceTasteProfile(
+        "simkl",
+        result.importedAt,
+        result.tasteProfile,
+      );
+    } catch (error) {
+      console.error(
+        "Failed to import Simkl data:",
+        error,
+      );
+
+      setImportError(
+        error instanceof Error
+          ? error.message
+          : "Failed to import Simkl data.",
+      );
+    } finally {
+      setImporting(null);
     }
   };
 
@@ -532,18 +754,18 @@ const PersonalizePage = () => {
                   <button
                     type="button"
                     onClick={importTMDB}
-                    disabled={importing}
+                    disabled={importing !== null}
                     className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <IoRefreshOutline
                       className={
-                        importing
+                        importing === "tmdb"
                           ? "size-5 animate-spin"
                           : "size-5"
                       }
                     />
 
-                    {importing
+                    {importing === "tmdb"
                       ? "Importing your taste..."
                       : savedProfile
                         ? "Refresh TMDB data"
@@ -554,16 +776,112 @@ const PersonalizePage = () => {
                     type="button"
                     onClick={disconnectTMDB}
                     disabled={
-                      disconnecting ||
-                      importing
+                      disconnecting !== null ||
+                      importing !== null
                     }
                     className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-default-100 text-sm font-semibold text-default-700 transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <IoLogOutOutline className="size-5" />
 
-                    {disconnecting
+                    {disconnecting === "tmdb"
                       ? "Disconnecting..."
                       : "Disconnect TMDB"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Simkl */}
+            <div className="rounded-2xl border border-default-200 bg-background/60 p-5 backdrop-blur-xl">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-black text-primary">
+                    SIMKL
+                  </div>
+
+                  <div>
+                    <h3 className="font-semibold">
+                      Simkl
+                    </h3>
+
+                    <p className="text-sm text-default-500">
+                      Watch history, ratings &
+                      anime
+                    </p>
+                  </div>
+                </div>
+
+                {simklLoading ? (
+                  <span className="rounded-full bg-default-100 px-3 py-1 text-xs font-medium text-default-500">
+                    Checking...
+                  </span>
+                ) : simkl.connected ? (
+                  <span className="flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1 text-xs font-medium text-success">
+                    <IoCheckmarkCircle className="size-4" />
+                    Connected
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-default-100 px-3 py-1 text-xs font-medium text-default-500">
+                    Not connected
+                  </span>
+                )}
+              </div>
+
+              {!simkl.connected ? (
+                <button
+                  type="button"
+                  onClick={connectSimkl}
+                  disabled={simklLoading}
+                  className="mt-6 h-11 w-full rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Connect Simkl
+                </button>
+              ) : (
+                <div className="mt-6 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={importSimkl}
+                    disabled={
+                      importing !== null ||
+                      !tmdb.connected
+                    }
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <IoRefreshOutline
+                      className={
+                        importing === "simkl"
+                          ? "size-5 animate-spin"
+                          : "size-5"
+                      }
+                    />
+
+                    {importing === "simkl"
+                      ? "Importing Simkl..."
+                      : "Import my Simkl taste"}
+                  </button>
+
+                  {!tmdb.connected && (
+                    <p className="px-1 text-xs text-default-500">
+                      Connect TMDB too so RyuFlix can
+                      enrich Simkl titles with TMDB
+                      metadata.
+                    </p>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={disconnectSimkl}
+                    disabled={
+                      disconnecting !== null ||
+                      importing !== null
+                    }
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-default-100 text-sm font-semibold text-default-700 transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <IoLogOutOutline className="size-5" />
+
+                    {disconnecting === "simkl"
+                      ? "Disconnecting..."
+                      : "Disconnect Simkl"}
                   </button>
                 </div>
               )}
@@ -630,7 +948,7 @@ const PersonalizePage = () => {
         {importError && (
           <section className="rounded-2xl border border-danger/30 bg-danger/5 p-5">
             <p className="font-semibold text-danger">
-              TMDB import failed
+              Personalization import failed
             </p>
 
             <p className="mt-1 text-sm text-danger/80">
@@ -935,7 +1253,7 @@ const PersonalizePage = () => {
 
                   <p className="text-sm text-default-500">
                     Your profile was generated from
-                    the following TMDB activity.
+                    the activity imported from your connected services.
                   </p>
                 </div>
               </div>
@@ -1047,10 +1365,10 @@ const PersonalizePage = () => {
             </h2>
 
             <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-default-500">
-              Connect TMDB and import your activity.
-              RyuFlix will analyze your ratings,
-              favorites, watchlists and deeper movie
-              metadata.
+              Connect TMDB and/or Simkl and import
+              your activity. RyuFlix will combine the
+              available taste signals for
+              personalization.
             </p>
           </section>
         )}
