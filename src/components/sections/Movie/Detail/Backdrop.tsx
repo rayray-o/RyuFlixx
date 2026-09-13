@@ -35,9 +35,8 @@ const BackdropSection: React.FC<{
     <section
       id="backdrop"
       aria-hidden="true"
-      className="pointer-events-none fixed inset-0 z-0 h-[62vh] min-h-[430px] md:h-[68vh] lg:h-[76vh]"
+      className="pointer-events-none fixed left-1/2 top-0 z-0 h-[62vh] min-h-[430px] w-screen -translate-x-1/2 md:h-[68vh] lg:h-[76vh]"
     >
-      {/* Main backdrop */}
       <div
         className="absolute inset-0 overflow-hidden"
         style={{
@@ -59,22 +58,16 @@ const BackdropSection: React.FC<{
         />
       </div>
 
-      {/* Dark cinematic layer */}
       <div className="absolute inset-0 bg-black/15" />
 
-      {/* Top fade */}
       <div className="absolute inset-x-0 top-0 h-32 bg-linear-to-b from-background via-background/35 to-transparent" />
 
-      {/* Side fade */}
       <div className="absolute inset-y-0 left-0 w-1/2 bg-linear-to-r from-background/55 via-transparent to-transparent" />
 
-      {/* Bottom fade into page */}
       <div className="absolute inset-x-0 bottom-0 h-[65%] bg-linear-to-t from-background via-background/75 via-35% to-transparent" />
 
-      {/* Extra cinematic depth */}
       <div className="absolute inset-x-0 bottom-0 h-[45%] bg-linear-to-t from-background to-transparent" />
 
-      {/* TMDB title artwork */}
       {titleImage && (
         <div
           className="absolute inset-x-0 bottom-[18%] z-10 flex justify-center px-8 transition-opacity duration-300 md:bottom-[20%]"
