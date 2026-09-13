@@ -28,9 +28,11 @@ export const TvShowOverviewSection: React.FC<TvShowOverviewSectionProps> = ({
   const firstReleaseYear = new Date(tv.first_air_date).getFullYear();
   const lastReleaseYear = new Date(tv.last_air_date).getFullYear();
   const releaseYears = `${firstReleaseYear} ${firstReleaseYear !== lastReleaseYear ? ` - ${lastReleaseYear}` : ""}`;
+
   const posterImage = getImageUrl(tv.poster_path);
   const title = mutateTvShowTitle(tv);
   const fullTitle = title;
+
   const bookmarkData: SavedMovieDetails = {
     type: "tv",
     adult: "adult" in tv ? (tv.adult as boolean) : false,
@@ -46,76 +48,147 @@ export const TvShowOverviewSection: React.FC<TvShowOverviewSectionProps> = ({
   useDocumentTitle(`${fullTitle} | ${siteConfig.name}`);
 
   return (
-    <section id="overview" className="relative z-3 flex flex-col gap-8 pt-[20vh] md:pt-[40vh]">
-      <div className="md:grid md:grid-cols-[auto_1fr] md:gap-6">
-        <Image
-          isBlurred
-          shadow="md"
-          alt={fullTitle}
-          classNames={{
-            wrapper: "w-52 max-h-min aspect-2/3 hidden md:block",
-          }}
-          className="object-cover object-center"
-          src={posterImage}
-        />
+    <section
+      id="overview"
+      className="relative z-3 flex flex-col gap-12 pt-[40vh] md:pt-[48vh] lg:pt-[54vh]"
+    >
+      <div className="px-4 md:px-0">
+        <div className="relative overflow-hidden rounded-3xl border border-white/8 bg-background/55 p-4 shadow-2xl backdrop-blur-xl md:p-6 lg:p-7">
+          <div className="pointer-events-none absolute inset-0 bg-linear-to-br from-white/[0.045] via-transparent to-transparent" />
 
-        <div className="flex flex-col gap-8">
-          <div id="title" className="flex flex-col gap-1 md:gap-2">
-            <Chip
-              color="warning"
-              variant="faded"
-              className="md:text-md text-xs"
-              classNames={{ content: "font-bold" }}
-            >
-              TV
-            </Chip>
-            <h2 className="text-2xl font-black md:text-4xl">{fullTitle}</h2>
-            <div className="md:text-md flex flex-wrap gap-1 text-xs md:gap-2">
-              <div className="flex items-center gap-1">
-                <Season />
-                <span>
-                  {tv.number_of_seasons} Season{tv.number_of_seasons > 1 ? "s" : ""}
-                </span>
-              </div>
-              <p>&#8226;</p>
-              <div className="flex items-center gap-1">
-                <List />
-                <span>
-                  {tv.number_of_episodes} Episode{tv.number_of_episodes > 1 ? "s" : ""}
-                </span>
-              </div>
-              <p>&#8226;</p>
-              <div className="flex items-center gap-1">
-                <Calendar />
-                <span>{releaseYears}</span>
-              </div>
-              <p>&#8226;</p>
-              <Rating rate={tv.vote_average} count={tv.vote_count} />
+          <div className="relative md:grid md:grid-cols-[210px_1fr] md:gap-7 lg:grid-cols-[230px_1fr] lg:gap-9">
+            <div className="hidden md:block">
+              <Image
+                isBlurred
+                shadow="lg"
+                alt={fullTitle}
+                classNames={{
+                  wrapper:
+                    "aspect-2/3 w-full overflow-hidden rounded-2xl",
+                }}
+                className="h-full w-full object-cover object-center"
+                src={posterImage}
+              />
             </div>
-            <Genres genres={tv.genres} type="tv" />
-          </div>
 
-          <div id="action" className="flex w-full flex-wrap justify-between gap-4 md:gap-0">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                color="warning"
-                variant="shadow"
-                onPress={onViewEpisodesClick}
-                startContent={<FaCirclePlay size={22} />}
+            <div className="flex min-w-0 flex-col gap-7">
+              <div
+                id="title"
+                className="flex flex-col gap-3"
               >
-                View Episodes
-              </Button>
-              <Trailer color="warning" videos={tv.videos.results} />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <ShareButton id={tv.id} title={title} type="tv" />
-              <BookmarkButton data={bookmarkData} />
-            </div>
-          </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Chip
+                    color="warning"
+                    variant="faded"
+                    size="sm"
+                    classNames={{
+                      content: "font-bold",
+                    }}
+                  >
+                    TV
+                  </Chip>
 
-          <div id="story" className="flex flex-col gap-2">
-            <SectionTitle color="warning">Story Line</SectionTitle>
-            <p className="text-sm">{tv.overview}</p>
+                  {"adult" in tv && tv.adult && (
+                    <Chip
+                      color="danger"
+                      variant="faded"
+                      size="sm"
+                    >
+                      18+
+                    </Chip>
+                  )}
+                </div>
+
+                <h1 className="max-w-4xl text-3xl font-black tracking-tight md:text-4xl lg:text-5xl">
+                  {fullTitle}
+                </h1>
+
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-foreground-500">
+                  <div className="flex items-center gap-1.5">
+                    <Season />
+                    <span>
+                      {tv.number_of_seasons} Season
+                      {tv.number_of_seasons > 1 ? "s" : ""}
+                    </span>
+                  </div>
+
+                  <span aria-hidden="true">•</span>
+
+                  <div className="flex items-center gap-1.5">
+                    <List />
+                    <span>
+                      {tv.number_of_episodes} Episode
+                      {tv.number_of_episodes > 1 ? "s" : ""}
+                    </span>
+                  </div>
+
+                  <span aria-hidden="true">•</span>
+
+                  <div className="flex items-center gap-1.5">
+                    <Calendar />
+                    <span>{releaseYears}</span>
+                  </div>
+
+                  <span aria-hidden="true">•</span>
+
+                  <Rating
+                    rate={tv.vote_average}
+                    count={tv.vote_count}
+                  />
+                </div>
+
+                <Genres genres={tv.genres} type="tv" />
+              </div>
+
+              <div
+                id="action"
+                className="flex flex-wrap items-center gap-3"
+              >
+                <Button
+                  color="warning"
+                  variant="shadow"
+                  size="lg"
+                  className="font-bold"
+                  onPress={onViewEpisodesClick}
+                  startContent={
+                    <FaCirclePlay size={21} />
+                  }
+                >
+                  View Episodes
+                </Button>
+
+                <Trailer
+                  color="warning"
+                  videos={tv.videos.results}
+                />
+
+                <div className="flex items-center gap-2">
+                  <ShareButton
+                    id={tv.id}
+                    title={title}
+                    type="tv"
+                  />
+
+                  <BookmarkButton
+                    data={bookmarkData}
+                  />
+                </div>
+              </div>
+
+              <div
+                id="story"
+                className="max-w-4xl"
+              >
+                <SectionTitle color="warning">
+                  Story Line
+                </SectionTitle>
+
+                <p className="mt-2 text-sm leading-7 text-foreground-500 md:text-base md:leading-8">
+                  {tv.overview ||
+                    "No overview is available for this TV show."}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
