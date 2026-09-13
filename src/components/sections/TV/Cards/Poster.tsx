@@ -50,7 +50,8 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
 
         if (!response.ok) return;
 
-        const data: { logo?: string | null } = await response.json();
+        const data: { logo?: string | null } =
+          await response.json();
 
         if (!cancelled) {
           setLogo(data.logo ?? null);
@@ -79,12 +80,21 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
     threshold: 300,
   });
 
+  /*
+   * Keep the title area compact.
+   *
+   * TV logo artwork can contain transparent padding,
+   * so using a large fixed-height box makes some logos
+   * look vertically detached from their poster.
+   */
   const titleContent = logo ? (
     <div
       aria-label={title}
       role="img"
-      className="h-9 w-full bg-contain bg-center bg-no-repeat"
-      style={{ backgroundImage: `url("${logo}")` }}
+      className="h-7 w-full bg-contain bg-center bg-no-repeat"
+      style={{
+        backgroundImage: `url("${logo}")`,
+      }}
     />
   ) : (
     <h6 className="max-w-full truncate text-center text-sm font-semibold">
@@ -103,7 +113,11 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
         placement="right-start"
         content={<TvShowHoverCard id={tv.id} />}
       >
-        <Link href={`/tv/${tv.id}`} ref={ref} {...longPress()}>
+        <Link
+          href={`/tv/${tv.id}`}
+          ref={ref}
+          {...longPress()}
+        >
           {variant === "full" && (
             <div className="group motion-preset-focus text-white">
               <div className="relative aspect-2/3 overflow-hidden rounded-lg border-[3px] border-transparent transition-colors hover:border-warning">
@@ -138,7 +152,7 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
                 />
               </div>
 
-              <div className="flex h-[44px] items-center justify-center overflow-hidden px-1 pt-1">
+              <div className="flex h-[34px] items-center justify-center overflow-hidden px-1">
                 {titleContent}
               </div>
 
@@ -190,7 +204,7 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
               </CardHeader>
 
               <CardBody className="justify-end pb-1">
-                <div className="flex h-[44px] items-center justify-center overflow-hidden">
+                <div className="flex h-[34px] items-center justify-center overflow-hidden">
                   {titleContent}
                 </div>
               </CardBody>
@@ -212,7 +226,10 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
           title={title}
           hiddenTitle
         >
-          <TvShowHoverCard id={tv.id} fullWidth />
+          <TvShowHoverCard
+            id={tv.id}
+            fullWidth
+          />
         </VaulDrawer>
       )}
     </>
