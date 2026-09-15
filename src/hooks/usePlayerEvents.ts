@@ -221,7 +221,7 @@ function parseGenericPlayerMessage(
  */
 const PLAYER_ORIGINS = [
   "https://vidlink.pro",
-  "https://embed.filmu.in",
+  "https://vidlink.pro",
 
   "https://www.2embed.cc",
   "https://2embed.cc",
@@ -238,7 +238,7 @@ const PLAYER_ORIGINS = [
   "https://vidsrc.ir",
   "https://vidsrc-me.ru",
 
-  "https://vsembed.ru",
+  "https://vidstuck.xyz",
 
   "https://player.videasy.to",
 
