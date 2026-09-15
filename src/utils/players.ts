@@ -83,7 +83,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
     },
     {
       title: "RyuFlix 11",
-      source: `https://vsembed.ru/embed/movie/${id}`,
+      source: `https://vidstuck.xyz/embed/movie/${id}?branding=Ryuflix`,
       recommended: true,
       fast: true,
       ads: true,
@@ -191,7 +191,7 @@ export const getTvShowPlayers = (
     },
     {
       title: "RyuFlix 11",
-      source: `https://vsembed.ru/embed/tv/${id}/${season}/${episode}?autoPlay=false`,
+      source: `https://vidstuck.xyz/embed/tv/${id}/${season}/${episode}?episodeSelector=true`,
       recommended: true,
       fast: true,
       ads: true,
