@@ -18,31 +18,17 @@ interface WatchPlayerProps {
     index: number,
   ) => void;
 
-  /*
-   * Returns the latest playback position
-   * from usePlayerEvents.
-   */
   getCurrentTime?: () => number;
 
-  /*
-   * Immediately saves the latest playback
-   * position before destroying the old iframe.
-   */
   flushProgress?: () => void;
 
-  /*
-   * Gives the parent access to the active iframe.
-   * Used to reject stale postMessage events.
-   */
-  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  iframeRef?: React.RefObject<
+    HTMLIFrameElement | null
+  >;
 
   title?: string;
 }
 
-/*
- * Add/update startAt without destroying any
- * existing query parameters.
- */
 function addResumePosition(
   source: string,
   position: number,
@@ -55,11 +41,14 @@ function addResumePosition(
   }
 
   try {
-    const url = new URL(source);
+    const url =
+      new URL(source);
 
     url.searchParams.set(
       "startAt",
-      Math.floor(position).toString(),
+      Math.floor(
+        position,
+      ).toString(),
     );
 
     return url.toString();
@@ -96,35 +85,34 @@ const WatchPlayer: React.FC<
   const currentServer =
     useMemo(
       () =>
-        servers[safeIndex],
-      [servers, safeIndex],
+        servers[
+          safeIndex
+        ],
+      [
+        servers,
+        safeIndex,
+      ],
     );
 
   const [loading, setLoading] =
     useState(true);
 
-  /*
-   * Position captured at the exact moment
-   * the user switches server.
-   */
   const [
     handoffPosition,
     setHandoffPosition,
-  ] = useState<number | null>(
-    null,
-  );
+  ] = useState<
+    number | null
+  >(null);
 
   const internalIframeRef =
-    useRef<HTMLIFrameElement | null>(
-      null,
-    );
+    useRef<
+      HTMLIFrameElement | null
+    >(null);
 
-  /*
-   * Use the parent's ref when supplied.
-   * Otherwise keep our own.
-   */
   const setIframeRef = (
-    element: HTMLIFrameElement | null,
+    element:
+      | HTMLIFrameElement
+      | null,
   ) => {
     internalIframeRef.current =
       element;
@@ -135,29 +123,38 @@ const WatchPlayer: React.FC<
     }
   };
 
-  /*
-   * Reset handoff state when the content
-   * itself changes, such as moving to another
-   * movie/episode.
-   */
   useEffect(() => {
-    setHandoffPosition(null);
-  }, [servers.length]);
+    setHandoffPosition(
+      null,
+    );
+  }, [
+    servers.length,
+  ]);
 
   useEffect(() => {
     setLoading(true);
-  }, [currentServer?.source]);
+
+    /*
+     * A newly selected external iframe must
+     * replace the old iframe ref immediately.
+     */
+    if (iframeRef) {
+      iframeRef.current =
+        null;
+    }
+  }, [
+    currentServer?.source,
+    iframeRef,
+  ]);
 
   /*
-   * ONLY the final server slot is the
-   * RyuFlix custom Video.js player.
-   *
-   * Every other server remains the
-   * original external iframe player.
+   * The final slot remains the existing
+   * RyuFlix HLS test player.
    */
   const isCustomPlayer =
     servers.length > 0 &&
-    safeIndex === servers.length - 1;
+    safeIndex ===
+      servers.length - 1;
 
   if (!currentServer) {
     return (
@@ -182,20 +179,20 @@ const WatchPlayer: React.FC<
       <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10">
         {isCustomPlayer ? (
           <RyuFlixPlayer
-            src={RYUFLIX_TEST_HLS}
+            src={
+              RYUFLIX_TEST_HLS
+            }
             title={title}
             resumeAt={
-              handoffPosition !== null
+              handoffPosition !==
+              null
                 ? handoffPosition
                 : 0
             }
             onTimeUpdate={() => {
               /*
-               * The existing RyuFlix progress system
-               * remains responsible for external players.
-               *
-               * This is only the authorized HLS
-               * Video.js test player.
+               * The custom HLS player is
+               * currently kept as a test player.
                */
             }}
             onEnded={() => {
@@ -214,7 +211,9 @@ const WatchPlayer: React.FC<
             loading="eager"
             referrerPolicy="strict-origin-when-cross-origin"
             onLoad={() =>
-              setLoading(false)
+              setLoading(
+                false,
+              )
             }
           />
         )}
@@ -230,7 +229,9 @@ const WatchPlayer: React.FC<
                 </span>
 
                 <span className="text-xs text-white/40">
-                  {currentServer.title}
+                  {
+                    currentServer.title
+                  }
                 </span>
 
                 {handoffPosition !==
@@ -254,26 +255,26 @@ const WatchPlayer: React.FC<
         </span>
 
         {servers.map(
-          (server, index) => {
+          (
+            server,
+            index,
+          ) => {
             const active =
-              index === safeIndex;
+              index ===
+              safeIndex;
 
             return (
               <button
                 key={`${server.title}-${index}`}
                 type="button"
-                aria-pressed={active}
+                aria-pressed={
+                  active
+                }
                 onClick={() => {
                   if (active) {
                     return;
                   }
 
-                  /*
-                   * 1. Read the freshest position.
-                   * 2. Persist it immediately.
-                   * 3. Give that position to the new player.
-                   * 4. Then change the server.
-                   */
                   const position =
                     Math.max(
                       0,
@@ -281,13 +282,19 @@ const WatchPlayer: React.FC<
                         0,
                     );
 
+                  /*
+                   * Save BEFORE replacing
+                   * the current iframe.
+                   */
                   flushProgress?.();
 
                   setHandoffPosition(
                     position,
                   );
 
-                  setLoading(true);
+                  setLoading(
+                    true,
+                  );
 
                   onServerChange(
                     index,
@@ -301,10 +308,14 @@ const WatchPlayer: React.FC<
                   active
                     ? "border-white/30 bg-white/15 text-white shadow-lg"
                     : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
-                ].join(" ")}
+                ].join(
+                  " ",
+                )}
               >
                 <span className="flex items-center gap-2">
-                  {server.title}
+                  {
+                    server.title
+                  }
 
                   {server.recommended && (
                     <span className="text-[9px] uppercase tracking-wider text-white/40">
