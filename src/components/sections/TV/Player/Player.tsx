@@ -72,7 +72,8 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
 }) => {
   const router = useRouter();
 
-  const { mobile } = useBreakpoints();
+  const { mobile } =
+    useBreakpoints();
 
   const players = getTvShowPlayers(
     id,
@@ -109,6 +110,13 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
     flushProgress,
   } = usePlayerEvents({
     saveHistory: true,
+
+    /*
+     * IMPORTANT:
+     * Give the event hook the same iframe ref
+     * used by WatchPlayer.
+     */
+    playerFrameRef,
 
     metadata: {
       mediaId: id,
