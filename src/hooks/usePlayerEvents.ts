@@ -22,7 +22,7 @@ export interface BasePlayerEventEnvelope<T = any> {
     | "PLAYER_EVENT"
     | "MEDIA_DATA"
     | string;
-  data: T;
+  data?: T;
 }
 
 export interface UnifiedPlayerEventData {
@@ -60,15 +60,41 @@ const SUPPORTED_EVENTS: PlayerEventType[] = [
 
 const COMPLETION_THRESHOLD = 0.9;
 
-function isPlayerEvent(
+function normalizeEvent(
   value: unknown,
-): value is PlayerEventType {
-  return (
-    typeof value === "string" &&
+): PlayerEventType | undefined {
+  if (
+    typeof value !== "string"
+  ) {
+    return undefined;
+  }
+
+  const normalized =
+    value
+      .trim()
+      .toLowerCase();
+
+  if (
+    normalized === "playing"
+  ) {
+    return "play";
+  }
+
+  if (
+    normalized === "progress"
+  ) {
+    return "timeupdate";
+  }
+
+  if (
     SUPPORTED_EVENTS.includes(
-      value as PlayerEventType,
+      normalized as PlayerEventType,
     )
-  );
+  ) {
+    return normalized as PlayerEventType;
+  }
+
+  return undefined;
 }
 
 function firstDefined<T>(
@@ -91,16 +117,22 @@ function toNumber(
     return value;
   }
 
-  if (typeof value === "string") {
-    const trimmed = value.trim();
+  if (
+    typeof value === "string"
+  ) {
+    const trimmed =
+      value.trim();
 
     if (!trimmed) {
       return undefined;
     }
 
-    const parsed = Number(trimmed);
+    const parsed =
+      Number(trimmed);
 
-    if (Number.isFinite(parsed)) {
+    if (
+      Number.isFinite(parsed)
+    ) {
       return parsed;
     }
   }
@@ -108,19 +140,39 @@ function toNumber(
   return undefined;
 }
 
+function parseMaybeJson(
+  value: unknown,
+): any {
+  if (
+    typeof value !== "string"
+  ) {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 function unwrapEventData(
   raw: BasePlayerEventEnvelope<any>,
 ): any {
-  let data = raw?.data;
+  let data =
+    parseMaybeJson(raw?.data);
 
+  /*
+   * Some providers send the actual event
+   * directly on event.data rather than inside
+   * a "data" property.
+   */
   if (
-    typeof data === "string"
+    !data ||
+    typeof data !== "object"
   ) {
-    try {
-      data = JSON.parse(data);
-    } catch {
-      return null;
-    }
+    data =
+      parseMaybeJson(raw);
   }
 
   if (
@@ -130,17 +182,43 @@ function unwrapEventData(
     return null;
   }
 
-  if (
-    data.data &&
-    typeof data.data === "object" &&
-    !data.event &&
-    !data.eventType &&
-    !data.action
+  /*
+   * Support:
+   *
+   * { data: { ... } }
+   * { data: { data: { ... } } }
+   *
+   * without requiring a particular envelope.
+   */
+  let current = data;
+
+  for (
+    let depth = 0;
+    depth < 3;
+    depth += 1
   ) {
-    return data.data;
+    if (
+      current.data === undefined
+    ) {
+      break;
+    }
+
+    const nested =
+      parseMaybeJson(
+        current.data,
+      );
+
+    if (
+      !nested ||
+      typeof nested !== "object"
+    ) {
+      break;
+    }
+
+    current = nested;
   }
 
-  return data;
+  return current;
 }
 
 function parseGenericPlayerMessage(
@@ -160,26 +238,31 @@ function parseGenericPlayerMessage(
     return null;
   }
 
-  const eventRaw = firstDefined(
-    data.event,
-    data.eventType,
-    data.event_type,
-    data.action,
-    data.name,
-  );
-
   const event =
-    typeof eventRaw === "string"
-      ? eventRaw.toLowerCase()
-      : undefined;
+    normalizeEvent(
+      firstDefined(
+        data.event,
+        data.eventType,
+        data.event_type,
+        data.action,
+        data.name,
+        data.type,
+        raw.type,
+      ),
+    );
 
-  if (!isPlayerEvent(event)) {
+  if (!event) {
     return null;
   }
 
+  /*
+   * Provider identity is optional.
+   *
+   * RyuFlix already knows the authoritative
+   * movie/TV identity from the current page.
+   */
   const mediaId =
     firstDefined(
-      data.mtmdbId,
       data.tmdbId,
       data.tmdb_id,
       data.mediaId,
@@ -187,14 +270,8 @@ function parseGenericPlayerMessage(
       data.id,
       data.videoId,
       data.video_id,
-    );
-
-  if (
-    mediaId === undefined ||
-    mediaId === null
-  ) {
-    return null;
-  }
+      data.mtmdbId,
+    ) ?? 0;
 
   const currentTime =
     toNumber(
@@ -205,6 +282,8 @@ function parseGenericPlayerMessage(
         data.current,
         data.time,
         data.seconds,
+        data.currentTimeSeconds,
+        data.current_time_seconds,
       ),
     ) ?? 0;
 
@@ -215,6 +294,8 @@ function parseGenericPlayerMessage(
         data.totalDuration,
         data.total_duration,
         data.length,
+        data.videoDuration,
+        data.video_duration,
       ),
     ) ?? 0;
 
@@ -241,14 +322,9 @@ function parseGenericPlayerMessage(
     );
 
   const mediaType =
-    mediaTypeRaw === "movie" ||
     mediaTypeRaw === "tv"
-      ? mediaTypeRaw
-      : undefined;
-
-  if (!mediaType) {
-    return null;
-  }
+      ? "tv"
+      : "movie";
 
   const season =
     toNumber(
@@ -270,18 +346,38 @@ function parseGenericPlayerMessage(
       ),
     );
 
+  /*
+   * Don't accept completely empty messages.
+   * A recognized playback event needs either
+   * timing information or an ended/play/pause
+   * signal.
+   */
+  const hasTimingData =
+    currentTime > 0 ||
+    duration > 0 ||
+    progress !== undefined;
+
+  if (
+    !hasTimingData &&
+    event === "timeupdate"
+  ) {
+    return null;
+  }
+
   return {
     event,
 
-    currentTime: Math.max(
-      0,
-      currentTime,
-    ),
+    currentTime:
+      Math.max(
+        0,
+        currentTime,
+      ),
 
-    duration: Math.max(
-      0,
-      duration,
-    ),
+    duration:
+      Math.max(
+        0,
+        duration,
+      ),
 
     mediaId,
 
@@ -293,14 +389,17 @@ function parseGenericPlayerMessage(
 
     progress:
       progress !== undefined
-        ? Math.max(0, progress)
+        ? Math.max(
+            0,
+            progress,
+          )
         : undefined,
   };
 }
 
 /*
- * These are the actual external iframe origins
- * currently used by players.ts.
+ * These are the actual external iframe
+ * origins currently used by players.ts.
  */
 const PLAYER_ORIGINS = [
   "https://vidlink.pro",
@@ -434,13 +533,14 @@ export function usePlayerEvents(
   const saveHistoryRef =
     useRef(saveHistory);
 
-  const callbacksRef = useRef({
-    onPlay,
-    onPause,
-    onSeeked,
-    onEnded,
-    onTimeUpdate,
-  });
+  const callbacksRef =
+    useRef({
+      onPlay,
+      onPause,
+      onSeeked,
+      onEnded,
+      onTimeUpdate,
+    });
 
   const lastSavedPositionRef =
     useRef(0);
@@ -455,10 +555,6 @@ export function usePlayerEvents(
     metadataRef.current =
       metadata;
 
-    /*
-     * Reset the cached event when the
-     * actual media/episode changes.
-     */
     const identity = [
       metadata?.mediaType ?? "",
       metadata?.mediaId ?? "",
@@ -532,7 +628,9 @@ export function usePlayerEvents(
           );
 
         if (
-          !Number.isFinite(mediaId) ||
+          !Number.isFinite(
+            mediaId,
+          ) ||
           mediaId <= 0
         ) {
           return;
@@ -556,9 +654,12 @@ export function usePlayerEvents(
 
         if (
           !title ||
-          backdropPath === undefined ||
-          releaseDate === undefined ||
-          voteAverage === undefined
+          backdropPath ===
+            undefined ||
+          releaseDate ===
+            undefined ||
+          voteAverage ===
+            undefined
         ) {
           return;
         }
@@ -636,7 +737,8 @@ export function usePlayerEvents(
 
       saveLocalProgress(
         latest,
-        latest.event === "ended",
+        latest.event ===
+          "ended",
       );
     }, [
       saveLocalProgress,
@@ -673,7 +775,9 @@ export function usePlayerEvents(
           return;
         }
 
-        saveLocalProgress(data);
+        saveLocalProgress(
+          data,
+        );
       },
       [
         saveLocalProgress,
@@ -692,7 +796,8 @@ export function usePlayerEvents(
 
         saveLocalProgress(
           latest,
-          latest.event === "ended",
+          latest.event ===
+            "ended",
         );
       };
 
@@ -711,11 +816,6 @@ export function usePlayerEvents(
         saveLatestProgress();
       };
 
-    const handleBeforeUnload =
-      () => {
-        saveLatestProgress();
-      };
-
     document.addEventListener(
       "visibilitychange",
       handleVisibilityChange,
@@ -724,11 +824,6 @@ export function usePlayerEvents(
     window.addEventListener(
       "pagehide",
       handlePageHide,
-    );
-
-    window.addEventListener(
-      "beforeunload",
-      handleBeforeUnload,
     );
 
     return () => {
@@ -742,11 +837,6 @@ export function usePlayerEvents(
       window.removeEventListener(
         "pagehide",
         handlePageHide,
-      );
-
-      window.removeEventListener(
-        "beforeunload",
-        handleBeforeUnload,
       );
     };
   }, [
@@ -769,17 +859,18 @@ export function usePlayerEvents(
           return;
         }
 
-        const activeFrame =
-          playerFrameRef?.current;
-
-        if (
-          activeFrame &&
-          event.source !==
-            activeFrame.contentWindow
-        ) {
-          return;
-        }
-
+        /*
+         * The origin allowlist above is the
+         * security boundary.
+         *
+         * Do NOT additionally require
+         * event.source === outer iframe.contentWindow.
+         *
+         * A provider may have its actual player
+         * inside another nested browsing context,
+         * in which case the nested window is the
+         * sender of the postMessage.
+         */
         let rawData: any;
 
         try {
@@ -803,43 +894,41 @@ export function usePlayerEvents(
         }
 
         const parsed =
-          adapter.parse(rawData);
+          adapter.parse(
+            rawData,
+          );
 
         if (!parsed) {
           return;
         }
 
-        /*
-         * Always trust the page metadata for
-         * identity when it is available.
-         *
-         * This prevents a provider from sending
-         * incomplete metadata and causing progress
-         * to be written under the wrong episode.
-         */
         const currentMetadata =
           metadataRef.current;
 
-        const normalized: UnifiedPlayerEventData =
-          {
-            ...parsed,
+        /*
+         * The RyuFlix page owns the identity.
+         * Provider metadata is only supplemental.
+         */
+        const normalized:
+          UnifiedPlayerEventData = {
+          ...parsed,
 
-            mediaId:
-              currentMetadata?.mediaId ??
-              parsed.mediaId,
+          mediaId:
+            currentMetadata?.mediaId ??
+            parsed.mediaId,
 
-            mediaType:
-              currentMetadata?.mediaType ??
-              parsed.mediaType,
+          mediaType:
+            currentMetadata?.mediaType ??
+            parsed.mediaType,
 
-            season:
-              currentMetadata?.season ??
-              parsed.season,
+          season:
+            currentMetadata?.season ??
+            parsed.season,
 
-            episode:
-              currentMetadata?.episode ??
-              parsed.episode,
-          };
+          episode:
+            currentMetadata?.episode ??
+            parsed.episode,
+        };
 
         const mediaIdentity = [
           normalized.mediaType,
@@ -945,6 +1034,22 @@ export function usePlayerEvents(
               .onPlay?.(
                 normalized,
               );
+
+            /*
+             * If this is the first useful
+             * position we have received,
+             * create the history record.
+             */
+            if (
+              normalized.currentTime >
+              0
+            ) {
+              maybeSaveProgress(
+                normalized,
+                true,
+              );
+            }
+
             break;
 
           case "pause":
@@ -957,6 +1062,7 @@ export function usePlayerEvents(
               normalized,
               true,
             );
+
             break;
 
           case "seeked":
@@ -969,6 +1075,7 @@ export function usePlayerEvents(
               normalized,
               true,
             );
+
             break;
 
           case "timeupdate":
@@ -980,6 +1087,7 @@ export function usePlayerEvents(
             maybeSaveProgress(
               normalized,
             );
+
             break;
         }
       };
@@ -997,7 +1105,6 @@ export function usePlayerEvents(
     };
   }, [
     maybeSaveProgress,
-    playerFrameRef,
     saveLocalProgress,
   ]);
 
@@ -1022,4 +1129,4 @@ export function usePlayerEvents(
 
     flushProgress,
   };
-      }
+}
