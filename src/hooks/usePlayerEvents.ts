@@ -5,6 +5,7 @@ import {
   saveWatchProgress,
 } from "@/utils/localStorage";
 import {
+  type RefObject,
   useCallback,
   useEffect,
   useRef,
@@ -60,41 +61,13 @@ const SUPPORTED_EVENTS: PlayerEventType[] = [
 
 const COMPLETION_THRESHOLD = 0.9;
 
-function normalizeEvent(
+function isRecord(
   value: unknown,
-): PlayerEventType | undefined {
-  if (
-    typeof value !== "string"
-  ) {
-    return undefined;
-  }
-
-  const normalized =
-    value
-      .trim()
-      .toLowerCase();
-
-  if (
-    normalized === "playing"
-  ) {
-    return "play";
-  }
-
-  if (
-    normalized === "progress"
-  ) {
-    return "timeupdate";
-  }
-
-  if (
-    SUPPORTED_EVENTS.includes(
-      normalized as PlayerEventType,
-    )
-  ) {
-    return normalized as PlayerEventType;
-  }
-
-  return undefined;
+): value is Record<string, any> {
+  return (
+    Boolean(value) &&
+    typeof value === "object"
+  );
 }
 
 function firstDefined<T>(
@@ -142,7 +115,7 @@ function toNumber(
 
 function parseMaybeJson(
   value: unknown,
-): any {
+): unknown {
   if (
     typeof value !== "string"
   ) {
@@ -156,66 +129,156 @@ function parseMaybeJson(
   }
 }
 
-function unwrapEventData(
-  raw: BasePlayerEventEnvelope<any>,
-): any {
-  let data =
-    parseMaybeJson(raw?.data);
+function normalizeEvent(
+  value: unknown,
+  hasTimingData = false,
+): PlayerEventType | undefined {
+  if (
+    typeof value !== "string"
+  ) {
+    return undefined;
+  }
+
+  const normalized =
+    value
+      .trim()
+      .toLowerCase();
+
+  if (
+    normalized === "play" ||
+    normalized === "playing" ||
+    normalized === "started" ||
+    normalized === "start" ||
+    normalized === "resume" ||
+    normalized === "resumed"
+  ) {
+    return "play";
+  }
+
+  if (
+    normalized === "pause" ||
+    normalized === "paused"
+  ) {
+    return "pause";
+  }
+
+  if (
+    normalized === "seeked" ||
+    normalized === "seek"
+  ) {
+    return "seeked";
+  }
+
+  if (
+    normalized === "ended" ||
+    normalized === "completed" ||
+    normalized === "complete" ||
+    normalized === "finished"
+  ) {
+    return "ended";
+  }
+
+  if (
+    normalized === "timeupdate" ||
+    normalized === "time_update" ||
+    normalized === "time-update"
+  ) {
+    return "timeupdate";
+  }
 
   /*
-   * Some providers send the actual event
-   * directly on event.data rather than inside
-   * a "data" property.
+   * Some providers call playback progress
+   * simply "progress". Only treat it as a
+   * playback event when actual timing data
+   * exists. This avoids confusing it with
+   * the browser's normal network-buffering
+   * progress concept.
    */
   if (
-    !data ||
-    typeof data !== "object"
+    normalized === "progress" &&
+    hasTimingData
+  ) {
+    return "timeupdate";
+  }
+
+  if (
+    SUPPORTED_EVENTS.includes(
+      normalized as PlayerEventType,
+    )
+  ) {
+    return normalized as PlayerEventType;
+  }
+
+  return undefined;
+}
+
+function unwrapEventData(
+  raw: BasePlayerEventEnvelope<any>,
+): Record<string, any> | null {
+  let data =
+    parseMaybeJson(
+      raw?.data,
+    );
+
+  /*
+   * Some providers send JSON directly
+   * as event.data rather than inside
+   * event.data.data.
+   */
+  if (
+    !isRecord(data)
   ) {
     data =
       parseMaybeJson(raw);
   }
 
   if (
-    !data ||
-    typeof data !== "object"
+    !isRecord(data)
   ) {
     return null;
   }
 
   /*
-   * Support:
+   * Walk through nested data wrappers.
    *
-   * { data: { ... } }
-   * { data: { data: { ... } } }
+   * Supported examples:
    *
-   * without requiring a particular envelope.
+   * {
+   *   data: {...}
+   * }
+   *
+   * {
+   *   data: {
+   *     data: {...}
+   *   }
+   * }
+   *
+   * {
+   *   data: {
+   *     data: {
+   *       data: {...}
+   *     }
+   *   }
+   * }
    */
-  let current = data;
+  let current =
+    data;
 
   for (
     let depth = 0;
-    depth < 3;
+    depth < 4;
     depth += 1
   ) {
     if (
-      current.data === undefined
-    ) {
-      break;
-    }
-
-    const nested =
-      parseMaybeJson(
+      !isRecord(
         current.data,
-      );
-
-    if (
-      !nested ||
-      typeof nested !== "object"
+      )
     ) {
       break;
     }
 
-    current = nested;
+    current =
+      current.data;
   }
 
   return current;
@@ -238,40 +301,34 @@ function parseGenericPlayerMessage(
     return null;
   }
 
-  const event =
-    normalizeEvent(
-      firstDefined(
-        data.event,
-        data.eventType,
-        data.event_type,
-        data.action,
-        data.name,
-        data.type,
-        raw.type,
-      ),
-    );
-
-  if (!event) {
-    return null;
-  }
+  /*
+   * VidSrc-style payload:
+   *
+   * data.player_info
+   * data.player_status
+   * data.player_progress
+   * data.player_duration
+   */
+  const playerInfo =
+    isRecord(
+      data.player_info,
+    )
+      ? data.player_info
+      : isRecord(
+            data.playerInfo,
+          )
+        ? data.playerInfo
+        : undefined;
 
   /*
-   * Provider identity is optional.
-   *
-   * RyuFlix already knows the authoritative
-   * movie/TV identity from the current page.
+   * Standard timing fields plus
+   * VidSrc-style fields and several
+   * common player.js-style fields.
    */
-  const mediaId =
-    firstDefined(
-      data.tmdbId,
-      data.tmdb_id,
-      data.mediaId,
-      data.media_id,
-      data.id,
-      data.videoId,
-      data.video_id,
-      data.mtmdbId,
-    ) ?? 0;
+  const value =
+    isRecord(data.value)
+      ? data.value
+      : undefined;
 
   const currentTime =
     toNumber(
@@ -284,6 +341,13 @@ function parseGenericPlayerMessage(
         data.seconds,
         data.currentTimeSeconds,
         data.current_time_seconds,
+
+        data.player_progress,
+
+        value?.currentTime,
+        value?.current_time,
+        value?.position,
+        value?.seconds,
       ),
     ) ?? 0;
 
@@ -296,6 +360,12 @@ function parseGenericPlayerMessage(
         data.length,
         data.videoDuration,
         data.video_duration,
+
+        data.player_duration,
+
+        value?.duration,
+        value?.totalDuration,
+        value?.total_duration,
       ),
     ) ?? 0;
 
@@ -305,8 +375,101 @@ function parseGenericPlayerMessage(
         data.progress,
         data.percent,
         data.percentage,
+
+        value?.progress,
+        value?.percent,
+        value?.percentage,
       ),
     );
+
+  const hasTimingData =
+    currentTime > 0 ||
+    duration > 0 ||
+    progress !== undefined;
+
+  /*
+   * Collect the event/status from all
+   * known naming conventions.
+   */
+  const eventCandidate =
+    firstDefined(
+      data.event,
+      data.eventType,
+      data.event_type,
+      data.action,
+      data.name,
+
+      data.player_status,
+      data.playerStatus,
+
+      data.status,
+      data.state,
+      data.playerState,
+
+      value?.event,
+      value?.eventType,
+      value?.status,
+      value?.state,
+
+      /*
+       * Some providers put the event
+       * directly in the outer envelope.
+       */
+      raw.type !==
+        "PLAYER_EVENT" &&
+        raw.type !==
+          "MEDIA_DATA"
+        ? raw.type
+        : undefined,
+    );
+
+  let event =
+    normalizeEvent(
+      eventCandidate,
+      hasTimingData,
+    );
+
+  /*
+   * If a provider gives us timing information
+   * but doesn't explicitly name the event,
+   * treat it as a timeupdate.
+   *
+   * This is important because the timing data
+   * itself is enough to save resume progress.
+   */
+  if (
+    !event &&
+    hasTimingData
+  ) {
+    event =
+      "timeupdate";
+  }
+
+  if (!event) {
+    return null;
+  }
+
+  /*
+   * Provider identity is optional because the
+   * current RyuFlix page already knows the
+   * authoritative TMDB/media identity.
+   */
+  const mediaId =
+    firstDefined(
+      data.mtmdbId,
+      data.tmdbId,
+      data.tmdb_id,
+      data.mediaId,
+      data.media_id,
+      data.id,
+      data.videoId,
+      data.video_id,
+
+      playerInfo?.tmdb,
+      playerInfo?.tmdbId,
+      playerInfo?.tmdb_id,
+      playerInfo?.id,
+    ) ?? 0;
 
   const mediaTypeRaw =
     firstDefined(
@@ -314,6 +477,10 @@ function parseGenericPlayerMessage(
       data.media_type,
       data.contentType,
       data.content_type,
+
+      playerInfo?.mediaType,
+      playerInfo?.media_type,
+
       data.type === "movie"
         ? "movie"
         : data.type === "tv"
@@ -333,6 +500,10 @@ function parseGenericPlayerMessage(
         data.seasonNumber,
         data.season_number,
         data.s,
+
+        playerInfo?.season,
+        playerInfo?.seasonNumber,
+        playerInfo?.season_number,
       ),
     );
 
@@ -343,35 +514,49 @@ function parseGenericPlayerMessage(
         data.episodeNumber,
         data.episode_number,
         data.e,
+
+        playerInfo?.episode,
+        playerInfo?.episodeNumber,
+        playerInfo?.episode_number,
       ),
     );
 
   /*
-   * Don't accept completely empty messages.
-   * A recognized playback event needs either
-   * timing information or an ended/play/pause
-   * signal.
+   * If a provider supplies only a percentage
+   * and no currentTime, recover the position
+   * from duration.
    */
-  const hasTimingData =
-    currentTime > 0 ||
-    duration > 0 ||
-    progress !== undefined;
+  let normalizedCurrentTime =
+    Math.max(
+      0,
+      currentTime,
+    );
 
   if (
-    !hasTimingData &&
-    event === "timeupdate"
+    normalizedCurrentTime <= 0 &&
+    duration > 0 &&
+    progress !== undefined
   ) {
-    return null;
+    const percentage =
+      progress > 1
+        ? progress / 100
+        : progress;
+
+    if (
+      percentage >= 0 &&
+      percentage <= 1
+    ) {
+      normalizedCurrentTime =
+        duration *
+        percentage;
+    }
   }
 
   return {
     event,
 
     currentTime:
-      Math.max(
-        0,
-        currentTime,
-      ),
+      normalizedCurrentTime,
 
     duration:
       Math.max(
@@ -398,8 +583,8 @@ function parseGenericPlayerMessage(
 }
 
 /*
- * These are the actual external iframe
- * origins currently used by players.ts.
+ * These are the external iframe origins
+ * currently used by players.ts.
  */
 const PLAYER_ORIGINS = [
   "https://vidlink.pro",
@@ -436,6 +621,11 @@ const PLAYER_ORIGINS = [
 
 export type PlayerOrigin =
   (typeof PLAYER_ORIGINS)[number];
+
+const PLAYER_ORIGIN_SET =
+  new Set<string>(
+    PLAYER_ORIGINS,
+  );
 
 export const playerAdapters =
   Object.fromEntries(
@@ -482,7 +672,7 @@ export interface UsePlayerEventsOptions {
 
   saveHistory?: boolean;
 
-  playerFrameRef?: React.RefObject<
+  playerFrameRef?: RefObject<
     HTMLIFrameElement | null
   >;
 
@@ -765,6 +955,12 @@ export function usePlayerEvents(
           return;
         }
 
+        /*
+         * Timeupdate events can be very frequent.
+         * Save roughly every 5 seconds of actual
+         * playback movement, while pause/seek/end
+         * events are allowed to force a save.
+         */
         if (
           !force &&
           Math.abs(
@@ -845,250 +1041,209 @@ export function usePlayerEvents(
 
   useEffect(() => {
     const handleMessage =
-      (event: MessageEvent) => {
-        const adapter =
-          Object.values(
-            playerAdapters,
-          ).find(
-            (candidate) =>
-              candidate.origin ===
-              event.origin,
+      (
+        event: MessageEvent,
+      ) => {
+        /*
+         * Trusted provider origin is the normal
+         * path.
+         */
+        const trustedOrigin =
+          PLAYER_ORIGIN_SET.has(
+            event.origin,
           );
 
-        if (!adapter) {
-          return;
-        }
-
         /*
-         * The origin allowlist above is the
-         * security boundary.
+         * If an embed navigates/redirects to
+         * another origin, the WindowProxy can
+         * still be the active iframe window.
          *
-         * Do NOT additionally require
-         * event.source === outer iframe.contentWindow.
-         *
-         * A provider may have its actual player
-         * inside another nested browsing context,
-         * in which case the nested window is the
-         * sender of the postMessage.
+         * Only accept an unknown origin through
+         * this path when we can verify that the
+         * message came from the iframe currently
+         * mounted by RyuFlix.
          */
-        let rawData: any;
+        const activeFrame =
+          playerFrameRef?.current;
 
-        try {
-          rawData =
-            typeof event.data ===
-            "string"
-              ? JSON.parse(
-                  event.data,
-                )
-              : event.data;
-        } catch {
-          return;
-        }
+        const activeFrameSource =
+          Boolean(
+            activeFrame &&
+              event.source ===
+                activeFrame.contentWindow,
+          );
 
         if (
-          !rawData ||
-          typeof rawData !==
-            "object"
+          !trustedOrigin &&
+          !activeFrameSource
         ) {
           return;
         }
 
-        const parsed =
-          adapter.parse(
-            rawData,
+        const rawData =
+          parseMaybeJson(
+            event.data,
           );
+
+        if (
+          !isRecord(rawData)
+        ) {
+          return;
+        }
+
+        const adapter =
+          trustedOrigin
+            ? playerAdapters[
+                event.origin
+              ]
+            : undefined;
+
+        let parsed =
+          adapter?.parse(
+            rawData,
+          ) ?? null;
+
+        /*
+         * Unknown-but-active iframe messages
+         * still use the same generic parser.
+         */
+        if (!parsed) {
+          parsed =
+            parseGenericPlayerMessage(
+              rawData,
+            );
+        }
 
         if (!parsed) {
           return;
         }
 
+        /*
+         * The page metadata is authoritative.
+         * Never let a provider accidentally save
+         * progress under another movie/episode.
+         */
         const currentMetadata =
           metadataRef.current;
 
-        /*
-         * The RyuFlix page owns the identity.
-         * Provider metadata is only supplemental.
-         */
-        const normalized:
-          UnifiedPlayerEventData = {
-          ...parsed,
+        const normalized: UnifiedPlayerEventData =
+          {
+            ...parsed,
 
-          mediaId:
-            currentMetadata?.mediaId ??
-            parsed.mediaId,
+            mediaId:
+              currentMetadata?.mediaId ??
+              parsed.mediaId,
 
-          mediaType:
-            currentMetadata?.mediaType ??
-            parsed.mediaType,
+            mediaType:
+              currentMetadata?.mediaType ??
+              parsed.mediaType,
 
-          season:
-            currentMetadata?.season ??
-            parsed.season,
+            season:
+              currentMetadata?.season ??
+              parsed.season,
 
-          episode:
-            currentMetadata?.episode ??
-            parsed.episode,
-        };
-
-        const mediaIdentity = [
-          normalized.mediaType,
-          normalized.mediaId,
-          normalized.season ?? "",
-          normalized.episode ?? "",
-        ].join(":");
-
-        if (
-          completionMediaIdentityRef.current !==
-            null &&
-          completionMediaIdentityRef.current !==
-            mediaIdentity
-        ) {
-          completionTriggeredRef.current =
-            false;
-
-          lastSavedPositionRef.current =
-            0;
-        }
-
-        completionMediaIdentityRef.current =
-          mediaIdentity;
+            episode:
+              currentMetadata?.episode ??
+              parsed.episode,
+          };
 
         eventDataRef.current =
           normalized;
 
-        if (
-          normalized.event ===
-          "timeupdate"
-        ) {
-          let progressRatio =
-            0;
-
-          if (
-            normalized.duration >
-            0
-          ) {
-            progressRatio =
-              normalized.currentTime /
-              normalized.duration;
-          } else if (
-            typeof normalized.progress ===
-            "number"
-          ) {
-            progressRatio =
-              normalized.progress >
-              1
-                ? normalized.progress /
-                  100
-                : normalized.progress;
-          }
-
-          if (
-            progressRatio >=
-              COMPLETION_THRESHOLD &&
-            !completionTriggeredRef.current
-          ) {
-            completionTriggeredRef.current =
-              true;
-
-            saveLocalProgress(
-              normalized,
-              true,
-            );
-
-            callbacksRef.current
-              .onEnded?.(
-                normalized,
-              );
-          }
-        }
-
-        if (
-          normalized.event ===
-          "ended"
-        ) {
-          if (
-            !completionTriggeredRef.current
-          ) {
-            completionTriggeredRef.current =
-              true;
-
-            saveLocalProgress(
-              normalized,
-              true,
-            );
-
-            callbacksRef.current
-              .onEnded?.(
-                normalized,
-              );
-          }
-
-          return;
-        }
+        const callbacks =
+          callbacksRef.current;
 
         switch (
           normalized.event
         ) {
           case "play":
-            callbacksRef.current
-              .onPlay?.(
-                normalized,
-              );
+            callbacks.onPlay?.(
+              normalized,
+            );
 
-            /*
-             * If this is the first useful
-             * position we have received,
-             * create the history record.
-             */
-            if (
-              normalized.currentTime >
-              0
-            ) {
-              maybeSaveProgress(
-                normalized,
-                true,
-              );
-            }
-
+            maybeSaveProgress(
+              normalized,
+            );
             break;
 
           case "pause":
-            callbacksRef.current
-              .onPause?.(
-                normalized,
-              );
+            callbacks.onPause?.(
+              normalized,
+            );
 
             maybeSaveProgress(
               normalized,
               true,
             );
-
             break;
 
           case "seeked":
-            callbacksRef.current
-              .onSeeked?.(
-                normalized,
-              );
+            callbacks.onSeeked?.(
+              normalized,
+            );
 
             maybeSaveProgress(
               normalized,
               true,
             );
-
             break;
 
           case "timeupdate":
-            callbacksRef.current
-              .onTimeUpdate?.(
-                normalized,
-              );
-
-            maybeSaveProgress(
+            callbacks.onTimeUpdate?.(
               normalized,
             );
 
+            /*
+             * A provider can report progress
+             * through timeupdate only.
+             */
+            maybeSaveProgress(
+              normalized,
+            );
             break;
+
+          case "ended":
+            if (
+              !completionTriggeredRef.current
+            ) {
+              completionTriggeredRef.current =
+                true;
+
+              saveLocalProgress(
+                normalized,
+                true,
+              );
+
+              callbacks.onEnded?.(
+                normalized,
+              );
+            }
+            break;
+        }
+
+        /*
+         * Keep the existing 90% completion
+         * fallback for providers that never
+         * emit a proper ended event.
+         */
+        if (
+          normalized.duration > 0 &&
+          normalized.currentTime >=
+            normalized.duration *
+              COMPLETION_THRESHOLD &&
+          !completionTriggeredRef.current
+        ) {
+          completionTriggeredRef.current =
+            true;
+
+          saveLocalProgress(
+            normalized,
+            true,
+          );
+
+          callbacks.onEnded?.(
+            normalized,
+          );
         }
       };
 
@@ -1105,28 +1260,12 @@ export function usePlayerEvents(
     };
   }, [
     maybeSaveProgress,
+    playerFrameRef,
     saveLocalProgress,
   ]);
 
   return {
-    isPlaying:
-      eventDataRef.current
-        ?.event === "play",
-
-    currentTime:
-      eventDataRef.current
-        ?.currentTime ?? 0,
-
-    duration:
-      eventDataRef.current
-        ?.duration ?? 0,
-
-    lastEvent:
-      eventDataRef.current
-        ?.event ?? null,
-
     getCurrentTime,
-
     flushProgress,
   };
-}
+  }
