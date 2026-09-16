@@ -18,7 +18,10 @@ export type PlayerEventType =
   | "timeupdate";
 
 export interface BasePlayerEventEnvelope<T = any> {
-  type: "PLAYER_EVENT" | "MEDIA_DATA" | string;
+  type:
+    | "PLAYER_EVENT"
+    | "MEDIA_DATA"
+    | string;
   data: T;
 }
 
@@ -55,12 +58,6 @@ const SUPPORTED_EVENTS: PlayerEventType[] = [
   "timeupdate",
 ];
 
-/*
- * Consider an item completed once playback reaches 90%.
- *
- * This is primarily a fallback for providers that do not
- * reliably send an "ended" event.
- */
 const COMPLETION_THRESHOLD = 0.9;
 
 function isPlayerEvent(
@@ -84,18 +81,47 @@ function firstDefined<T>(
   ) as T | undefined;
 }
 
-function parseGenericPlayerMessage(
-  raw: BasePlayerEventEnvelope<any>,
-): UnifiedPlayerEventData | null {
+function toNumber(
+  value: unknown,
+): number | undefined {
   if (
-    !raw ||
-    typeof raw !== "object" ||
-    raw.type !== "PLAYER_EVENT"
+    typeof value === "number" &&
+    Number.isFinite(value)
   ) {
-    return null;
+    return value;
   }
 
-  const data = raw.data;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const parsed = Number(trimmed);
+
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function unwrapEventData(
+  raw: BasePlayerEventEnvelope<any>,
+): any {
+  let data = raw?.data;
+
+  if (
+    typeof data === "string"
+  ) {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
 
   if (
     !data ||
@@ -104,28 +130,64 @@ function parseGenericPlayerMessage(
     return null;
   }
 
-  const event = firstDefined<string>(
+  if (
+    data.data &&
+    typeof data.data === "object" &&
+    !data.event &&
+    !data.eventType &&
+    !data.action
+  ) {
+    return data.data;
+  }
+
+  return data;
+}
+
+function parseGenericPlayerMessage(
+  raw: BasePlayerEventEnvelope<any>,
+): UnifiedPlayerEventData | null {
+  if (
+    !raw ||
+    typeof raw !== "object"
+  ) {
+    return null;
+  }
+
+  const data =
+    unwrapEventData(raw);
+
+  if (!data) {
+    return null;
+  }
+
+  const eventRaw = firstDefined(
     data.event,
     data.eventType,
+    data.event_type,
     data.action,
+    data.name,
   );
+
+  const event =
+    typeof eventRaw === "string"
+      ? eventRaw.toLowerCase()
+      : undefined;
 
   if (!isPlayerEvent(event)) {
     return null;
   }
 
-  const mediaId = firstDefined<
-    string | number
-  >(
-    data.mtmdbId,
-    data.tmdbId,
-    data.tmdb_id,
-    data.mediaId,
-    data.media_id,
-    data.id,
-    data.videoId,
-    data.video_id,
-  );
+  const mediaId =
+    firstDefined(
+      data.mtmdbId,
+      data.tmdbId,
+      data.tmdb_id,
+      data.mediaId,
+      data.media_id,
+      data.id,
+      data.videoId,
+      data.video_id,
+    );
 
   if (
     mediaId === undefined ||
@@ -134,41 +196,43 @@ function parseGenericPlayerMessage(
     return null;
   }
 
-  const currentTimeRaw =
-    firstDefined<number>(
-      data.currentTime,
-      data.current_time,
-      data.position,
-      data.time,
-    );
-
-  const durationRaw =
-    firstDefined<number>(
-      data.duration,
-      data.totalDuration,
-      data.total_duration,
-    );
-
-  const progressRaw =
-    firstDefined<number>(
-      data.progress,
-      data.percent,
-    );
-
   const currentTime =
-    typeof currentTimeRaw === "number"
-      ? currentTimeRaw
-      : 0;
+    toNumber(
+      firstDefined(
+        data.currentTime,
+        data.current_time,
+        data.position,
+        data.current,
+        data.time,
+        data.seconds,
+      ),
+    ) ?? 0;
 
   const duration =
-    typeof durationRaw === "number"
-      ? durationRaw
-      : 0;
+    toNumber(
+      firstDefined(
+        data.duration,
+        data.totalDuration,
+        data.total_duration,
+        data.length,
+      ),
+    ) ?? 0;
 
-  const mediaType =
-    firstDefined<ContentType>(
+  const progress =
+    toNumber(
+      firstDefined(
+        data.progress,
+        data.percent,
+        data.percentage,
+      ),
+    );
+
+  const mediaTypeRaw =
+    firstDefined(
       data.mediaType,
       data.media_type,
+      data.contentType,
+      data.content_type,
       data.type === "movie"
         ? "movie"
         : data.type === "tv"
@@ -176,9 +240,35 @@ function parseGenericPlayerMessage(
           : undefined,
     );
 
+  const mediaType =
+    mediaTypeRaw === "movie" ||
+    mediaTypeRaw === "tv"
+      ? mediaTypeRaw
+      : undefined;
+
   if (!mediaType) {
     return null;
   }
+
+  const season =
+    toNumber(
+      firstDefined(
+        data.season,
+        data.seasonNumber,
+        data.season_number,
+        data.s,
+      ),
+    );
+
+  const episode =
+    toNumber(
+      firstDefined(
+        data.episode,
+        data.episodeNumber,
+        data.episode_number,
+        data.e,
+      ),
+    );
 
   return {
     event,
@@ -197,34 +287,27 @@ function parseGenericPlayerMessage(
 
     mediaType,
 
-    season:
-      typeof data.season === "number"
-        ? data.season
-        : undefined,
+    season,
 
-    episode:
-      typeof data.episode === "number"
-        ? data.episode
-        : undefined,
+    episode,
 
     progress:
-      typeof progressRaw === "number"
-        ? progressRaw
+      progress !== undefined
+        ? Math.max(0, progress)
         : undefined,
   };
 }
 
 /*
- * Current RyuFlixx providers.
- *
- * VidKing is intentionally NOT included.
+ * These are the actual external iframe origins
+ * currently used by players.ts.
  */
 const PLAYER_ORIGINS = [
   "https://vidlink.pro",
-  "https://vidlink.pro",
 
-  "https://www.2embed.cc",
-  "https://2embed.cc",
+  "https://embed.filmu.in",
+
+  "https://vidsrc.in",
 
   "https://multiembed.mov",
 
@@ -243,6 +326,9 @@ const PLAYER_ORIGINS = [
   "https://player.videasy.to",
 
   "https://filmku.stream",
+
+  "https://www.2embed.cc",
+  "https://2embed.cc",
 
   "https://vidsrc.ru",
   "https://vidsrc.su",
@@ -297,10 +383,6 @@ export interface UsePlayerEventsOptions {
 
   saveHistory?: boolean;
 
-  /*
-   * Ref to the iframe currently controlled by
-   * WatchPlayer.
-   */
   playerFrameRef?: React.RefObject<
     HTMLIFrameElement | null
   >;
@@ -363,32 +445,54 @@ export function usePlayerEvents(
   const lastSavedPositionRef =
     useRef(0);
 
-  /*
-   * Prevent the completion threshold from
-   * firing more than once for the same
-   * movie/episode.
-   */
   const completionTriggeredRef =
     useRef(false);
 
-  /*
-   * Track which movie/episode the completion
-   * state belongs to.
-   *
-   * Next.js can keep the same player component
-   * mounted while navigating between episodes.
-   */
   const completionMediaIdentityRef =
     useRef<string | null>(null);
 
   useEffect(() => {
-    metadataRef.current = metadata;
-  }, [metadata]);
+    metadataRef.current =
+      metadata;
+
+    /*
+     * Reset the cached event when the
+     * actual media/episode changes.
+     */
+    const identity = [
+      metadata?.mediaType ?? "",
+      metadata?.mediaId ?? "",
+      metadata?.season ?? "",
+      metadata?.episode ?? "",
+    ].join(":");
+
+    if (
+      identity &&
+      completionMediaIdentityRef.current !==
+        identity
+    ) {
+      completionMediaIdentityRef.current =
+        identity;
+
+      completionTriggeredRef.current =
+        false;
+
+      lastSavedPositionRef.current =
+        0;
+
+      eventDataRef.current =
+        null;
+    }
+  }, [
+    metadata,
+  ]);
 
   useEffect(() => {
     saveHistoryRef.current =
       saveHistory;
-  }, [saveHistory]);
+  }, [
+    saveHistory,
+  ]);
 
   useEffect(() => {
     callbacksRef.current = {
@@ -406,165 +510,123 @@ export function usePlayerEvents(
     onTimeUpdate,
   ]);
 
-  /*
-   * Save progress locally.
-   */
-  const saveLocalProgress = useCallback(
-    (
-      data: UnifiedPlayerEventData,
-      completed = false,
-    ) => {
-      if (!saveHistoryRef.current) {
-        return;
-      }
+  const saveLocalProgress =
+    useCallback(
+      (
+        data: UnifiedPlayerEventData,
+        completed = false,
+      ) => {
+        if (
+          !saveHistoryRef.current
+        ) {
+          return;
+        }
 
-      const currentMetadata =
-        metadataRef.current;
+        const currentMetadata =
+          metadataRef.current;
 
-      const mediaId =
-        Number(data.mediaId);
+        const mediaId =
+          Number(
+            currentMetadata?.mediaId ??
+              data.mediaId,
+          );
 
-      if (
-        !Number.isFinite(mediaId) ||
-        mediaId <= 0
-      ) {
-        return;
-      }
+        if (
+          !Number.isFinite(mediaId) ||
+          mediaId <= 0
+        ) {
+          return;
+        }
 
-      const mediaType =
-        currentMetadata?.mediaType ??
-        data.mediaType;
+        const mediaType =
+          currentMetadata?.mediaType ??
+          data.mediaType;
 
-      const title =
-        currentMetadata?.title;
+        const title =
+          currentMetadata?.title;
 
-      const backdropPath =
-        currentMetadata?.backdrop_path;
+        const backdropPath =
+          currentMetadata?.backdrop_path;
 
-      const releaseDate =
-        currentMetadata?.release_date;
+        const releaseDate =
+          currentMetadata?.release_date;
 
-      const voteAverage =
-        currentMetadata?.vote_average;
+        const voteAverage =
+          currentMetadata?.vote_average;
 
-      if (
-        !title ||
-        backdropPath === undefined ||
-        releaseDate === undefined ||
-        voteAverage === undefined
-      ) {
-        return;
-      }
+        if (
+          !title ||
+          backdropPath === undefined ||
+          releaseDate === undefined ||
+          voteAverage === undefined
+        ) {
+          return;
+        }
 
-      const season =
-        data.season ??
-        currentMetadata?.season;
+        const season =
+          currentMetadata?.season ??
+          data.season;
 
-      const episode =
-        data.episode ??
-        currentMetadata?.episode;
+        const episode =
+          currentMetadata?.episode ??
+          data.episode;
 
-      saveWatchProgress(
-        {
-          mediaId,
-          mediaType,
+        const currentTime =
+          Number.isFinite(
+            data.currentTime,
+          )
+            ? Math.max(
+                0,
+                data.currentTime,
+              )
+            : 0;
 
-          title,
+        const duration =
+          Number.isFinite(
+            data.duration,
+          )
+            ? Math.max(
+                0,
+                data.duration,
+              )
+            : 0;
 
-          backdrop_path:
-            backdropPath,
+        saveWatchProgress(
+          {
+            mediaId,
+            mediaType,
 
-          poster_path:
-            currentMetadata?.poster_path,
+            title,
 
-          release_date:
-            releaseDate,
+            backdrop_path:
+              backdropPath,
 
-          vote_average:
-            voteAverage,
+            poster_path:
+              currentMetadata?.poster_path,
 
-          season,
-          episode,
-        },
+            release_date:
+              releaseDate,
 
-        data.currentTime,
-        data.duration,
-        completed,
-      );
+            vote_average:
+              voteAverage,
 
-      lastSavedPositionRef.current =
-        data.currentTime;
-    },
-    [],
-  );
+            season,
+            episode,
+          },
 
-  /*
-   * Force-save the latest known event.
-   */
-  const flushProgress = useCallback(() => {
-    const latest =
-      eventDataRef.current;
+          currentTime,
+          duration,
+          completed,
+        );
 
-    if (!latest) {
-      return;
-    }
-
-    saveLocalProgress(
-      latest,
-      latest.event === "ended",
+        lastSavedPositionRef.current =
+          currentTime;
+      },
+      [],
     );
-  }, [saveLocalProgress]);
 
-  /*
-   * Current playback position.
-   */
-  const getCurrentTime = useCallback(() => {
-    const latest =
-      eventDataRef.current;
-
-    if (!latest) {
-      return 0;
-    }
-
-    return Math.max(
-      0,
-      latest.currentTime,
-    );
-  }, []);
-
-  /*
-   * Save timeupdate events periodically.
-   */
-  const maybeSaveProgress = useCallback(
-    (
-      data: UnifiedPlayerEventData,
-      force = false,
-    ) => {
-      if (!saveHistoryRef.current) {
-        return;
-      }
-
-      if (
-        !force &&
-        Math.abs(
-          data.currentTime -
-            lastSavedPositionRef.current,
-        ) < 5
-      ) {
-        return;
-      }
-
-      saveLocalProgress(data);
-    },
-    [saveLocalProgress],
-  );
-
-  /*
-   * Save when the page becomes hidden
-   * or closes.
-   */
-  useEffect(() => {
-    const saveLatestProgress = () => {
+  const flushProgress =
+    useCallback(() => {
       const latest =
         eventDataRef.current;
 
@@ -576,7 +638,63 @@ export function usePlayerEvents(
         latest,
         latest.event === "ended",
       );
-    };
+    }, [
+      saveLocalProgress,
+    ]);
+
+  const getCurrentTime =
+    useCallback(() => {
+      return Math.max(
+        0,
+        eventDataRef.current
+          ?.currentTime ?? 0,
+      );
+    }, []);
+
+  const maybeSaveProgress =
+    useCallback(
+      (
+        data: UnifiedPlayerEventData,
+        force = false,
+      ) => {
+        if (
+          !saveHistoryRef.current
+        ) {
+          return;
+        }
+
+        if (
+          !force &&
+          Math.abs(
+            data.currentTime -
+              lastSavedPositionRef.current,
+          ) < 5
+        ) {
+          return;
+        }
+
+        saveLocalProgress(data);
+      },
+      [
+        saveLocalProgress,
+      ],
+    );
+
+  useEffect(() => {
+    const saveLatestProgress =
+      () => {
+        const latest =
+          eventDataRef.current;
+
+        if (!latest) {
+          return;
+        }
+
+        saveLocalProgress(
+          latest,
+          latest.event === "ended",
+        );
+      };
 
     const handleVisibilityChange =
       () => {
@@ -588,13 +706,24 @@ export function usePlayerEvents(
         }
       };
 
-    const handleBeforeUnload = () => {
-      saveLatestProgress();
-    };
+    const handlePageHide =
+      () => {
+        saveLatestProgress();
+      };
+
+    const handleBeforeUnload =
+      () => {
+        saveLatestProgress();
+      };
 
     document.addEventListener(
       "visibilitychange",
       handleVisibilityChange,
+    );
+
+    window.addEventListener(
+      "pagehide",
+      handlePageHide,
     );
 
     window.addEventListener(
@@ -611,261 +740,249 @@ export function usePlayerEvents(
       );
 
       window.removeEventListener(
+        "pagehide",
+        handlePageHide,
+      );
+
+      window.removeEventListener(
         "beforeunload",
         handleBeforeUnload,
       );
     };
-  }, [saveLocalProgress]);
+  }, [
+    saveLocalProgress,
+  ]);
 
-  /*
-   * Listen for PLAYER_EVENT messages.
-   */
   useEffect(() => {
-    const handleMessage = (
-      event: MessageEvent,
-    ) => {
-      /*
-       * Only accept messages from one of
-       * the providers we actually use.
-       */
-      const adapter =
-        Object.values(
-          playerAdapters,
-        ).find(
-          (candidate) =>
-            candidate.origin ===
-            event.origin,
-        );
+    const handleMessage =
+      (event: MessageEvent) => {
+        const adapter =
+          Object.values(
+            playerAdapters,
+          ).find(
+            (candidate) =>
+              candidate.origin ===
+              event.origin,
+          );
 
-      if (!adapter) {
-        return;
-      }
+        if (!adapter) {
+          return;
+        }
 
-      /*
-       * Make sure the message came from
-       * the active iframe.
-       */
-      const activeFrame =
-        playerFrameRef?.current;
+        const activeFrame =
+          playerFrameRef?.current;
 
-      if (
-        activeFrame &&
-        event.source !==
-          activeFrame.contentWindow
-      ) {
-        return;
-      }
+        if (
+          activeFrame &&
+          event.source !==
+            activeFrame.contentWindow
+        ) {
+          return;
+        }
 
-      let rawData: any;
+        let rawData: any;
 
-      try {
-        rawData =
-          typeof event.data ===
-          "string"
-            ? JSON.parse(event.data)
-            : event.data;
-      } catch {
-        return;
-      }
+        try {
+          rawData =
+            typeof event.data ===
+            "string"
+              ? JSON.parse(
+                  event.data,
+                )
+              : event.data;
+        } catch {
+          return;
+        }
 
-      if (
-        !rawData ||
-        typeof rawData !== "object"
-      ) {
-        return;
-      }
+        if (
+          !rawData ||
+          typeof rawData !==
+            "object"
+        ) {
+          return;
+        }
 
-      const parsed =
-        adapter.parse(rawData);
+        const parsed =
+          adapter.parse(rawData);
 
-      if (!parsed) {
-        return;
-      }
-
-      /*
-       * ----------------------------------------------------
-       * MEDIA / EPISODE IDENTITY RESET
-       * ----------------------------------------------------
-       *
-       * The same player component can survive navigation
-       * from one episode to another.
-       *
-       * If episode 1 reaches 90%, completionTriggeredRef
-       * becomes true. Without resetting it, episode 2
-       * could never trigger its own completion callback.
-       *
-       * The identity includes:
-       *
-       *   media type
-       *   media ID
-       *   season
-       *   episode
-       *
-       * Therefore every distinct movie or episode gets
-       * its own completion state.
-       */
-      const mediaIdentity = [
-        parsed.mediaType,
-        parsed.mediaId,
-        parsed.season ?? "",
-        parsed.episode ?? "",
-      ].join(":");
-
-      if (
-        completionMediaIdentityRef.current !==
-          null &&
-        completionMediaIdentityRef.current !==
-          mediaIdentity
-      ) {
-        completionTriggeredRef.current =
-          false;
+        if (!parsed) {
+          return;
+        }
 
         /*
-         * A new movie/episode should start
-         * with its own progress baseline.
+         * Always trust the page metadata for
+         * identity when it is available.
+         *
+         * This prevents a provider from sending
+         * incomplete metadata and causing progress
+         * to be written under the wrong episode.
          */
-        lastSavedPositionRef.current =
-          0;
-      }
+        const currentMetadata =
+          metadataRef.current;
 
-      completionMediaIdentityRef.current =
-        mediaIdentity;
+        const normalized: UnifiedPlayerEventData =
+          {
+            ...parsed,
 
-      eventDataRef.current =
-        parsed;
+            mediaId:
+              currentMetadata?.mediaId ??
+              parsed.mediaId,
 
-      /*
-       * ----------------------------------------------------
-       * COMPLETION THRESHOLD
-       * ----------------------------------------------------
-       *
-       * Providers sometimes fail to emit "ended".
-       *
-       * When a timeupdate gives us a real duration and
-       * playback reaches 90%, mark the item completed
-       * and invoke the exact same callback used by
-       * a genuine "ended" event.
-       *
-       * We deliberately only trigger this on timeupdate,
-       * so simply seeking/pause won't accidentally finish
-       * an episode.
-       */
-      if (
-        parsed.event ===
-        "timeupdate"
-      ) {
-        let progressRatio = 0;
+            mediaType:
+              currentMetadata?.mediaType ??
+              parsed.mediaType,
 
-        if (parsed.duration > 0) {
-          progressRatio =
-            parsed.currentTime /
-            parsed.duration;
-        } else if (
-          typeof parsed.progress ===
-          "number"
+            season:
+              currentMetadata?.season ??
+              parsed.season,
+
+            episode:
+              currentMetadata?.episode ??
+              parsed.episode,
+          };
+
+        const mediaIdentity = [
+          normalized.mediaType,
+          normalized.mediaId,
+          normalized.season ?? "",
+          normalized.episode ?? "",
+        ].join(":");
+
+        if (
+          completionMediaIdentityRef.current !==
+            null &&
+          completionMediaIdentityRef.current !==
+            mediaIdentity
         ) {
-          /*
-           * Providers may report progress as either:
-           *
-           *   0.0 - 1.0
-           *
-           * or
-           *
-           *   0 - 100
-           */
-          progressRatio =
-            parsed.progress > 1
-              ? parsed.progress / 100
-              : parsed.progress;
+          completionTriggeredRef.current =
+            false;
+
+          lastSavedPositionRef.current =
+            0;
+        }
+
+        completionMediaIdentityRef.current =
+          mediaIdentity;
+
+        eventDataRef.current =
+          normalized;
+
+        if (
+          normalized.event ===
+          "timeupdate"
+        ) {
+          let progressRatio =
+            0;
+
+          if (
+            normalized.duration >
+            0
+          ) {
+            progressRatio =
+              normalized.currentTime /
+              normalized.duration;
+          } else if (
+            typeof normalized.progress ===
+            "number"
+          ) {
+            progressRatio =
+              normalized.progress >
+              1
+                ? normalized.progress /
+                  100
+                : normalized.progress;
+          }
+
+          if (
+            progressRatio >=
+              COMPLETION_THRESHOLD &&
+            !completionTriggeredRef.current
+          ) {
+            completionTriggeredRef.current =
+              true;
+
+            saveLocalProgress(
+              normalized,
+              true,
+            );
+
+            callbacksRef.current
+              .onEnded?.(
+                normalized,
+              );
+          }
         }
 
         if (
-          progressRatio >=
-            COMPLETION_THRESHOLD &&
-          !completionTriggeredRef.current
+          normalized.event ===
+          "ended"
         ) {
-          completionTriggeredRef.current =
-            true;
+          if (
+            !completionTriggeredRef.current
+          ) {
+            completionTriggeredRef.current =
+              true;
 
-          /*
-           * Save completed=true BEFORE
-           * triggering navigation.
-           */
-          saveLocalProgress(
-            parsed,
-            true,
-          );
+            saveLocalProgress(
+              normalized,
+              true,
+            );
 
-          /*
-           * Reuse the existing onEnded
-           * callback. The TV player already
-           * contains the next-episode logic.
-           */
-          callbacksRef.current
-            .onEnded?.(parsed);
-        }
-      }
+            callbacksRef.current
+              .onEnded?.(
+                normalized,
+              );
+          }
 
-      /*
-       * Real provider ended event.
-       */
-      if (
-        parsed.event === "ended"
-      ) {
-        if (
-          !completionTriggeredRef.current
-        ) {
-          completionTriggeredRef.current =
-            true;
-
-          saveLocalProgress(
-            parsed,
-            true,
-          );
-
-          callbacksRef.current
-            .onEnded?.(parsed);
+          return;
         }
 
-        return;
-      }
+        switch (
+          normalized.event
+        ) {
+          case "play":
+            callbacksRef.current
+              .onPlay?.(
+                normalized,
+              );
+            break;
 
-      switch (parsed.event) {
-        case "play":
-          callbacksRef.current
-            .onPlay?.(parsed);
-          break;
+          case "pause":
+            callbacksRef.current
+              .onPause?.(
+                normalized,
+              );
 
-        case "pause":
-          callbacksRef.current
-            .onPause?.(parsed);
+            maybeSaveProgress(
+              normalized,
+              true,
+            );
+            break;
 
-          maybeSaveProgress(
-            parsed,
-            true,
-          );
-          break;
+          case "seeked":
+            callbacksRef.current
+              .onSeeked?.(
+                normalized,
+              );
 
-        case "seeked":
-          callbacksRef.current
-            .onSeeked?.(parsed);
+            maybeSaveProgress(
+              normalized,
+              true,
+            );
+            break;
 
-          maybeSaveProgress(
-            parsed,
-            true,
-          );
-          break;
+          case "timeupdate":
+            callbacksRef.current
+              .onTimeUpdate?.(
+                normalized,
+              );
 
-        case "timeupdate":
-          callbacksRef.current
-            .onTimeUpdate?.(parsed);
-
-          maybeSaveProgress(
-            parsed,
-          );
-          break;
-      }
-    };
+            maybeSaveProgress(
+              normalized,
+            );
+            break;
+        }
+      };
 
     window.addEventListener(
       "message",
@@ -886,8 +1003,8 @@ export function usePlayerEvents(
 
   return {
     isPlaying:
-      eventDataRef.current?.event ===
-      "play",
+      eventDataRef.current
+        ?.event === "play",
 
     currentTime:
       eventDataRef.current
@@ -905,4 +1022,4 @@ export function usePlayerEvents(
 
     flushProgress,
   };
-  }
+      }
