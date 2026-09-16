@@ -6,8 +6,8 @@ const withPWA = withPWAInit({
   register: true,
   disable: process.env.NODE_ENV === "development",
   reloadOnOnline: true,
-  cacheOnFrontEndNav: true,
-  aggressiveFrontEndNavCaching: true,
+  cacheOnFrontEndNav: false,
+  aggressiveFrontEndNavCaching: false,
   workboxOptions: {
     disableDevLogs: true,
   },
@@ -16,10 +16,20 @@ const withPWA = withPWAInit({
 const nextConfig: NextConfig = {
   // https://github.com/payloadcms/payload/issues/12550#issuecomment-2939070941
   turbopack: {
-    resolveExtensions: [".mdx", ".tsx", ".ts", ".jsx", ".js", ".mjs", ".json"],
+    resolveExtensions: [
+      ".mdx",
+      ".tsx",
+      ".ts",
+      ".jsx",
+      ".js",
+      ".mjs",
+      ".json",
+    ],
   },
   experimental: {
-    optimizePackageImports: ["@heroui/react"],
+    optimizePackageImports: [
+      "@heroui/react",
+    ],
     prefetchInlining: true,
   },
 };
