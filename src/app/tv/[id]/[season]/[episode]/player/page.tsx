@@ -16,12 +16,24 @@ const TvShowPlayer = dynamic(
 
 const TvShowPlayerPage: NextPage<
   Params<{
-    id: number;
-    season: number;
-    episode: number;
+    id: string;
+    season: string;
+    episode: string;
   }>
 > = ({ params }) => {
-  const { id, season, episode } = use(params);
+  const routeParams = use(params);
+
+  const id = Number(routeParams.id);
+  const season = Number(routeParams.season);
+  const episode = Number(routeParams.episode);
+
+  const validParams =
+    Number.isInteger(id) &&
+    id > 0 &&
+    Number.isInteger(season) &&
+    season > 0 &&
+    Number.isInteger(episode) &&
+    episode > 0;
 
   const {
     data: tv,
@@ -30,6 +42,7 @@ const TvShowPlayerPage: NextPage<
   } = useQuery({
     queryFn: () => tmdb.tvShows.details(id),
     queryKey: ["tv-show-player-details", id],
+    enabled: validParams,
   });
 
   const {
@@ -37,17 +50,45 @@ const TvShowPlayerPage: NextPage<
     isPending: isPendingSeason,
     error: errorSeason,
   } = useQuery({
-    queryFn: () => tmdb.tvShows.season(id, season),
-    queryKey: ["tv-show-season", id, season],
+    queryFn: () =>
+      tmdb.tvShows.season(id, season),
+    queryKey: [
+      "tv-show-season",
+      id,
+      season,
+    ],
+    enabled: validParams,
   });
 
   const [startAt, setStartAt] = useState(0);
 
   useEffect(() => {
-    setStartAt(getTvShowLastPosition(id, season, episode));
-  }, [id, season, episode]);
+    if (!validParams) {
+      return;
+    }
 
-  if (isPendingTv || isPendingSeason) {
+    setStartAt(
+      getTvShowLastPosition(
+        id,
+        season,
+        episode,
+      ),
+    );
+  }, [
+    id,
+    season,
+    episode,
+    validParams,
+  ]);
+
+  if (!validParams) {
+    return notFound();
+  }
+
+  if (
+    isPendingTv ||
+    isPendingSeason
+  ) {
     return (
       <Spinner
         size="lg"
@@ -58,14 +99,21 @@ const TvShowPlayerPage: NextPage<
     );
   }
 
-  if (!seasonDetail || !tv || errorTv || errorSeason) {
+  if (
+    !seasonDetail ||
+    !tv ||
+    errorTv ||
+    errorSeason
+  ) {
     return notFound();
   }
 
-  const EPISODE = seasonDetail.episodes.find(
-    (entry) =>
-      entry.episode_number.toString() === episode.toString(),
-  );
+  const EPISODE =
+    seasonDetail.episodes.find(
+      (entry) =>
+        entry.episode_number ===
+        episode,
+    );
 
   if (!EPISODE) {
     return notFound();
@@ -81,81 +129,106 @@ const TvShowPlayerPage: NextPage<
     return notFound();
   }
 
-  const currentEpisodeIndex = seasonDetail.episodes.findIndex(
-    (entry) =>
-      entry.episode_number === EPISODE.episode_number,
-  );
+  const currentEpisodeIndex =
+    seasonDetail.episodes.findIndex(
+      (entry) =>
+        entry.episode_number ===
+        EPISODE.episode_number,
+    );
 
   /*
-   * Find the next RELEASED episode in the current season.
+   * Find the next RELEASED episode in
+   * the current season.
    *
-   * We don't simply use index + 1 because the next episode
-   * may exist in TMDB but have a future air date.
+   * We don't simply use index + 1 because
+   * the next episode may exist in TMDB but
+   * have a future air date.
    */
   const sameSeasonNextEpisode =
     seasonDetail.episodes
-      .slice(currentEpisodeIndex + 1)
+      .slice(
+        currentEpisodeIndex + 1,
+      )
       .filter(
         (entry) =>
           entry.air_date &&
-          new Date(entry.air_date) <= now,
+          new Date(entry.air_date) <=
+            now,
       )
       .sort(
         (a, b) =>
-          a.episode_number - b.episode_number,
+          a.episode_number -
+          b.episode_number,
       )[0] ?? null;
 
   /*
-   * Find the previous RELEASED episode in the current season.
+   * Find the previous RELEASED episode
+   * in the current season.
    */
   const sameSeasonPreviousEpisode =
     seasonDetail.episodes
-      .slice(0, currentEpisodeIndex)
+      .slice(
+        0,
+        currentEpisodeIndex,
+      )
       .filter(
         (entry) =>
           entry.air_date &&
-          new Date(entry.air_date) <= now,
+          new Date(entry.air_date) <=
+            now,
       )
       .sort(
         (a, b) =>
-          b.episode_number - a.episode_number,
+          b.episode_number -
+          a.episode_number,
       )[0] ?? null;
 
   /*
-   * We only need the next season when there isn't
-   * another released episode in this season.
+   * We only need the next season when
+   * there isn't another released episode
+   * in this season.
    */
   const hasNextSeason =
     !sameSeasonNextEpisode &&
-    season < (tv.number_of_seasons ?? 0);
+    season <
+      (tv.number_of_seasons ?? 0);
 
   const {
     data: nextSeasonDetail,
     isPending: isPendingNextSeason,
   } = useQuery({
     queryFn: () =>
-      tmdb.tvShows.season(id, season + 1),
+      tmdb.tvShows.season(
+        id,
+        season + 1,
+      ),
     queryKey: [
       "tv-show-next-season",
       id,
       season + 1,
     ],
-    enabled: hasNextSeason,
+    enabled:
+      validParams &&
+      hasNextSeason,
   });
 
   /*
-   * First RELEASED episode of the next season.
+   * First RELEASED episode of the
+   * next season.
    *
-   * Sorting makes this reliable even if TMDB doesn't return
-   * episodes in perfect numerical order.
+   * Sorting makes this reliable even if
+   * TMDB doesn't return episodes in
+   * perfect numerical order.
    */
   const nextSeasonEpisode =
-    hasNextSeason && nextSeasonDetail?.episodes
+    hasNextSeason &&
+    nextSeasonDetail?.episodes
       ? nextSeasonDetail.episodes
           .filter(
             (entry) =>
               entry.air_date &&
-              new Date(entry.air_date) <= now,
+              new Date(entry.air_date) <=
+                now,
           )
           .sort(
             (a, b) =>
@@ -170,10 +243,12 @@ const TvShowPlayerPage: NextPage<
     null;
 
   /*
-   * If we're on S2E1, look backwards into S1.
+   * If we're on S2E1, look backwards
+   * into S1.
    *
-   * We only query the previous season when there isn't
-   * already a previous episode in the current season.
+   * We only query the previous season
+   * when there isn't already a previous
+   * episode in the current season.
    */
   const hasPreviousSeason =
     !sameSeasonPreviousEpisode &&
@@ -181,20 +256,25 @@ const TvShowPlayerPage: NextPage<
 
   const {
     data: previousSeasonDetail,
-    isPending: isPendingPreviousSeason,
   } = useQuery({
     queryFn: () =>
-      tmdb.tvShows.season(id, season - 1),
+      tmdb.tvShows.season(
+        id,
+        season - 1,
+      ),
     queryKey: [
       "tv-show-previous-season",
       id,
       season - 1,
     ],
-    enabled: hasPreviousSeason,
+    enabled:
+      validParams &&
+      hasPreviousSeason,
   });
 
   /*
-   * Last RELEASED episode of the previous season.
+   * Last RELEASED episode of the
+   * previous season.
    */
   const previousSeasonEpisode =
     hasPreviousSeason &&
@@ -203,7 +283,8 @@ const TvShowPlayerPage: NextPage<
           .filter(
             (entry) =>
               entry.air_date &&
-              new Date(entry.air_date) <= now,
+              new Date(entry.air_date) <=
+                now,
           )
           .sort(
             (a, b) =>
@@ -218,16 +299,20 @@ const TvShowPlayerPage: NextPage<
     null;
 
   const nextEpisodeNumber =
-    nextEpisode?.episode_number ?? null;
+    nextEpisode?.episode_number ??
+    null;
 
   const nextEpisodeSeason =
-    nextEpisode?.season_number ?? null;
+    nextEpisode?.season_number ??
+    null;
 
   const prevEpisodeNumber =
-    previousEpisode?.episode_number ?? null;
+    previousEpisode?.episode_number ??
+    null;
 
   const prevEpisodeSeason =
-    previousEpisode?.season_number ?? null;
+    previousEpisode?.season_number ??
+    null;
 
   return (
     <TvShowPlayer
@@ -237,10 +322,18 @@ const TvShowPlayerPage: NextPage<
       seasonName={seasonDetail.name}
       episode={EPISODE}
       episodes={seasonDetail.episodes}
-      nextEpisodeNumber={nextEpisodeNumber}
-      nextEpisodeSeason={nextEpisodeSeason}
-      prevEpisodeNumber={prevEpisodeNumber}
-      prevEpisodeSeason={prevEpisodeSeason}
+      nextEpisodeNumber={
+        nextEpisodeNumber
+      }
+      nextEpisodeSeason={
+        nextEpisodeSeason
+      }
+      prevEpisodeNumber={
+        prevEpisodeNumber
+      }
+      prevEpisodeSeason={
+        prevEpisodeSeason
+      }
       startAt={startAt}
       nextSeasonLoading={
         isPendingNextSeason
