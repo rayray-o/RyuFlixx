@@ -49,6 +49,10 @@ export interface PlayerAdapter<
 export type AdapterMap =
   Record<string, PlayerAdapter<any>>;
 
+const SAVE_DISTANCE_SECONDS = 2;
+
+const COMPLETION_THRESHOLD = 0.9;
+
 const SUPPORTED_EVENTS: PlayerEventType[] = [
   "play",
   "pause",
@@ -56,8 +60,6 @@ const SUPPORTED_EVENTS: PlayerEventType[] = [
   "ended",
   "timeupdate",
 ];
-
-const COMPLETION_THRESHOLD = 0.9;
 
 function isRecord(
   value: unknown,
@@ -127,9 +129,42 @@ function parseMaybeJson(
   }
 }
 
+function unwrapData(
+  raw: unknown,
+): Record<string, any> | null {
+  let current =
+    parseMaybeJson(raw);
+
+  if (!isRecord(current)) {
+    return null;
+  }
+
+  for (
+    let depth = 0;
+    depth < 6;
+    depth += 1
+  ) {
+    if (
+      !isRecord(current.data)
+    ) {
+      break;
+    }
+
+    current =
+      parseMaybeJson(
+        current.data,
+      );
+
+    if (!isRecord(current)) {
+      return null;
+    }
+  }
+
+  return current;
+}
+
 function normalizeEvent(
   value: unknown,
-  hasTimingData = false,
 ): PlayerEventType | undefined {
   if (
     typeof value !== "string"
@@ -161,8 +196,8 @@ function normalizeEvent(
   }
 
   if (
-    normalized === "seeked" ||
-    normalized === "seek"
+    normalized === "seek" ||
+    normalized === "seeked"
   ) {
     return "seeked";
   }
@@ -185,13 +220,6 @@ function normalizeEvent(
   }
 
   if (
-    normalized === "progress" &&
-    hasTimingData
-  ) {
-    return "timeupdate";
-  }
-
-  if (
     SUPPORTED_EVENTS.includes(
       normalized as PlayerEventType,
     )
@@ -202,62 +230,71 @@ function normalizeEvent(
   return undefined;
 }
 
-function unwrapEventData(
-  raw: Record<string, any>,
-): Record<string, any> | null {
-  let data =
-    parseMaybeJson(
-      raw?.data,
+function normalizeTiming(
+  currentTime: number,
+  duration: number,
+  progress?: number,
+) {
+  let time =
+    Math.max(
+      0,
+      currentTime,
+    );
+
+  let safeDuration =
+    Math.max(
+      0,
+      duration,
     );
 
   if (
-    !isRecord(data)
+    time <= 0 &&
+    safeDuration > 0 &&
+    progress !== undefined
   ) {
-    data =
-      parseMaybeJson(raw);
+    const percentage =
+      progress > 1
+        ? progress / 100
+        : progress;
+
+    if (
+      percentage >= 0 &&
+      percentage <= 1
+    ) {
+      time =
+        safeDuration *
+        percentage;
+    }
   }
 
   if (
-    !isRecord(data)
+    safeDuration > 0
   ) {
-    return null;
+    time =
+      Math.min(
+        time,
+        safeDuration,
+      );
   }
 
-  let current =
-    data;
-
-  for (
-    let depth = 0;
-    depth < 4;
-    depth += 1
-  ) {
-    if (
-      !isRecord(
-        current.data,
-      )
-    ) {
-      break;
-    }
-
-    current =
-      current.data;
-  }
-
-  return current;
+  return {
+    currentTime: time,
+    duration: safeDuration,
+  };
 }
 
 function parseGenericPlayerMessage(
   raw: Record<string, any>,
 ): UnifiedPlayerEventData | null {
-  if (
-    !raw ||
-    typeof raw !== "object"
-  ) {
+  const root =
+    parseMaybeJson(raw);
+
+  if (!isRecord(root)) {
     return null;
   }
 
   const data =
-    unwrapEventData(raw);
+    unwrapData(root);
 
   if (!data) {
     return null;
@@ -279,6 +316,11 @@ function parseGenericPlayerMessage(
       ? data.value
       : undefined;
 
+  const progressObject =
+    isRecord(data.progress)
+      ? data.progress
+      : undefined;
+
   const currentTime =
     toNumber(
       firstDefined(
@@ -288,13 +330,15 @@ function parseGenericPlayerMessage(
         data.current,
         data.time,
         data.seconds,
-        data.currentTimeSeconds,
-        data.current_time_seconds,
+        data.watched,
         data.player_progress,
         value?.currentTime,
         value?.current_time,
         value?.position,
         value?.seconds,
+        value?.watched,
+        progressObject?.watched,
+        progressObject?.currentTime,
       ),
     ) ?? 0;
 
@@ -311,63 +355,52 @@ function parseGenericPlayerMessage(
         value?.duration,
         value?.totalDuration,
         value?.total_duration,
+        progressObject?.duration,
       ),
     ) ?? 0;
 
   const progress =
     toNumber(
       firstDefined(
-        data.progress,
+        typeof data.progress ===
+          "number"
+          ? data.progress
+          : undefined,
         data.percent,
         data.percentage,
         value?.progress,
         value?.percent,
         value?.percentage,
+        progressObject?.percentage,
       ),
     );
 
-  const hasTimingData =
-    currentTime > 0 ||
-    duration > 0 ||
-    progress !== undefined;
-
-  const eventCandidate =
-    firstDefined(
-      data.event,
-      data.eventType,
-      data.event_type,
-      data.action,
-      data.name,
-      data.player_status,
-      data.playerStatus,
-      data.status,
-      data.state,
-      data.playerState,
-      value?.event,
-      value?.eventType,
-      value?.status,
-      value?.state,
-      raw.type !==
-        "PLAYER_EVENT" &&
-        raw.type !==
-          "MEDIA_DATA"
-        ? raw.type
-        : undefined,
-    );
-
-  let event =
+  const event =
     normalizeEvent(
-      eventCandidate,
-      hasTimingData,
+      firstDefined(
+        data.event,
+        data.eventType,
+        data.event_type,
+        data.action,
+        data.name,
+        data.player_status,
+        data.playerStatus,
+        data.status,
+        data.state,
+        data.playerState,
+        value?.event,
+        value?.eventType,
+        value?.status,
+        value?.state,
+      ),
+    ) ??
+    (
+      currentTime > 0 ||
+      duration > 0 ||
+      progress !== undefined
+        ? "timeupdate"
+        : undefined
     );
-
-  if (
-    !event &&
-    hasTimingData
-  ) {
-    event =
-      "timeupdate";
-  }
 
   if (!event) {
     return null;
@@ -397,11 +430,6 @@ function parseGenericPlayerMessage(
       data.content_type,
       playerInfo?.mediaType,
       playerInfo?.media_type,
-      data.type === "movie"
-        ? "movie"
-        : data.type === "tv"
-          ? "tv"
-          : undefined,
     );
 
   const mediaType =
@@ -435,43 +463,21 @@ function parseGenericPlayerMessage(
       ),
     );
 
-  let normalizedCurrentTime =
-    Math.max(
-      0,
+  const timing =
+    normalizeTiming(
       currentTime,
+      duration,
+      progress,
     );
-
-  if (
-    normalizedCurrentTime <= 0 &&
-    duration > 0 &&
-    progress !== undefined
-  ) {
-    const percentage =
-      progress > 1
-        ? progress / 100
-        : progress;
-
-    if (
-      percentage >= 0 &&
-      percentage <= 1
-    ) {
-      normalizedCurrentTime =
-        duration *
-        percentage;
-    }
-  }
 
   return {
     event,
 
     currentTime:
-      normalizedCurrentTime,
+      timing.currentTime,
 
     duration:
-      Math.max(
-        0,
-        duration,
-      ),
+      timing.duration,
 
     mediaId,
 
@@ -491,25 +497,339 @@ function parseGenericPlayerMessage(
   };
 }
 
+/*
+ * VidLink:
+ *
+ * MEDIA_DATA:
+ * {
+ *   id,
+ *   type,
+ *   progress: {
+ *     watched,
+ *     duration
+ *   },
+ *   ...
+ * }
+ *
+ * PLAYER_EVENT:
+ * {
+ *   event,
+ *   currentTime,
+ *   duration,
+ *   ...
+ * }
+ */
+function parseVidLinkMessage(
+  raw: Record<string, any>,
+): UnifiedPlayerEventData | null {
+  const root =
+    parseMaybeJson(raw);
+
+  if (!isRecord(root)) {
+    return null;
+  }
+
+  if (
+    root.type ===
+    "MEDIA_DATA"
+  ) {
+    const data =
+      unwrapData(root);
+
+    if (!data) {
+      return null;
+    }
+
+    const progress =
+      isRecord(data.progress)
+        ? data.progress
+        : undefined;
+
+    const currentTime =
+      toNumber(
+        progress?.watched,
+      ) ?? 0;
+
+    const duration =
+      toNumber(
+        progress?.duration,
+      ) ?? 0;
+
+    if (
+      currentTime <= 0 &&
+      duration <= 0
+    ) {
+      return null;
+    }
+
+    return {
+      event:
+        "timeupdate",
+
+      currentTime,
+
+      duration,
+
+      mediaId:
+        firstDefined(
+          data.id,
+          data.tmdbId,
+          data.tmdb_id,
+        ) ?? 0,
+
+      mediaType:
+        data.type === "tv"
+          ? "tv"
+          : "movie",
+
+      season:
+        toNumber(
+          firstDefined(
+            data.last_season_watched,
+            data.season,
+          ),
+        ),
+
+      episode:
+        toNumber(
+          firstDefined(
+            data.last_episode_watched,
+            data.episode,
+          ),
+        ),
+    };
+  }
+
+  return parseGenericPlayerMessage(
+    root,
+  );
+}
+
+/*
+ * FilmU:
+ *
+ * SYNC_HISTORY
+ * FILMU_PLAYER_EVENT
+ */
+function parseFilmUMessage(
+  raw: Record<string, any>,
+): UnifiedPlayerEventData | null {
+  const root =
+    parseMaybeJson(raw);
+
+  if (!isRecord(root)) {
+    return null;
+  }
+
+  const data =
+    unwrapData(root);
+
+  if (!data) {
+    return null;
+  }
+
+  if (
+    root.type ===
+    "SYNC_HISTORY"
+  ) {
+    const currentTime =
+      toNumber(
+        data.watched,
+      ) ?? 0;
+
+    const duration =
+      toNumber(
+        data.duration,
+      ) ?? 0;
+
+    return {
+      event:
+        "timeupdate",
+
+      currentTime,
+
+      duration,
+
+      mediaId:
+        firstDefined(
+          data.media_id,
+          data.tmdbId,
+          data.id,
+        ) ?? 0,
+
+      mediaType:
+        data.media_type === "tv"
+          ? "tv"
+          : "movie",
+
+      season:
+        toNumber(
+          data.season,
+        ),
+
+      episode:
+        toNumber(
+          data.episode,
+        ),
+    };
+  }
+
+  if (
+    root.type ===
+    "FILMU_PLAYER_EVENT"
+  ) {
+    const event =
+      normalizeEvent(
+        data.event,
+      );
+
+    if (!event) {
+      return null;
+    }
+
+    return {
+      event,
+
+      currentTime:
+        toNumber(
+          data.currentTime,
+        ) ?? 0,
+
+      duration:
+        toNumber(
+          data.duration,
+        ) ?? 0,
+
+      mediaId:
+        firstDefined(
+          data.tmdbId,
+          data.media_id,
+        ) ?? 0,
+
+      mediaType:
+        data.mediaType === "tv"
+          ? "tv"
+          : "movie",
+
+      season:
+        toNumber(
+          data.season,
+        ),
+
+      episode:
+        toNumber(
+          data.episode,
+        ),
+    };
+  }
+
+  return parseGenericPlayerMessage(
+    root,
+  );
+}
+
+/*
+ * VidRift:
+ *
+ * vidrift:progress
+ * vidrift:ended
+ */
+function parseVidRiftMessage(
+  raw: Record<string, any>,
+): UnifiedPlayerEventData | null {
+  const root =
+    parseMaybeJson(raw);
+
+  if (!isRecord(root)) {
+    return null;
+  }
+
+  if (
+    root.type !==
+      "vidrift:progress" &&
+    root.type !==
+      "vidrift:ended"
+  ) {
+    return null;
+  }
+
+  const currentTime =
+    toNumber(
+      root.currentTime,
+    ) ?? 0;
+
+  const duration =
+    toNumber(
+      root.duration,
+    ) ?? 0;
+
+  return {
+    event:
+      root.type ===
+      "vidrift:ended"
+        ? "ended"
+        : "timeupdate",
+
+    currentTime,
+
+    duration,
+
+    mediaId:
+      firstDefined(
+        root.tmdbId,
+        root.tmdb_id,
+        root.mediaId,
+      ) ?? 0,
+
+    mediaType:
+      root.mediaType === "tv"
+        ? "tv"
+        : "movie",
+
+    season:
+      toNumber(
+        root.season,
+      ),
+
+    episode:
+      toNumber(
+        root.episode,
+      ),
+  };
+}
+
 const PLAYER_ORIGINS = [
   "https://vidlink.pro",
+
   "https://embed.filmu.in",
+
+  "https://embed.vidrift.net",
+  "https://embed.vidrift.in",
+
   "https://vidsrc.in",
-  "https://multiembed.mov",
-  "https://www.nontongo.win",
-  "https://vidcore.org",
-  "https://vidsrcme.ru",
-  "https://vidsrcme.su",
-  "https://vidsrc.ir",
-  "https://vidsrc-me.ru",
-  "https://vidstuck.xyz",
-  "https://player.videasy.to",
-  "https://filmku.stream",
-  "https://www.2embed.cc",
-  "https://2embed.cc",
   "https://vidsrc.ru",
   "https://vidsrc.su",
+  "https://vidsrc.ir",
+  "https://vidsrcme.ru",
+  "https://vidsrcme.su",
+  "https://vidsrc-me.ru",
   "https://vidsrc-me.ir",
+
+  "https://multiembed.mov",
+
+  "https://www.nontongo.win",
+
+  "https://vidcore.org",
+  "https://vidcore.io",
+
+  "https://filmku.stream",
+
+  "https://www.2embed.cc",
+  "https://2embed.cc",
+
+  "https://vidstuck.xyz",
+
+  "https://player.videasy.to",
 ] as const;
 
 export type PlayerOrigin =
@@ -521,8 +841,57 @@ const PLAYER_ORIGIN_SET =
   );
 
 export const playerAdapters =
-  Object.fromEntries(
-    PLAYER_ORIGINS.map(
+  Object.fromEntries([
+    [
+      "https://vidlink.pro",
+      {
+        origin:
+          "https://vidlink.pro",
+        parse:
+          parseVidLinkMessage,
+      },
+    ],
+
+    [
+      "https://embed.filmu.in",
+      {
+        origin:
+          "https://embed.filmu.in",
+        parse:
+          parseFilmUMessage,
+      },
+    ],
+
+    [
+      "https://embed.vidrift.net",
+      {
+        origin:
+          "https://embed.vidrift.net",
+        parse:
+          parseVidRiftMessage,
+      },
+    ],
+
+    [
+      "https://embed.vidrift.in",
+      {
+        origin:
+          "https://embed.vidrift.in",
+        parse:
+          parseVidRiftMessage,
+      },
+    ],
+
+    ...[
+      "https://vidsrc.in",
+      "https://vidsrc.ru",
+      "https://vidsrc.su",
+      "https://vidsrc.ir",
+      "https://vidsrcme.ru",
+      "https://vidsrcme.su",
+      "https://vidsrc-me.ru",
+      "https://vidsrc-me.ir",
+    ].map(
       (origin) => [
         origin,
         {
@@ -532,21 +901,28 @@ export const playerAdapters =
         },
       ],
     ),
-  ) as AdapterMap;
 
-export interface PlayerMediaMetadata {
-  mediaId: number;
-  mediaType: ContentType;
-
-  title: string;
-  backdrop_path: string;
-  poster_path?: string;
-  release_date: string;
-  vote_average: number;
-
-  season?: number;
-  episode?: number;
-}
+    ...[
+      "https://multiembed.mov",
+      "https://www.nontongo.win",
+      "https://vidcore.org",
+      "https://vidcore.io",
+      "https://filmku.stream",
+      "https://www.2embed.cc",
+      "https://2embed.cc",
+      "https://vidstuck.xyz",
+      "https://player.videasy.to",
+    ].map(
+      (origin) => [
+        origin,
+        {
+          origin,
+          parse:
+            parseGenericPlayerMessage,
+        },
+      ],
+    ),
+  ]) as AdapterMap;
 
 export interface UsePlayerEventsOptions {
   metadata?: {
@@ -628,10 +1004,13 @@ export function usePlayerEvents(
   const lastSavedPositionRef =
     useRef(0);
 
+  const lastDurationRef =
+    useRef(0);
+
   const completionTriggeredRef =
     useRef(false);
 
-  const completionMediaIdentityRef =
+  const completionIdentityRef =
     useRef<string | null>(null);
 
   useEffect(() => {
@@ -647,16 +1026,19 @@ export function usePlayerEvents(
 
     if (
       identity &&
-      completionMediaIdentityRef.current !==
+      completionIdentityRef.current !==
         identity
     ) {
-      completionMediaIdentityRef.current =
+      completionIdentityRef.current =
         identity;
 
       completionTriggeredRef.current =
         false;
 
       lastSavedPositionRef.current =
+        0;
+
+      lastDurationRef.current =
         0;
 
       eventDataRef.current =
@@ -768,12 +1150,17 @@ export function usePlayerEvents(
         const duration =
           Number.isFinite(
             data.duration,
-          )
-            ? Math.max(
-                0,
-                data.duration,
-              )
-            : 0;
+          ) &&
+          data.duration > 0
+            ? data.duration
+            : lastDurationRef.current;
+
+        if (
+          duration > 0
+        ) {
+          lastDurationRef.current =
+            duration;
+        }
 
         saveWatchProgress(
           {
@@ -799,7 +1186,9 @@ export function usePlayerEvents(
           },
 
           currentTime,
+
           duration,
+
           completed,
         );
 
@@ -853,7 +1242,8 @@ export function usePlayerEvents(
           Math.abs(
             data.currentTime -
               lastSavedPositionRef.current,
-          ) < 5
+          ) <
+            SAVE_DISTANCE_SECONDS
         ) {
           return;
         }
@@ -868,7 +1258,7 @@ export function usePlayerEvents(
     );
 
   useEffect(() => {
-    const saveLatestProgress =
+    const saveLatest =
       () => {
         const latest =
           eventDataRef.current;
@@ -884,24 +1274,24 @@ export function usePlayerEvents(
         );
       };
 
-    const handleVisibilityChange =
+    const handleVisibility =
       () => {
         if (
           document.visibilityState ===
           "hidden"
         ) {
-          saveLatestProgress();
+          saveLatest();
         }
       };
 
     const handlePageHide =
       () => {
-        saveLatestProgress();
+        saveLatest();
       };
 
     document.addEventListener(
       "visibilitychange",
-      handleVisibilityChange,
+      handleVisibility,
     );
 
     window.addEventListener(
@@ -910,11 +1300,11 @@ export function usePlayerEvents(
     );
 
     return () => {
-      saveLatestProgress();
+      saveLatest();
 
       document.removeEventListener(
         "visibilitychange",
-        handleVisibilityChange,
+        handleVisibility,
       );
 
       window.removeEventListener(
@@ -931,55 +1321,56 @@ export function usePlayerEvents(
       (
         event: MessageEvent,
       ) => {
-        const trustedOrigin =
-          PLAYER_ORIGIN_SET.has(
+        if (
+          !PLAYER_ORIGIN_SET.has(
             event.origin,
-          );
+          )
+        ) {
+          return;
+        }
 
         const activeFrame =
           playerFrameRef?.current;
 
-        const activeFrameSource =
-          Boolean(
-            activeFrame &&
-              event.source ===
-                activeFrame.contentWindow,
-          );
-
+        /*
+         * Only accept events from the iframe
+         * that is actually playing right now.
+         *
+         * This prevents an old iframe/provider
+         * from overwriting the new server's
+         * position.
+         */
         if (
-          !trustedOrigin &&
-          !activeFrameSource
+          activeFrame &&
+          event.source !==
+            activeFrame.contentWindow
         ) {
           return;
         }
 
-        const rawData =
+        const raw =
           parseMaybeJson(
             event.data,
           );
 
-        if (
-          !isRecord(rawData)
-        ) {
+        if (!isRecord(raw)) {
           return;
         }
 
         const adapter =
-          trustedOrigin
-            ? playerAdapters[
-                event.origin
-              ]
-            : undefined;
+          playerAdapters[
+            event.origin
+          ];
 
         let parsed =
           adapter?.parse(
-            rawData,
+            raw,
           ) ?? null;
 
         if (!parsed) {
           parsed =
             parseGenericPlayerMessage(
-              rawData,
+              raw,
             );
         }
 
@@ -1011,8 +1402,24 @@ export function usePlayerEvents(
               parsed.episode,
           };
 
+        if (
+          normalized.mediaType !==
+            "movie" &&
+          normalized.mediaType !==
+            "tv"
+        ) {
+          return;
+        }
+
         eventDataRef.current =
           normalized;
+
+        if (
+          normalized.duration > 0
+        ) {
+          lastDurationRef.current =
+            normalized.duration;
+        }
 
         const callbacks =
           callbacksRef.current;
