@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const INTRO_KEY = "ryuflixx-intro-played";
 
@@ -9,6 +9,7 @@ export default function RyuFlixxIntro() {
   const [logoVisible, setLogoVisible] = useState(false);
   const [logoFading, setLogoFading] = useState(false);
   const [revealing, setRevealing] = useState(false);
+  const introAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     try {
@@ -22,6 +23,20 @@ export default function RyuFlixxIntro() {
     }
 
     setVisible(true);
+
+    // Start the cinematic intro audio at the exact same moment
+    // the visual intro begins. No delayed interaction fallback:
+    // if autoplay is blocked, the audio simply remains silent.
+    const audio = new Audio("/RyuFlixxIntro.mp3");
+    audio.preload = "auto";
+    audio.volume = 1;
+    introAudioRef.current = audio;
+
+    audio.play().catch(() => {
+      // Browser autoplay policy may block audible playback.
+      // Do not retry later after user interaction, because that
+      // would make the sound play out of sync with the intro.
+    });
 
     // Let the wallpaper establish itself before revealing the title.
     const logoIn = window.setTimeout(() => {
@@ -48,6 +63,13 @@ export default function RyuFlixxIntro() {
       window.clearTimeout(logoOut);
       window.clearTimeout(reveal);
       window.clearTimeout(finish);
+
+      audio.pause();
+      audio.currentTime = 0;
+
+      if (introAudioRef.current === audio) {
+        introAudioRef.current = null;
+      }
     };
   }, []);
 
@@ -122,4 +144,4 @@ export default function RyuFlixxIntro() {
       </div>
     </div>
   );
-}
+  }
