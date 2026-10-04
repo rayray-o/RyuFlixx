@@ -36,7 +36,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
     },
     {
       title: "<RyuFlix Embed>",
-      source: `https://embed.vidrift.net/embed/movie/${id}&brand=Ryuflix&brandColor=00d1b2`,
+      source: `https://embed.vidrift.net/embed/movie/${id}?brand=Ryuflix&brandColor=00d1b2`,
       ads: true,
     },
     {
