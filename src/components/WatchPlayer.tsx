@@ -8,6 +8,11 @@ import {
   useState,
 } from "react";
 import { RyuFlixPlayer } from "@/components/ui/player/RyuFlixPlayer";
+import {
+  findLastServerIndex,
+  getLastServer,
+  saveLastServer,
+} from "@/utils/server-memory";
 
 interface WatchPlayerProps {
   servers: PlayersProps[];
@@ -27,6 +32,27 @@ interface WatchPlayerProps {
   >;
 
   title?: string;
+
+  /*
+   * Unique memory key for this piece of content.
+   *
+   * Movie:
+   *   movie:123
+   *
+   * TV episode:
+   *   tv:123:s1:e4
+   */
+  serverMemoryKey: string;
+
+  /*
+   * Optional fallback used for TV.
+   *
+   * Example:
+   *   tv:123
+   *
+   * This lets a server preference carry between episodes.
+   */
+  serverFallbackMemoryKey?: string;
 }
 
 function addResumePosition(
@@ -70,6 +96,8 @@ const WatchPlayer: React.FC<
   flushProgress,
   iframeRef,
   title = "Video Player",
+  serverMemoryKey,
+  serverFallbackMemoryKey,
 }) => {
   const safeIndex =
     servers.length > 0
@@ -109,6 +137,21 @@ const WatchPlayer: React.FC<
       HTMLIFrameElement | null
     >(null);
 
+  const restoredMemoryRef =
+    useRef(false);
+
+  const serverSignature =
+    useMemo(
+      () =>
+        servers
+          .map(
+            (server) =>
+              `${server.title}|${server.source}`,
+          )
+          .join("||"),
+      [servers],
+    );
+
   const setIframeRef = (
     element:
       | HTMLIFrameElement
@@ -122,6 +165,196 @@ const WatchPlayer: React.FC<
         element;
     }
   };
+
+  /*
+   * Restore the last server used when the player opens.
+   *
+   * An explicit ?src=... always wins. This is important because
+   * clicking a server button should never immediately get overridden
+   * by old server memory.
+   */
+  useEffect(() => {
+    if (
+      restoredMemoryRef.current ||
+      !servers.length ||
+      !serverMemoryKey
+    ) {
+      return;
+    }
+
+    restoredMemoryRef.current =
+      true;
+
+    if (
+      typeof window ===
+      "undefined"
+    ) {
+      return;
+    }
+
+    const search =
+      new URLSearchParams(
+        window.location.search,
+      );
+
+    /*
+     * Explicit source selection has priority.
+     */
+    if (
+      search.has("src")
+    ) {
+      return;
+    }
+
+    let preference =
+      getLastServer(
+        serverMemoryKey,
+      );
+
+    /*
+     * For TV, if this exact episode has never been watched,
+     * fall back to the last server used anywhere in the show.
+     */
+    if (
+      !preference &&
+      serverFallbackMemoryKey
+    ) {
+      preference =
+        getLastServer(
+          serverFallbackMemoryKey,
+        );
+    }
+
+    const rememberedIndex =
+      findLastServerIndex(
+        servers,
+        preference,
+      );
+
+    if (
+      rememberedIndex ===
+        null ||
+      rememberedIndex ===
+        safeIndex
+    ) {
+      return;
+    }
+
+    onServerChange(
+      rememberedIndex,
+    );
+  }, [
+    serverMemoryKey,
+    serverFallbackMemoryKey,
+    serverSignature,
+    servers,
+    safeIndex,
+    onServerChange,
+  ]);
+
+  /*
+   * Save the active server whenever the player changes content/server.
+   */
+  useEffect(() => {
+    if (
+      !currentServer ||
+      !serverMemoryKey
+    ) {
+      return;
+    }
+
+    saveLastServer(
+      serverMemoryKey,
+      currentServer,
+    );
+
+    if (
+      serverFallbackMemoryKey
+    ) {
+      saveLastServer(
+        serverFallbackMemoryKey,
+        currentServer,
+      );
+    }
+  }, [
+    currentServer?.source,
+    currentServer?.title,
+    serverMemoryKey,
+    serverFallbackMemoryKey,
+  ]);
+
+  /*
+   * Also save the active server immediately before the page disappears.
+   * This catches browser back, closing the tab, navigation, etc.
+   */
+  useEffect(() => {
+    const saveCurrentServer =
+      () => {
+        if (
+          !currentServer ||
+          !serverMemoryKey
+        ) {
+          return;
+        }
+
+        saveLastServer(
+          serverMemoryKey,
+          currentServer,
+        );
+
+        if (
+          serverFallbackMemoryKey
+        ) {
+          saveLastServer(
+            serverFallbackMemoryKey,
+            currentServer,
+          );
+        }
+      };
+
+    const handleVisibility =
+      () => {
+        if (
+          document.visibilityState ===
+          "hidden"
+        ) {
+          saveCurrentServer();
+        }
+      };
+
+    const handlePageHide =
+      () => {
+        saveCurrentServer();
+      };
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibility,
+    );
+
+    window.addEventListener(
+      "pagehide",
+      handlePageHide,
+    );
+
+    return () => {
+      saveCurrentServer();
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibility,
+      );
+
+      window.removeEventListener(
+        "pagehide",
+        handlePageHide,
+      );
+    };
+  }, [
+    currentServer,
+    serverMemoryKey,
+    serverFallbackMemoryKey,
+  ]);
 
   useEffect(() => {
     setHandoffPosition(
@@ -283,7 +516,25 @@ const WatchPlayer: React.FC<
                     );
 
                   /*
-                   * Save BEFORE replacing
+                   * Save the server preference BEFORE replacing
+                   * the current iframe.
+                   */
+                  saveLastServer(
+                    serverMemoryKey,
+                    server,
+                  );
+
+                  if (
+                    serverFallbackMemoryKey
+                  ) {
+                    saveLastServer(
+                      serverFallbackMemoryKey,
+                      server,
+                    );
+                  }
+
+                  /*
+                   * Save progress BEFORE replacing
                    * the current iframe.
                    */
                   flushProgress?.();
