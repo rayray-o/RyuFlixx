@@ -4,6 +4,7 @@
 
 .container {
   display: flex;
+  align-items: flex-start;
   cursor: grab;
 }
 
