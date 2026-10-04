@@ -38,92 +38,109 @@ const ExtremeScrollingTitle: React.FC<
       const availableWidth =
         container.clientWidth;
 
-      const textWidth =
+      if (availableWidth <= 0) return;
+
+      /*
+       * Always measure the title at its natural
+       * normal size first.
+       *
+       * This is critical: we never measure the
+       * already-shrunk title to decide whether
+       * it should shrink.
+       */
+      const previousFontSize =
+        text.style.fontSize;
+
+      const previousWidth =
+        text.style.width;
+
+      text.style.fontSize =
+        `${NORMAL_FONT_SIZE}px`;
+
+      text.style.width = "max-content";
+
+      const naturalWidth =
         text.scrollWidth;
 
-      if (availableWidth <= 0 || textWidth <= 0) {
-        return;
-      }
-
-      const overflowRatio =
-        textWidth / availableWidth;
-
       /*
-       * First priority:
-       * keep the normal title size whenever it fits.
+       * Restore the element before React updates
+       * the actual display state.
        */
-      if (overflowRatio <= 1.01) {
-        setIsExtreme(false);
-        setScrollDistance(0);
+      text.style.fontSize =
+        previousFontSize;
 
-        if (fontSize !== NORMAL_FONT_SIZE) {
-          setFontSize(NORMAL_FONT_SIZE);
-        }
+      text.style.width =
+        previousWidth;
+
+      if (naturalWidth <= availableWidth) {
+        /*
+         * STATE 1:
+         * Completely normal title.
+         */
+        setFontSize(NORMAL_FONT_SIZE);
+        setScrollDistance(0);
+        setIsExtreme(false);
 
         return;
       }
 
       /*
-       * Second priority:
-       * shrink the title just enough to fit.
-       *
-       * This handles titles like:
-       * "Drishyam: The Conclusion"
-       *
-       * without resorting to a marquee.
+       * Calculate exactly how small the title
+       * needs to become to fit.
        */
       const fittedFontSize =
-        NORMAL_FONT_SIZE / overflowRatio;
+        NORMAL_FONT_SIZE *
+        (availableWidth / naturalWidth);
 
-      if (
-        fittedFontSize >=
-        MIN_FONT_SIZE
-      ) {
-        setIsExtreme(false);
-        setScrollDistance(0);
-
-        const nextFontSize = Math.min(
-          NORMAL_FONT_SIZE,
+      if (fittedFontSize >= MIN_FONT_SIZE) {
+        /*
+         * STATE 2:
+         * Slightly long title.
+         *
+         * Shrink it just enough to fit.
+         */
+        setFontSize(
           Math.max(
             MIN_FONT_SIZE,
             fittedFontSize,
           ),
         );
 
-        if (
-          Math.abs(
-            nextFontSize - fontSize,
-          ) > 0.05
-        ) {
-          setFontSize(nextFontSize);
-        }
+        setScrollDistance(0);
+        setIsExtreme(false);
 
         return;
       }
 
       /*
-       * Third priority:
-       * the title is genuinely too long to fit
-       * even at the minimum readable size.
+       * STATE 3:
+       * Even the minimum readable size
+       * cannot fit.
        *
-       * Only now do we activate the marquee.
+       * NOW, and only now, use the marquee.
        */
+      const scaledWidth =
+        naturalWidth *
+        (MIN_FONT_SIZE / NORMAL_FONT_SIZE);
+
       const distance =
         Math.max(
           0,
-          textWidth - availableWidth,
+          scaledWidth - availableWidth,
         );
 
       setFontSize(MIN_FONT_SIZE);
-      setIsExtreme(distance > 0);
       setScrollDistance(distance);
+      setIsExtreme(distance > 0);
     };
 
     const frame =
       window.requestAnimationFrame(measure);
 
     const resizeObserver =
-      new ResizeObserver(measure);
+      new ResizeObserver(() => {
+        window.requestAnimationFrame(measure);
+      });
 
     if (containerRef.current) {
       resizeObserver.observe(
@@ -131,19 +148,15 @@ const ExtremeScrollingTitle: React.FC<
       );
     }
 
-    if (textRef.current) {
-      resizeObserver.observe(
-        textRef.current,
-      );
-    }
-
-    document.fonts?.ready.then(measure);
+    document.fonts?.ready.then(() => {
+      window.requestAnimationFrame(measure);
+    });
 
     return () => {
       window.cancelAnimationFrame(frame);
       resizeObserver.disconnect();
     };
-  }, [title, fontSize]);
+  }, [title]);
 
   const scrollDuration =
     scrollDistance > 0
@@ -175,11 +188,9 @@ const ExtremeScrollingTitle: React.FC<
           fontSize: `${fontSize}px`,
           lineHeight: 1.25,
           whiteSpace: "nowrap",
-
           width: isExtreme
             ? "max-content"
             : "100%",
-
           textAlign: "center",
 
           ...(isExtreme
