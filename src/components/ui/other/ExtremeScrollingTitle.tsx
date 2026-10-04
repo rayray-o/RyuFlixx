@@ -6,7 +6,8 @@ interface ExtremeScrollingTitleProps {
   title: string;
 }
 
-const EXTREME_OVERFLOW_RATIO = 1.35;
+const NORMAL_FONT_SIZE = 14;
+const MIN_FONT_SIZE = 10.5;
 const PIXELS_PER_SECOND = 28;
 
 const ExtremeScrollingTitle: React.FC<
@@ -17,6 +18,9 @@ const ExtremeScrollingTitle: React.FC<
 
   const textRef =
     useRef<HTMLDivElement | null>(null);
+
+  const [fontSize, setFontSize] =
+    useState(NORMAL_FONT_SIZE);
 
   const [scrollDistance, setScrollDistance] =
     useState(0);
@@ -37,22 +41,82 @@ const ExtremeScrollingTitle: React.FC<
       const textWidth =
         text.scrollWidth;
 
-      const overflow =
+      if (availableWidth <= 0 || textWidth <= 0) {
+        return;
+      }
+
+      const overflowRatio =
+        textWidth / availableWidth;
+
+      /*
+       * First priority:
+       * keep the normal title size whenever it fits.
+       */
+      if (overflowRatio <= 1.01) {
+        setIsExtreme(false);
+        setScrollDistance(0);
+
+        if (fontSize !== NORMAL_FONT_SIZE) {
+          setFontSize(NORMAL_FONT_SIZE);
+        }
+
+        return;
+      }
+
+      /*
+       * Second priority:
+       * shrink the title just enough to fit.
+       *
+       * This handles titles like:
+       * "Drishyam: The Conclusion"
+       *
+       * without resorting to a marquee.
+       */
+      const fittedFontSize =
+        NORMAL_FONT_SIZE / overflowRatio;
+
+      if (
+        fittedFontSize >=
+        MIN_FONT_SIZE
+      ) {
+        setIsExtreme(false);
+        setScrollDistance(0);
+
+        const nextFontSize = Math.min(
+          NORMAL_FONT_SIZE,
+          Math.max(
+            MIN_FONT_SIZE,
+            fittedFontSize,
+          ),
+        );
+
+        if (
+          Math.abs(
+            nextFontSize - fontSize,
+          ) > 0.05
+        ) {
+          setFontSize(nextFontSize);
+        }
+
+        return;
+      }
+
+      /*
+       * Third priority:
+       * the title is genuinely too long to fit
+       * even at the minimum readable size.
+       *
+       * Only now do we activate the marquee.
+       */
+      const distance =
         Math.max(
           0,
           textWidth - availableWidth,
         );
 
-      const extreme =
-        availableWidth > 0 &&
-        textWidth >
-          availableWidth *
-            EXTREME_OVERFLOW_RATIO;
-
-      setIsExtreme(extreme);
-      setScrollDistance(
-        extreme ? overflow : 0,
-      );
+      setFontSize(MIN_FONT_SIZE);
+      setIsExtreme(distance > 0);
+      setScrollDistance(distance);
     };
 
     const frame =
@@ -79,7 +143,7 @@ const ExtremeScrollingTitle: React.FC<
       window.cancelAnimationFrame(frame);
       resizeObserver.disconnect();
     };
-  }, [title]);
+  }, [title, fontSize]);
 
   const scrollDuration =
     scrollDistance > 0
@@ -106,16 +170,21 @@ const ExtremeScrollingTitle: React.FC<
     >
       <div
         ref={textRef}
-        className="whitespace-nowrap text-center text-sm font-semibold"
+        className="font-semibold"
         style={{
+          fontSize: `${fontSize}px`,
+          lineHeight: 1.25,
+          whiteSpace: "nowrap",
+
           width: isExtreme
             ? "max-content"
             : "100%",
 
+          textAlign: "center",
+
           ...(isExtreme
             ? {
                 "--scroll-distance": `-${scrollDistance}px`,
-                "--scroll-duration": `${scrollDuration}s`,
                 "--total-duration": `${totalDuration}s`,
                 animation:
                   "ryuflix-extreme-title-scroll var(--total-duration) linear infinite",
