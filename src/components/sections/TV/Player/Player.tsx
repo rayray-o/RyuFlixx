@@ -99,10 +99,6 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
   const playerFrameRef =
     useRef<HTMLIFrameElement | null>(null);
 
-  /*
-   * Prevent duplicate "ended" events from
-   * causing multiple navigations.
-   */
   const transitioningRef = useRef(false);
 
   const {
@@ -111,11 +107,6 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
   } = usePlayerEvents({
     saveHistory: true,
 
-    /*
-     * IMPORTANT:
-     * Give the event hook the same iframe ref
-     * used by WatchPlayer.
-     */
     playerFrameRef,
 
     metadata: {
@@ -141,11 +132,6 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
         return;
       }
 
-      /*
-       * No next episode:
-       * keep the current episode as the
-       * latest continuation.
-       */
       if (!nextEpisode) {
         setTvContinuation({
           mediaId: id,
@@ -160,11 +146,6 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
 
       transitioningRef.current = true;
 
-      /*
-       * Save the next episode before navigating.
-       * This makes Continue Watching immediately
-       * point at the correct episode.
-       */
       setTvContinuation({
         mediaId: id,
         season:
@@ -173,10 +154,6 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
           nextEpisode.episode_number,
       });
 
-      /*
-       * Preserve the currently selected server
-       * when automatically moving to the next episode.
-       */
       const nextUrl =
         `/tv/${id}/${nextEpisode.season_number}/${nextEpisode.episode_number}/player?src=${selectedSource}`;
 
@@ -246,6 +223,12 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
           iframeRef={
             playerFrameRef
           }
+          serverMemoryKey={
+            `tv:${id}:s${episode.season_number}:e${episode.episode_number}`
+          }
+          serverFallbackMemoryKey={
+            `tv:${id}`
+          }
         />
       </div>
 
@@ -266,9 +249,7 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
       <TvShowPlayerEpisodeSelection
         id={id}
         opened={episodeOpened}
-        onClose={
-          episodeHandlers.close
-        }
+        onClose={episodeHandlers.close}
         episodes={episodes}
         currentSeason={
           episode.season_number
