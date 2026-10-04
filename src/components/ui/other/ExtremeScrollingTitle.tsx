@@ -7,49 +7,73 @@ interface ExtremeScrollingTitleProps {
 }
 
 const EXTREME_OVERFLOW_RATIO = 1.35;
+const PIXELS_PER_SECOND = 28;
 
 const ExtremeScrollingTitle: React.FC<
   ExtremeScrollingTitleProps
 > = ({ title }) => {
   const containerRef =
     useRef<HTMLDivElement | null>(null);
+
   const textRef =
     useRef<HTMLDivElement | null>(null);
 
-  const [extreme, setExtreme] = useState(false);
+  const [scrollDistance, setScrollDistance] =
+    useState(0);
+
+  const [isExtreme, setIsExtreme] =
+    useState(false);
 
   useEffect(() => {
-    const checkOverflow = () => {
+    const measure = () => {
       const container = containerRef.current;
       const text = textRef.current;
 
       if (!container || !text) return;
 
-      const availableWidth = container.clientWidth;
-      const textWidth = text.scrollWidth;
+      const availableWidth =
+        container.clientWidth;
 
-      setExtreme(
+      const textWidth =
+        text.scrollWidth;
+
+      const overflow =
+        Math.max(
+          0,
+          textWidth - availableWidth,
+        );
+
+      const extreme =
         availableWidth > 0 &&
-          textWidth > availableWidth * EXTREME_OVERFLOW_RATIO,
+        textWidth >
+          availableWidth *
+            EXTREME_OVERFLOW_RATIO;
+
+      setIsExtreme(extreme);
+      setScrollDistance(
+        extreme ? overflow : 0,
       );
     };
 
-    const frame = window.requestAnimationFrame(
-      checkOverflow,
-    );
+    const frame =
+      window.requestAnimationFrame(measure);
 
     const resizeObserver =
-      new ResizeObserver(checkOverflow);
+      new ResizeObserver(measure);
 
     if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
+      resizeObserver.observe(
+        containerRef.current,
+      );
     }
 
     if (textRef.current) {
-      resizeObserver.observe(textRef.current);
+      resizeObserver.observe(
+        textRef.current,
+      );
     }
 
-    document.fonts?.ready.then(checkOverflow);
+    document.fonts?.ready.then(measure);
 
     return () => {
       window.cancelAnimationFrame(frame);
@@ -57,51 +81,66 @@ const ExtremeScrollingTitle: React.FC<
     };
   }, [title]);
 
+  const scrollDuration =
+    scrollDistance > 0
+      ? Math.max(
+          7,
+          scrollDistance /
+            PIXELS_PER_SECOND,
+        )
+      : 0;
+
+  const totalDuration =
+    scrollDuration + 7;
+
   return (
     <div
       ref={containerRef}
       className="relative w-full overflow-hidden"
       style={{
-        maskImage: extreme
-          ? "linear-gradient(to right, transparent 0%, black 7%, black 93%, transparent 100%)"
-          : undefined,
-        WebkitMaskImage: extreme
-          ? "linear-gradient(to right, transparent 0%, black 7%, black 93%, transparent 100%)"
-          : undefined,
+        maskImage:
+          "linear-gradient(to right, transparent 0%, black 6%, black 94%, transparent 100%)",
+        WebkitMaskImage:
+          "linear-gradient(to right, transparent 0%, black 6%, black 94%, transparent 100%)",
       }}
     >
       <div
         ref={textRef}
-        className="max-w-full whitespace-nowrap text-center text-sm font-semibold"
-        style={
-          extreme
+        className="whitespace-nowrap text-center text-sm font-semibold"
+        style={{
+          width: isExtreme
+            ? "max-content"
+            : "100%",
+
+          ...(isExtreme
             ? {
-                width: "max-content",
+                "--scroll-distance": `-${scrollDistance}px`,
+                "--scroll-duration": `${scrollDuration}s`,
+                "--total-duration": `${totalDuration}s`,
                 animation:
-                  "ryuflix-extreme-title-scroll 11s cubic-bezier(0.22, 1, 0.36, 1) infinite",
-                willChange: "transform",
+                  "ryuflix-extreme-title-scroll var(--total-duration) linear infinite",
               }
-            : undefined
-        }
+            : {}),
+        } as React.CSSProperties}
       >
         {title}
       </div>
 
-      {extreme && (
+      {isExtreme && (
         <>
           <div
-            className="pointer-events-none absolute inset-y-0 left-0 w-6"
+            className="pointer-events-none absolute inset-y-0 left-0 w-8"
             style={{
               background:
-                "linear-gradient(to right, rgba(0,0,0,0.35), transparent)",
+                "linear-gradient(to right, rgba(0,0,0,0.42), transparent)",
             }}
           />
 
           <div
-            className="pointer-events-none absolute inset-y-0 right-0 w-6"
+            className="pointer-events-none absolute inset-y-0 right-0 w-8"
             style={{
               background:
-                "linear-gradient(to left, rgba(0,0,0,0.35), transparent)",
+                "linear-gradient(to left, rgba(0,0,0,0.42), transparent)",
             }}
           />
         </>
@@ -111,26 +150,42 @@ const ExtremeScrollingTitle: React.FC<
         @keyframes ryuflix-extreme-title-scroll {
           0% {
             transform: translateX(0);
+            opacity: 1;
           }
 
-          18% {
+          8% {
             transform: translateX(0);
+            opacity: 1;
           }
 
-          68% {
-            transform: translateX(
-              calc(-100% + 100% / ${EXTREME_OVERFLOW_RATIO})
-            );
+          12% {
+            transform: translateX(0);
+            opacity: 1;
           }
 
-          84% {
-            transform: translateX(
-              calc(-100% + 100% / ${EXTREME_OVERFLOW_RATIO})
-            );
+          72% {
+            transform: translateX(var(--scroll-distance));
+            opacity: 1;
+          }
+
+          82% {
+            transform: translateX(var(--scroll-distance));
+            opacity: 1;
+          }
+
+          92% {
+            transform: translateX(var(--scroll-distance));
+            opacity: 0;
+          }
+
+          94% {
+            transform: translateX(0);
+            opacity: 0;
           }
 
           100% {
             transform: translateX(0);
+            opacity: 1;
           }
         }
       `}</style>
