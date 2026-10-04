@@ -1,6 +1,7 @@
 "use client";
 
 import Rating from "@/components/ui/other/Rating";
+import ExtremeScrollingTitle from "@/components/ui/other/ExtremeScrollingTitle";
 import VaulDrawer from "@/components/ui/overlay/VaulDrawer";
 import useBreakpoints from "@/hooks/useBreakpoints";
 import useDeviceVibration from "@/hooks/useDeviceVibration";
@@ -97,9 +98,7 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
       }}
     />
   ) : (
-    <h6 className="max-w-full truncate text-center text-sm font-semibold">
-      {title}
-    </h6>
+    <ExtremeScrollingTitle title={title} />
   );
 
   return (
@@ -119,7 +118,7 @@ const TvShowPosterCard: React.FC<TvShowPosterCardProps> = ({
           {...longPress()}
         >
           {variant === "full" && (
-            <div className="group motion-preset-focus text-white">
+            <div className="group w-[166.6667px] motion-preset-focus text-white md:w-[200px]">
               <div className="relative aspect-2/3 overflow-hidden rounded-lg border-[3px] border-transparent transition-colors hover:border-warning">
                 {hovered && (
                   <Icon
