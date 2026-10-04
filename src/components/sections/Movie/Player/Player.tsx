@@ -70,10 +70,6 @@ const MoviePlayer: React.FC<
     parseAsInteger.withDefault(0),
   );
 
-  /*
-   * This ref always points at the iframe
-   * currently mounted by WatchPlayer.
-   */
   const playerFrameRef =
     useRef<HTMLIFrameElement | null>(
       null,
@@ -160,6 +156,9 @@ const MoviePlayer: React.FC<
           }
           iframeRef={
             playerFrameRef
+          }
+          serverMemoryKey={
+            `movie:${movie.id}`
           }
         />
       </div>
