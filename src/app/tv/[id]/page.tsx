@@ -210,4 +210,4 @@ export default async function TVShowDetailPage(
       <TVShowDetailClient tv={tv} />
     </>
   );
-      }
+                        }
