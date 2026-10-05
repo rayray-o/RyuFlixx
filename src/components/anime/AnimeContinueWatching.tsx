@@ -115,12 +115,34 @@ export default function AnimeContinueWatching() {
   }, []);
 
   const items = useMemo(() => {
-    return history
-      .filter(
-        (item) =>
-          item.current_time > 0,
-      )
-      .slice(0, 12);
+    const latestByAnime =
+      new Map<
+        string,
+        AnimeWatchHistory
+      >();
+
+    for (const item of history) {
+      if (
+        item.current_time <= 0
+      ) {
+        continue;
+      }
+
+      if (
+        !latestByAnime.has(
+          item.anime_id,
+        )
+      ) {
+        latestByAnime.set(
+          item.anime_id,
+          item,
+        );
+      }
+    }
+
+    return Array.from(
+      latestByAnime.values(),
+    ).slice(0, 12);
   }, [history]);
 
   if (items.length === 0) {
@@ -152,7 +174,7 @@ export default function AnimeContinueWatching() {
 
           return (
             <Link
-              key={item.key}
+              key={item.anime_id}
               href={`/anime/${encodeURIComponent(
                 item.anime_id,
               )}/watch?episode=${
@@ -178,9 +200,8 @@ export default function AnimeContinueWatching() {
 
                 <div className="absolute bottom-3 left-3 right-3">
                   <span className="rounded-md bg-black/70 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white">
-                    {item.completed
-                      ? "Finished"
-                      : `Episode ${item.episode}`}
+                    Episode{" "}
+                    {item.episode}
                   </span>
                 </div>
               </div>
@@ -199,9 +220,9 @@ export default function AnimeContinueWatching() {
                         )}
                   </span>
 
-                  {item.duration >
-                    0 &&
-                    !item.completed && (
+                  {!item.completed &&
+                    item.duration >
+                      0 && (
                       <span>
                         {formatTime(
                           item.duration,
@@ -225,4 +246,4 @@ export default function AnimeContinueWatching() {
       </div>
     </section>
   );
-}
+    }
