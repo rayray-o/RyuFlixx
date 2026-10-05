@@ -237,13 +237,6 @@ export default async function AnimeWatchPage(
             image={
               anime.image
             }
-            nextEpisode={
-              nextEpisode?.episode ??
-              null
-            }
-            language={
-              requestedLanguage
-            }
           />
         </div>
       </section>
@@ -338,4 +331,4 @@ export default async function AnimeWatchPage(
       </section>
     </main>
   );
-    }
+              }
