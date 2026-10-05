@@ -1,93 +1,223 @@
-"use client";
-
-import { Suspense, use } from "react";
-import { Spinner } from "@heroui/spinner";
-import { useQuery } from "@tanstack/react-query";
-import { tmdb } from "@/api/tmdb";
-import { Cast } from "tmdb-ts/dist/types/credits";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Image } from "tmdb-ts";
-import dynamic from "next/dynamic";
+import { tmdb } from "@/api/tmdb";
 import { Params } from "@/types";
-import { NextPage } from "next";
+import MovieDetailClient from "./MovieDetailClient";
 
-const PhotosSection = dynamic(
-  () => import("@/components/ui/other/PhotosSection"),
-);
-const BackdropSection = dynamic(
-  () => import("@/components/sections/Movie/Detail/Backdrop"),
-);
-const OverviewSection = dynamic(
-  () => import("@/components/sections/Movie/Detail/Overview"),
-);
-const CastsSection = dynamic(
-  () => import("@/components/sections/Movie/Detail/Casts"),
-);
-const RelatedSection = dynamic(
-  () => import("@/components/sections/Movie/Detail/Related"),
-);
+const BASE_URL = "https://ryuflix.vercel.app";
+const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
 
-const MovieDetailPage: NextPage<
-  Params<{ id: number }>
-> = ({ params }) => {
-  const { id } = use(params);
+async function getMovie(id: number) {
+  return tmdb.movies.details(id, [
+    "images",
+    "videos",
+    "credits",
+    "keywords",
+    "recommendations",
+    "similar",
+    "reviews",
+    "watch/providers",
+  ]);
+}
 
-  const {
-    data: movie,
-    isPending,
-    error,
-  } = useQuery({
-    queryFn: () =>
-      tmdb.movies.details(id, [
-        "images",
-        "videos",
-        "credits",
-        "keywords",
-        "recommendations",
-        "similar",
-        "reviews",
-        "watch/providers",
-      ]),
-    queryKey: ["movie-detail", id],
-  });
+function getMovieYear(
+  releaseDate?: string | null,
+) {
+  return releaseDate?.slice(0, 4) || null;
+}
 
-  if (isPending) {
-    return (
-      <Spinner
-        size="lg"
-        className="absolute-center"
-        variant="simple"
-      />
-    );
+export async function generateMetadata(
+  { params }: Params<{ id: string }>,
+): Promise<Metadata> {
+  const { id } = await params;
+  const movieId = Number(id);
+
+  if (!Number.isInteger(movieId)) {
+    return {
+      title: "Movie Not Found | RyuFlix",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
   }
 
-  if (error) notFound();
+  try {
+    const movie = await getMovie(movieId);
+
+    const year = getMovieYear(
+      movie.release_date,
+    );
+
+    const title = movie.title?.trim() || "Movie";
+
+    const pageTitle = year
+      ? `Watch ${title} (${year}) | RyuFlix`
+      : `Watch ${title} | RyuFlix`;
+
+    const description =
+      movie.overview?.trim() ||
+      `Watch ${title} on RyuFlix.`;
+
+    const canonical =
+      `${BASE_URL}/movie/${movieId}`;
+
+    const image = movie.poster_path
+      ? `${TMDB_IMAGE_BASE}/w780${movie.poster_path}`
+      : movie.backdrop_path
+        ? `${TMDB_IMAGE_BASE}/w1280${movie.backdrop_path}`
+        : undefined;
+
+    return {
+      title: pageTitle,
+
+      description,
+
+      alternates: {
+        canonical,
+      },
+
+      robots: {
+        index: true,
+        follow: true,
+      },
+
+      openGraph: {
+        type: "video.movie",
+        url: canonical,
+        siteName: "RyuFlix",
+        title: pageTitle,
+        description,
+        ...(image
+          ? {
+              images: [
+                {
+                  url: image,
+                  width: 780,
+                  height: 1170,
+                  alt: title,
+                },
+              ],
+            }
+          : {}),
+      },
+
+      twitter: {
+        card: image
+          ? "summary_large_image"
+          : "summary",
+        title: pageTitle,
+        description,
+        ...(image
+          ? {
+              images: [image],
+            }
+          : {}),
+      },
+    };
+  } catch {
+    return {
+      title: "Movie | RyuFlix",
+    };
+  }
+}
+
+export default async function MovieDetailPage(
+  { params }: Params<{ id: string }>,
+) {
+  const { id } = await params;
+  const movieId = Number(id);
+
+  if (!Number.isInteger(movieId)) {
+    notFound();
+  }
+
+  let movie;
+
+  try {
+    movie = await getMovie(movieId);
+  } catch {
+    notFound();
+  }
+
+  const canonical =
+    `${BASE_URL}/movie/${movieId}`;
+
+  const image = movie.poster_path
+    ? `${TMDB_IMAGE_BASE}/w780${movie.poster_path}`
+    : movie.backdrop_path
+      ? `${TMDB_IMAGE_BASE}/w1280${movie.backdrop_path}`
+      : null;
+
+  const directors = movie.credits.crew
+    .filter(
+      (person) =>
+        person.job === "Director",
+    )
+    .map((person) => ({
+      "@type": "Person",
+      name: person.name,
+    }));
+
+  const actors = movie.credits.cast
+    .slice(0, 10)
+    .map((person) => ({
+      "@type": "Person",
+      name: person.name,
+    }));
+
+  const movieSchema = {
+    "@context": "https://schema.org",
+    "@type": "Movie",
+    "@id": `${canonical}#movie`,
+    url: canonical,
+    name: movie.title,
+    ...(image
+      ? {
+          image: image,
+        }
+      : {}),
+    ...(movie.release_date
+      ? {
+          dateCreated: movie.release_date,
+        }
+      : {}),
+    ...(movie.overview
+      ? {
+          description: movie.overview,
+        }
+      : {}),
+    ...(movie.genres?.length
+      ? {
+          genre: movie.genres.map(
+            (genre) => genre.name,
+          ),
+        }
+      : {}),
+    ...(directors.length
+      ? {
+          director: directors,
+        }
+      : {}),
+    ...(actors.length
+      ? {
+          actor: actors,
+        }
+      : {}),
+  };
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <Suspense
-        fallback={
-          <Spinner
-            size="lg"
-            className="absolute-center"
-            variant="simple"
-          />
-        }
-      >
-        <div className="flex flex-col gap-10">
-          <BackdropSection movie={movie} />
-          <OverviewSection movie={movie} />
-          <CastsSection
-            casts={movie.credits.cast as Cast[]}
-          />
-          <PhotosSection
-            images={movie.images.backdrops as Image[]}
-          />
-          <RelatedSection movie={movie} />
-        </div>
-      </Suspense>
-    </div>
-  );
-};
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(
+            movieSchema,
+          ).replace(/</g, "\\u003c"),
+        }}
+      />
 
-export default MovieDetailPage;
+      <MovieDetailClient movie={movie} />
+    </>
+  );
+}
