@@ -1,4 +1,5 @@
 import {
+  AnimeEpisode,
   AnimeMedia,
   AnimePage,
 } from "@/types/anime";
