@@ -90,7 +90,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         tmdb.trending.trending(
           "movie",
           "day",
-          page,
+          { page },
         ),
       ),
 
@@ -98,7 +98,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         tmdb.trending.trending(
           "movie",
           "week",
-          page,
+          { page },
         ),
       ),
 
@@ -122,7 +122,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         tmdb.trending.trending(
           "tv",
           "day",
-          page,
+          { page },
         ),
       ),
 
@@ -130,7 +130,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         tmdb.trending.trending(
           "tv",
           "week",
-          page,
+          { page },
         ),
       ),
 
@@ -207,4 +207,4 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   } catch {
     return staticRoutes;
   }
-          }
+}
