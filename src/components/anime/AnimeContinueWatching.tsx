@@ -118,7 +118,6 @@ export default function AnimeContinueWatching() {
     return history
       .filter(
         (item) =>
-          !item.completed &&
           item.current_time > 0,
       )
       .slice(0, 12);
@@ -179,7 +178,9 @@ export default function AnimeContinueWatching() {
 
                 <div className="absolute bottom-3 left-3 right-3">
                   <span className="rounded-md bg-black/70 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white">
-                    Episode {item.episode}
+                    {item.completed
+                      ? "Finished"
+                      : `Episode ${item.episode}`}
                   </span>
                 </div>
               </div>
@@ -191,19 +192,22 @@ export default function AnimeContinueWatching() {
 
                 <div className="mt-1 flex items-center justify-between text-[11px] text-white/40">
                   <span>
-                    {formatTime(
-                      item.current_time,
-                    )}
+                    {item.completed
+                      ? "Finished"
+                      : formatTime(
+                          item.current_time,
+                        )}
                   </span>
 
                   {item.duration >
-                    0 && (
-                    <span>
-                      {formatTime(
-                        item.duration,
-                      )}
-                    </span>
-                  )}
+                    0 &&
+                    !item.completed && (
+                      <span>
+                        {formatTime(
+                          item.duration,
+                        )}
+                      </span>
+                    )}
                 </div>
 
                 <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
