@@ -313,6 +313,25 @@ export function removeAnimeWatchHistory(
   emit();
 }
 
+export function removeAnimeFromWatchHistory(
+  animeId: string,
+) {
+  if (!isBrowser()) return;
+
+  const history =
+    getAnimeWatchHistory().filter(
+      (item) =>
+        item.anime_id !== animeId,
+    );
+
+  window.localStorage.setItem(
+    ANIME_HISTORY_KEY,
+    JSON.stringify(history),
+  );
+
+  emit();
+}
+
 export function clearAnimeWatchHistory() {
   if (!isBrowser()) return;
 
@@ -325,4 +344,4 @@ export function clearAnimeWatchHistory() {
 
 export function getAnimeHistoryEventName() {
   return ANIME_HISTORY_EVENT;
-}
+      }
