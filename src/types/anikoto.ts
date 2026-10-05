@@ -55,6 +55,17 @@ export type AnikotoRecentResponse = {
   };
 };
 
+export type AnikotoSearchResponse = {
+  ok: boolean;
+  data: AnikotoAnime[];
+  pagination?: {
+    page?: number;
+    total_pages?: number;
+    total?: number | null;
+    has_next?: boolean;
+  };
+};
+
 export type AnikotoSeriesResponse = {
   ok: boolean;
   anime: AnikotoAnime;
