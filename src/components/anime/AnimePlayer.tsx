@@ -5,6 +5,9 @@ import {
   useRef,
 } from "react";
 import {
+  useRouter,
+} from "next/navigation";
+import {
   saveAnimeWatchProgress,
 } from "@/utils/animeHistory";
 
@@ -19,6 +22,9 @@ interface AnimePlayerProps {
 
   poster?: string | null;
   image?: string | null;
+
+  nextEpisode?: number | null;
+  language?: "sub" | "dub";
 }
 
 const MEGAPLAY_ORIGIN =
@@ -38,8 +44,14 @@ export default function AnimePlayer(
 
     poster,
     image,
+
+    nextEpisode,
+    language = "sub",
   }: AnimePlayerProps,
 ) {
+  const router =
+    useRouter();
+
   const latestProgressRef =
     useRef({
       currentTime: 0,
@@ -52,6 +64,9 @@ export default function AnimePlayer(
   const completedRef =
     useRef(false);
 
+  const advancingRef =
+    useRef(false);
+
   useEffect(() => {
     latestProgressRef.current = {
       currentTime: 0,
@@ -61,6 +76,8 @@ export default function AnimePlayer(
     lastSavedTimeRef.current = 0;
 
     completedRef.current = false;
+
+    advancingRef.current = false;
   }, [
     animeId,
     episode,
@@ -106,6 +123,25 @@ export default function AnimePlayer(
           latest.currentTime;
       };
 
+    const advanceToNextEpisode =
+      () => {
+        if (
+          !nextEpisode ||
+          advancingRef.current
+        ) {
+          return;
+        }
+
+        advancingRef.current =
+          true;
+
+        router.push(
+          `/anime/${encodeURIComponent(
+            animeId,
+          )}/watch?episode=${nextEpisode}&lang=${language}`,
+        );
+      };
+
     const handleMessage =
       (event: MessageEvent) => {
         if (
@@ -137,25 +173,6 @@ export default function AnimePlayer(
         ) {
           return;
         }
-
-        /*
-         * MegaPlay documents:
-         *
-         * {
-         *   event: "time",
-         *   time,
-         *   duration,
-         *   percent
-         * }
-         *
-         * and:
-         *
-         * {
-         *   type: "watching-log",
-         *   currentTime,
-         *   duration
-         * }
-         */
 
         if (
           data.event ===
@@ -267,10 +284,18 @@ export default function AnimePlayer(
           data.event ===
           "complete"
         ) {
+          if (
+            completedRef.current
+          ) {
+            return;
+          }
+
           completedRef.current =
             true;
 
           saveLatest(true);
+
+          advanceToNextEpisode();
         }
       };
 
@@ -313,6 +338,9 @@ export default function AnimePlayer(
     episodeTitle,
     poster,
     image,
+    nextEpisode,
+    language,
+    router,
   ]);
 
   return (
@@ -326,4 +354,4 @@ export default function AnimePlayer(
       referrerPolicy="origin"
     />
   );
-    }
+        }
