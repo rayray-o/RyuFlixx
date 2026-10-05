@@ -1,20 +1,17 @@
 import Link from "next/link";
 import {
-  getAnimePage,
   getAnimeTitle,
-} from "@/api/anilist";
+  getRecentAnime,
+} from "@/api/anikoto";
 
 export const revalidate = 300;
 
 export default async function AnimePage() {
-  const anime =
-    await getAnimePage({
-      page: 1,
-      perPage: 24,
-      sort: [
-        "TRENDING_DESC",
-      ],
-    });
+  const data =
+    await getRecentAnime(
+      1,
+      24,
+    );
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 pb-12">
@@ -24,28 +21,29 @@ export default async function AnimePage() {
         </p>
 
         <h1 className="text-3xl font-bold text-white md:text-5xl">
-          Trending Anime
+          Latest Anime
         </h1>
 
         <p className="mt-3 max-w-2xl text-sm text-white/55 md:text-base">
-          Discover anime powered by AniList,
-          with dedicated episode playback.
+          Discover anime with dedicated
+          episode playback.
         </p>
       </div>
 
       <section className="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-        {anime.media.map(
+        {data.anime.map(
           (item) => {
             const title =
               getAnimeTitle(item);
 
             const image =
-              item.coverImage.extraLarge ||
-              item.coverImage.large;
+              item.image ||
+              item.poster ||
+              item.cover;
 
             return (
               <Link
-                key={item.id}
+                key={String(item.id)}
                 href={`/anime/${item.id}`}
                 className="group min-w-0"
               >
@@ -69,21 +67,15 @@ export default async function AnimePage() {
                 </h2>
 
                 <div className="mt-1 flex items-center gap-2 text-xs text-white/45">
-                  {item.seasonYear && (
+                  {item.year && (
                     <span>
-                      {item.seasonYear}
+                      {item.year}
                     </span>
                   )}
 
-                  {item.format && (
+                  {item.type && (
                     <span>
-                      {item.format}
-                    </span>
-                  )}
-
-                  {item.averageScore && (
-                    <span>
-                      {item.averageScore / 10}
+                      {item.type}
                     </span>
                   )}
                 </div>
