@@ -1,6 +1,7 @@
 export type AnikotoEpisode = {
   episode: number;
   title?: string | null;
+  episode_embed_id?: string | number | null;
   embed_url?: {
     sub?: string | null;
     dub?: string | null;
