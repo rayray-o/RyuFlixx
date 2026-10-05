@@ -37,21 +37,19 @@ async function anikotoRequest<T>(
 export async function getRecentAnime(
   page = 1,
   perPage = 24,
-): Promise<AnikotoRecentResponse> {
+): Promise<
+  AnikotoRecentResponse & {
+    anime: AnikotoAnime[];
+  }
+> {
   const response =
-    await anikotoRequest<{
-      ok: boolean;
-      anikoto_domains?: string[];
-      data?: AnikotoAnime[];
-    }>(
+    await anikotoRequest<AnikotoRecentResponse>(
       `/recent-anime?page=${page}&per_page=${perPage}`,
     );
 
   return {
-    ok: response.ok,
-    anikoto_domains:
-      response.anikoto_domains,
-    data: response.data ?? [],
+    ...response,
+    anime: response.data ?? [],
   };
 }
 
@@ -82,4 +80,4 @@ export function getEpisodeEmbed(
     episode.embed_url?.[language] ??
     null
   );
-}
+    }
