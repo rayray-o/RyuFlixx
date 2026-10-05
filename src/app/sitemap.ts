@@ -103,19 +103,27 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       ),
 
       getMoviePages((page) =>
-        tmdb.movies.popular(page),
+        tmdb.movies.popular({
+          page,
+        }),
       ),
 
       getMoviePages((page) =>
-        tmdb.movies.nowPlaying(page),
+        tmdb.movies.nowPlaying({
+          page,
+        }),
       ),
 
       getMoviePages((page) =>
-        tmdb.movies.upcoming(page),
+        tmdb.movies.upcoming({
+          page,
+        }),
       ),
 
       getMoviePages((page) =>
-        tmdb.movies.topRated(page),
+        tmdb.movies.topRated({
+          page,
+        }),
       ),
 
       getMoviePages((page) =>
@@ -135,15 +143,21 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       ),
 
       getMoviePages((page) =>
-        tmdb.tvShows.popular(page),
+        tmdb.tvShows.popular({
+          page,
+        }),
       ),
 
       getMoviePages((page) =>
-        tmdb.tvShows.onTheAir(page),
+        tmdb.tvShows.onTheAir({
+          page,
+        }),
       ),
 
       getMoviePages((page) =>
-        tmdb.tvShows.topRated(page),
+        tmdb.tvShows.topRated({
+          page,
+        }),
       ),
     ]);
 
@@ -207,4 +221,4 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   } catch {
     return staticRoutes;
   }
-}
+      }
