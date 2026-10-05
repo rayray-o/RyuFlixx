@@ -7,6 +7,7 @@ import {
   getEpisodeEmbed,
 } from "@/api/anikoto";
 import { Params } from "@/types";
+import AnimePlayer from "@/components/anime/AnimePlayer";
 
 const BASE_URL =
   "https://ryuflix.vercel.app";
@@ -68,12 +69,15 @@ export async function generateMetadata(
     return {
       title:
         `${title} Episode ${episode} | RyuFlix`,
+
       description:
         `Watch ${title} episode ${episode} on RyuFlix.`,
+
       alternates: {
         canonical:
           `${BASE_URL}/anime/${anime.id}/watch?episode=${episode}`,
       },
+
       robots: {
         index: false,
         follow: true,
@@ -154,7 +158,9 @@ export default async function AnimeWatchPage(
   const fallbackUrl =
     fallbackEmbedId
       ? `https://megaplay.buzz/stream/s-2/${encodeURIComponent(
-          String(fallbackEmbedId),
+          String(
+            fallbackEmbedId,
+          ),
         )}/${requestedLanguage}`
       : null;
 
@@ -217,14 +223,20 @@ export default async function AnimeWatchPage(
 
       <section className="overflow-hidden rounded-2xl border border-white/10 bg-black">
         <div className="relative aspect-video w-full bg-black">
-          <iframe
-            key={playerUrl}
-            src={playerUrl}
-            title={`${title} Episode ${episodeNumber}`}
-            className="absolute inset-0 h-full w-full border-0"
-            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-            allowFullScreen
-            referrerPolicy="origin"
+          <AnimePlayer
+            playerUrl={playerUrl}
+            animeId={String(anime.id)}
+            title={title}
+            episode={episodeNumber}
+            episodeTitle={
+              episode.title
+            }
+            poster={
+              anime.poster
+            }
+            image={
+              anime.image
+            }
           />
         </div>
       </section>
@@ -252,7 +264,8 @@ export default async function AnimeWatchPage(
               <Link
                 href={`/anime/${anime.id}/watch?episode=${episodeNumber}&lang=sub`}
                 className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
-                  requestedLanguage === "sub"
+                  requestedLanguage ===
+                  "sub"
                     ? "border-warning/50 bg-warning/10 text-warning"
                     : "border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white"
                 }`}
@@ -265,7 +278,8 @@ export default async function AnimeWatchPage(
               <Link
                 href={`/anime/${anime.id}/watch?episode=${episodeNumber}&lang=dub`}
                 className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
-                  requestedLanguage === "dub"
+                  requestedLanguage ===
+                  "dub"
                     ? "border-warning/50 bg-warning/10 text-warning"
                     : "border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white"
                 }`}
