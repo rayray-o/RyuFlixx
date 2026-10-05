@@ -3,6 +3,7 @@ import {
   getAnimeTitle,
   getRecentAnime,
 } from "@/api/anikoto";
+import AnimeContinueWatching from "@/components/anime/AnimeContinueWatching";
 
 export const revalidate = 300;
 
@@ -15,6 +16,8 @@ export default async function AnimePage() {
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 pb-12">
+      <AnimeContinueWatching />
+
       <div className="mb-8">
         <p className="mb-2 text-xs font-semibold uppercase tracking-[0.25em] text-warning">
           RyuFlix Anime
@@ -86,4 +89,4 @@ export default async function AnimePage() {
       </section>
     </main>
   );
-                      }
+}
