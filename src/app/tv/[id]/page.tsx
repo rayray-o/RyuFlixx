@@ -1,77 +1,213 @@
-"use client";
-
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { tmdb } from "@/api/tmdb";
 import { Params } from "@/types";
-import { Spinner } from "@heroui/react";
-import { useScrollIntoView } from "@mantine/hooks";
-import { useQuery } from "@tanstack/react-query";
-import { notFound } from "next/navigation";
-import { Suspense, use } from "react";
-import dynamic from "next/dynamic";
-import { NextPage } from "next";
-const PhotosSection = dynamic(() => import("@/components/ui/other/PhotosSection"));
-const TvShowRelatedSection = dynamic(() => import("@/components/sections/TV/Details/Related"));
-const TvShowCastsSection = dynamic(() => import("@/components/sections/TV/Details/Casts"));
-const TvShowBackdropSection = dynamic(() => import("@/components/sections/TV/Details/Backdrop"));
-const TvShowOverviewSection = dynamic(() => import("@/components/sections/TV/Details/Overview"));
-const TvShowsSeasonsSelection = dynamic(() => import("@/components/sections/TV/Details/Seasons"));
+import TVShowDetailClient from "./TVShowDetailClient";
 
-const TVShowDetailPage: NextPage<Params<{ id: number }>> = ({ params }) => {
-  const { id } = use(params);
-  const { scrollIntoView, targetRef } = useScrollIntoView<HTMLDivElement>({
-    duration: 500,
-  });
+const BASE_URL = "https://ryuflix.vercel.app";
+const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
 
-  const {
-    data: tv,
-    isPending,
-    error,
-  } = useQuery({
-    queryFn: () =>
-      tmdb.tvShows.details(id, [
-        "images",
-        "videos",
-        "credits",
-        "keywords",
-        "recommendations",
-        "similar",
-        "reviews",
-        "watch/providers",
-      ]),
-    queryKey: ["tv-show-detail", id],
-  });
+async function getTVShow(id: number) {
+  return tmdb.tvShows.details(id, [
+    "images",
+    "videos",
+    "credits",
+    "keywords",
+    "recommendations",
+    "similar",
+    "reviews",
+    "watch/providers",
+  ]);
+}
 
-  if (isPending) {
-    return (
-      <div className="mx-auto max-w-5xl">
-        <Spinner size="lg" className="absolute-center" color="warning" variant="simple" />
-      </div>
-    );
+export async function generateMetadata(
+  { params }: Params<{ id: string }>,
+): Promise<Metadata> {
+  const { id } = await params;
+  const tvId = Number(id);
+
+  if (!Number.isInteger(tvId)) {
+    return {
+      title: "TV Show Not Found | RyuFlix",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
   }
 
-  if (error) notFound();
+  try {
+    const tv = await getTVShow(tvId);
+
+    const title =
+      tv.name?.trim() || "TV Show";
+
+    const year =
+      tv.first_air_date?.slice(0, 4);
+
+    const pageTitle = year
+      ? `Watch ${title} (${year}) | RyuFlix`
+      : `Watch ${title} | RyuFlix`;
+
+    const description =
+      tv.overview?.trim() ||
+      `Watch ${title} on RyuFlix.`;
+
+    const canonical =
+      `${BASE_URL}/tv/${tvId}`;
+
+    const image = tv.poster_path
+      ? `${TMDB_IMAGE_BASE}/w780${tv.poster_path}`
+      : tv.backdrop_path
+        ? `${TMDB_IMAGE_BASE}/w1280${tv.backdrop_path}`
+        : undefined;
+
+    return {
+      title: pageTitle,
+
+      description,
+
+      alternates: {
+        canonical,
+      },
+
+      robots: {
+        index: true,
+        follow: true,
+      },
+
+      openGraph: {
+        type: "website",
+        url: canonical,
+        siteName: "RyuFlix",
+        title: pageTitle,
+        description,
+        ...(image
+          ? {
+              images: [
+                {
+                  url: image,
+                  width: 780,
+                  height: 1170,
+                  alt: title,
+                },
+              ],
+            }
+          : {}),
+      },
+
+      twitter: {
+        card: image
+          ? "summary_large_image"
+          : "summary",
+        title: pageTitle,
+        description,
+        ...(image
+          ? {
+              images: [image],
+            }
+          : {}),
+      },
+    };
+  } catch {
+    return {
+      title: "TV Show | RyuFlix",
+    };
+  }
+}
+
+export default async function TVShowDetailPage(
+  { params }: Params<{ id: string }>,
+) {
+  const { id } = await params;
+  const tvId = Number(id);
+
+  if (!Number.isInteger(tvId)) {
+    notFound();
+  }
+
+  let tv;
+
+  try {
+    tv = await getTVShow(tvId);
+  } catch {
+    notFound();
+  }
+
+  const canonical =
+    `${BASE_URL}/tv/${tvId}`;
+
+  const image = tv.poster_path
+    ? `${TMDB_IMAGE_BASE}/w780${tv.poster_path}`
+    : tv.backdrop_path
+      ? `${TMDB_IMAGE_BASE}/w1280${tv.backdrop_path}`
+      : null;
+
+  const creators =
+    tv.created_by?.map((person) => ({
+      "@type": "Person",
+      name: person.name,
+    })) ?? [];
+
+  const actors = tv.credits.cast
+    .slice(0, 10)
+    .map((person) => ({
+      "@type": "Person",
+      name: person.name,
+    }));
+
+  const tvSchema = {
+    "@context": "https://schema.org",
+    "@type": "TVSeries",
+    "@id": `${canonical}#tvseries`,
+    url: canonical,
+    name: tv.name,
+    ...(image
+      ? {
+          image: image,
+        }
+      : {}),
+    ...(tv.first_air_date
+      ? {
+          dateCreated: tv.first_air_date,
+        }
+      : {}),
+    ...(tv.overview
+      ? {
+          description: tv.overview,
+        }
+      : {}),
+    ...(tv.genres?.length
+      ? {
+          genre: tv.genres.map(
+            (genre) => genre.name,
+          ),
+        }
+      : {}),
+    ...(creators.length
+      ? {
+          creator: creators,
+        }
+      : {}),
+    ...(actors.length
+      ? {
+          actor: actors,
+        }
+      : {}),
+  };
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <Suspense
-        fallback={
-          <Spinner size="lg" className="absolute-center" color="warning" variant="simple" />
-        }
-      >
-        <div className="flex flex-col gap-10">
-          <TvShowBackdropSection tv={tv} />
-          <TvShowOverviewSection
-            onViewEpisodesClick={() => scrollIntoView({ alignment: "center" })}
-            tv={tv}
-          />
-          <TvShowCastsSection casts={tv.credits.cast} />
-          <PhotosSection images={tv.images.backdrops} type="tv" />
-          <TvShowsSeasonsSelection ref={targetRef} id={id} seasons={tv.seasons} />
-          <TvShowRelatedSection tv={tv} />
-        </div>
-      </Suspense>
-    </div>
-  );
-};
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(
+            tvSchema,
+          ).replace(/</g, "\\u003c"),
+        }}
+      />
 
-export default TVShowDetailPage;
+      <TVShowDetailClient tv={tv} />
+    </>
+  );
+      }
