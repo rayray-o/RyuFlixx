@@ -4,6 +4,7 @@ import {
 } from "@/api/anikoto";
 import AnimePosterCard from "@/components/anime/AnimePosterCard";
 import AnimeSearchBar from "@/components/anime/AnimeSearchBar";
+import type { AnikotoAnime } from "@/types/anikoto";
 
 export const revalidate = 300;
 
@@ -40,7 +41,8 @@ export default async function AnimeSearchPage(
         )
       : 1;
 
-  let results = [];
+  let results: AnikotoAnime[] =
+    [];
   let hasNextPage = false;
   let totalResults =
     0;
