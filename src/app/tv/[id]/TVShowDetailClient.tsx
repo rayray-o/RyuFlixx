@@ -4,7 +4,8 @@ import { Suspense } from "react";
 import dynamic from "next/dynamic";
 import { useScrollIntoView } from "@mantine/hooks";
 import { Spinner } from "@heroui/react";
-import type { tmdb } from "@/api/tmdb";
+import { TvShowDetails } from "tmdb-ts/dist/types/tv-shows";
+import { AppendToResponse } from "tmdb-ts/dist/types/options";
 
 const PhotosSection = dynamic(
   () =>
@@ -48,12 +49,23 @@ const TvShowsSeasonsSelection = dynamic(
     ),
 );
 
-type TVShowDetails = Awaited<
-  ReturnType<typeof tmdb.tvShows.details>
+type TVShowDetailsWithData = AppendToResponse<
+  TvShowDetails,
+  (
+    | "images"
+    | "videos"
+    | "credits"
+    | "keywords"
+    | "recommendations"
+    | "similar"
+    | "reviews"
+    | "watch/providers"
+  )[],
+  "tvShow"
 >;
 
 interface TVShowDetailClientProps {
-  tv: TVShowDetails;
+  tv: TVShowDetailsWithData;
 }
 
 const TVShowDetailClient: React.FC<
