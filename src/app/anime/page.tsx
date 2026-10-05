@@ -1,5 +1,4 @@
 import Link from "next/link";
-import Image from "next/image";
 import {
   getAnimePage,
   getAnimeTitle,
@@ -12,7 +11,9 @@ export default async function AnimePage() {
     await getAnimePage({
       page: 1,
       perPage: 24,
-      sort: "TRENDING_DESC",
+      sort: [
+        "TRENDING_DESC",
+      ],
     });
 
   return (
@@ -50,12 +51,11 @@ export default async function AnimePage() {
               >
                 <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-white/5">
                   {image ? (
-                    <Image
+                    <img
                       src={image}
                       alt={title}
-                      fill
-                      sizes="(max-width: 640px) 45vw, (max-width: 768px) 30vw, (max-width: 1024px) 22vw, 16vw"
-                      className="object-cover transition-transform duration-300 group-hover:scale-105"
+                      loading="lazy"
+                      className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center text-xs text-white/30">
@@ -94,4 +94,4 @@ export default async function AnimePage() {
       </section>
     </main>
   );
-}
+                      }
