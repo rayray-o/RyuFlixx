@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import {
-  getAnimeById,
-  getAnimeTitle,
-} from "@/api/anilist";
-import { Params } from "@/types";
 import Link from "next/link";
-import Image from "next/image";
+import {
+  getAnimeSeries,
+  getAnimeTitle,
+} from "@/api/anikoto";
+import { Params } from "@/types";
 
 const BASE_URL =
   "https://ryuflix.vercel.app";
@@ -16,6 +15,19 @@ type AnimeDetailPageProps =
     id: string;
   }>;
 
+export const revalidate = 300;
+
+function cleanDescription(
+  description?: string | null,
+): string {
+  return (
+    description
+      ?.replace(/<[^>]*>/g, "")
+      .trim() ||
+    "Anime on RyuFlix."
+  );
+}
+
 export async function generateMetadata(
   {
     params,
@@ -24,56 +36,33 @@ export async function generateMetadata(
   const { id } =
     await params;
 
-  const animeId =
-    Number(id);
-
-  if (
-    !Number.isInteger(
-      animeId,
-    )
-  ) {
-    return {
-      title:
-        "Anime Not Found | RyuFlix",
-      robots: {
-        index: false,
-        follow: false,
-      },
-    };
-  }
-
   try {
+    const data =
+      await getAnimeSeries(id);
+
     const anime =
-      await getAnimeById(
-        animeId,
-      );
+      data.anime;
 
     const title =
       getAnimeTitle(anime);
 
-    const pageTitle =
-      `Watch ${title} | RyuFlix`;
-
     const description =
-      anime.description
-        ?.replace(
-          /<[^>]*>/g,
-          "",
-        )
-        .trim() ||
-      `Watch ${title} on RyuFlix.`;
+      cleanDescription(
+        anime.description,
+      );
 
     const canonical =
       `${BASE_URL}/anime/${anime.id}`;
 
     const image =
-      anime.coverImage.extraLarge ||
-      anime.coverImage.large ||
-      anime.bannerImage ||
+      anime.poster ||
+      anime.image ||
+      anime.cover ||
       undefined;
 
     return {
-      title: pageTitle,
+      title:
+        `Watch ${title} | RyuFlix`,
 
       description,
 
@@ -90,7 +79,8 @@ export async function generateMetadata(
         type: "website",
         url: canonical,
         siteName: "RyuFlix",
-        title: pageTitle,
+        title:
+          `Watch ${title} | RyuFlix`,
         description,
 
         ...(image
@@ -110,7 +100,8 @@ export async function generateMetadata(
           ? "summary_large_image"
           : "summary",
 
-        title: pageTitle,
+        title:
+          `Watch ${title} | RyuFlix`,
         description,
 
         ...(image
@@ -136,25 +127,19 @@ export default async function AnimeDetailPage(
   const { id } =
     await params;
 
-  const animeId =
-    Number(id);
+  let data;
 
-  if (
-    !Number.isInteger(
-      animeId,
-    )
-  ) {
+  try {
+    data =
+      await getAnimeSeries(id);
+  } catch {
     notFound();
   }
 
-  let anime;
+  const anime =
+    data.anime;
 
-  try {
-    anime =
-      await getAnimeById(
-        animeId,
-      );
-  } catch {
+  if (!anime) {
     notFound();
   }
 
@@ -162,22 +147,21 @@ export default async function AnimeDetailPage(
     getAnimeTitle(anime);
 
   const description =
-    anime.description
-      ?.replace(
-        /<[^>]*>/g,
-        "",
-      )
-      .trim() ||
-    "Anime on RyuFlix.";
+    cleanDescription(
+      anime.description,
+    );
+
+  const image =
+    anime.poster ||
+    anime.image ||
+    anime.cover ||
+    null;
+
+  const episodes =
+    data.episodes || [];
 
   const canonical =
     `${BASE_URL}/anime/${anime.id}`;
-
-  const image =
-    anime.coverImage.extraLarge ||
-    anime.coverImage.large ||
-    anime.bannerImage ||
-    null;
 
   const animeSchema = {
     "@context":
@@ -205,14 +189,14 @@ export default async function AnimeDetailPage(
         }
       : {}),
 
-    ...(anime.seasonYear
+    ...(anime.year
       ? {
           dateCreated:
-            `${anime.seasonYear}-01-01`,
+            `${anime.year}-01-01`,
         }
       : {}),
 
-    ...(anime.genres.length
+    ...(anime.genres?.length
       ? {
           genre:
             anime.genres,
@@ -236,65 +220,57 @@ export default async function AnimeDetailPage(
       />
 
       <main className="mx-auto w-full max-w-6xl px-4 pb-12">
-        <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/30">
-          {anime.bannerImage && (
+        <section className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/30">
+          {image && (
             <div className="absolute inset-0">
-              <Image
-                src={
-                  anime.bannerImage
-                }
+              <img
+                src={image}
                 alt=""
-                fill
-                priority
-                sizes="100vw"
-                className="object-cover opacity-25 blur-[1px]"
+                className="h-full w-full object-cover opacity-20 blur-[2px]"
               />
 
-              <div className="absolute inset-0 bg-black/70" />
+              <div className="absolute inset-0 bg-black/75" />
             </div>
           )}
 
           <div className="relative flex flex-col gap-6 p-5 md:flex-row md:p-8">
             {image && (
               <div className="relative aspect-[2/3] w-36 shrink-0 overflow-hidden rounded-xl md:w-52">
-                <Image
+                <img
                   src={image}
                   alt={title}
-                  fill
-                  priority
-                  sizes="208px"
-                  className="object-cover"
+                  className="h-full w-full object-cover"
                 />
               </div>
             )}
 
             <div className="flex min-w-0 flex-col justify-end">
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.25em] text-warning">
-                Anime
+                RyuFlix Anime
               </p>
 
               <h1 className="text-3xl font-bold text-white md:text-5xl">
                 {title}
               </h1>
 
-              {anime.title.native &&
-                anime.title.native !==
+              {anime.native &&
+                anime.native !==
                   title && (
                   <p className="mt-2 text-sm text-white/45">
-                    {anime.title.native}
+                    {anime.native}
                   </p>
                 )}
 
               <div className="mt-4 flex flex-wrap gap-2 text-xs text-white/55">
-                {anime.seasonYear && (
+                {anime.year && (
                   <span>
-                    {anime.seasonYear}
+                    {anime.year}
                   </span>
                 )}
 
-                {anime.format && (
+                {anime.type && (
                   <span>
-                    {anime.format}
+                    {anime.type}
                   </span>
                 )}
 
@@ -304,30 +280,108 @@ export default async function AnimeDetailPage(
                   </span>
                 )}
 
-                {anime.averageScore && (
+                {anime.status && (
                   <span>
-                    Score{" "}
-                    {anime.averageScore / 10}
+                    {anime.status}
+                  </span>
+                )}
+
+                {anime.rating && (
+                  <span>
+                    {anime.rating}
                   </span>
                 )}
               </div>
 
+              {anime.genres &&
+                anime.genres.length > 0 && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {anime.genres.map(
+                      (genre) => (
+                        <span
+                          key={genre}
+                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/60"
+                        >
+                          {genre}
+                        </span>
+                      ),
+                    )}
+                  </div>
+                )}
+
               <p className="mt-5 max-w-3xl text-sm leading-7 text-white/65">
                 {description}
               </p>
-
-              <div className="mt-6">
-                <Link
-                  href={`/anime/${anime.id}/watch?episode=1`}
-                  className="inline-flex items-center rounded-xl bg-warning px-5 py-3 text-sm font-semibold text-black transition-transform hover:scale-[1.02]"
-                >
-                  Watch Episode 1
-                </Link>
-              </div>
             </div>
           </div>
-        </div>
+        </section>
+
+        <section className="mt-8">
+          <div className="mb-5 flex items-end justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-warning">
+                Episodes
+              </p>
+
+              <h2 className="mt-1 text-2xl font-bold text-white">
+                Watch Episodes
+              </h2>
+            </div>
+
+            <span className="text-sm text-white/40">
+              {episodes.length} available
+            </span>
+          </div>
+
+          {episodes.length > 0 ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+              {episodes.map(
+                (episode) => (
+                  <Link
+                    key={episode.episode}
+                    href={`/anime/${anime.id}/watch?episode=${episode.episode}`}
+                    className="group rounded-xl border border-white/10 bg-white/[0.03] p-4 transition-colors hover:border-warning/40 hover:bg-white/[0.06]"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-lg font-bold text-white">
+                        {episode.episode}
+                      </span>
+
+                      <span className="text-xs text-warning opacity-0 transition-opacity group-hover:opacity-100">
+                        Watch
+                      </span>
+                    </div>
+
+                    {episode.title && (
+                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-white/45">
+                        {episode.title}
+                      </p>
+                    )}
+
+                    <div className="mt-3 flex gap-2">
+                      {episode.embed_url?.sub && (
+                        <span className="rounded-md bg-white/5 px-2 py-1 text-[10px] uppercase tracking-wide text-white/45">
+                          Sub
+                        </span>
+                      )}
+
+                      {episode.embed_url?.dub && (
+                        <span className="rounded-md bg-white/5 px-2 py-1 text-[10px] uppercase tracking-wide text-white/45">
+                          Dub
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                ),
+              )}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-8 text-center text-sm text-white/40">
+              No episodes available.
+            </div>
+          )}
+        </section>
       </main>
     </>
   );
-            }
+}
