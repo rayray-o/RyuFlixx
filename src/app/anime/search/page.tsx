@@ -1,4 +1,7 @@
 import Link from "next/link";
+import {
+  searchAnime,
+} from "@/api/anikoto";
 import AnimePosterCard from "@/components/anime/AnimePosterCard";
 import AnimeSearchBar from "@/components/anime/AnimeSearchBar";
 
@@ -7,6 +10,7 @@ export const revalidate = 300;
 type AnimeSearchPageProps = {
   searchParams: Promise<{
     q?: string;
+    page?: string;
   }>;
 };
 
@@ -15,42 +19,52 @@ export default async function AnimeSearchPage(
     searchParams,
   }: AnimeSearchPageProps,
 ) {
-  const query =
+  const params =
     await searchParams;
 
   const search =
-    query.q?.trim() ?? "";
+    params.q?.trim() ?? "";
 
-  let results =
-    search.length > 0
-      ? (
-          await getRecentAnime(
-            1,
-            100,
-          )
-        ).anime.filter(
-          (anime) => {
-            const haystack =
-              [
-                anime.title,
-                anime.name,
-                anime.romaji,
-                anime.alternative,
-                anime.native,
-              ]
-                .filter(Boolean)
-                .join(" ")
-                .toLowerCase();
+  const requestedPage =
+    Number(
+      params.page ?? "1",
+    );
 
-            return haystack.includes(
-              search.toLowerCase(),
-            );
-          },
+  const page =
+    Number.isFinite(
+      requestedPage,
+    ) &&
+    requestedPage > 0
+      ? Math.floor(
+          requestedPage,
         )
-      : [];
+      : 1;
 
-  results =
-    results.slice(0, 60);
+  let results = [];
+  let hasNextPage = false;
+  let totalResults =
+    0;
+
+  if (search.length > 0) {
+    const response =
+      await searchAnime(
+        search,
+        page,
+      );
+
+    results =
+      response.data ?? [];
+
+    hasNextPage =
+      response.pagination
+        ?.has_next ??
+      false;
+
+    totalResults =
+      response.pagination
+        ?.total ??
+      results.length;
+  }
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 pb-12">
@@ -90,7 +104,9 @@ export default async function AnimeSearchPage(
           </p>
 
           <h2 className="mt-2 text-xl font-bold text-white">
-            Nothing matched “{search}”
+            Nothing matched “
+            {search}
+            ”
           </h2>
 
           <p className="mt-2 text-sm text-white/45">
@@ -101,10 +117,15 @@ export default async function AnimeSearchPage(
         <>
           <div className="mb-5">
             <p className="text-sm text-white/45">
-              {results.length} result
-              {results.length === 1
+              {totalResults ||
+                results.length}{" "}
+              result
+              {(totalResults ||
+                results.length) ===
+              1
                 ? ""
-                : "s"} for{" "}
+                : "s"}{" "}
+              for{" "}
               <span className="font-semibold text-white">
                 “{search}”
               </span>
@@ -123,6 +144,33 @@ export default async function AnimeSearchPage(
               ),
             )}
           </section>
+
+          {(page > 1 ||
+            hasNextPage) && (
+            <div className="mt-10 flex items-center justify-center gap-3">
+              {page > 1 && (
+                <Link
+                  href={`/anime/search?q=${encodeURIComponent(search)}&page=${page - 1}`}
+                  className="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/70 transition hover:bg-white/10 hover:text-white"
+                >
+                  ← Previous
+                </Link>
+              )}
+
+              <span className="rounded-xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm text-white/40">
+                Page {page}
+              </span>
+
+              {hasNextPage && (
+                <Link
+                  href={`/anime/search?q=${encodeURIComponent(search)}&page=${page + 1}`}
+                  className="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/70 transition hover:bg-white/10 hover:text-white"
+                >
+                  Next →
+                </Link>
+              )}
+            </div>
+          )}
         </>
       )}
     </main>
