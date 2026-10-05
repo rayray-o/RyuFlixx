@@ -1,10 +1,6 @@
 import Link from "next/link";
 import AnimePosterCard from "@/components/anime/AnimePosterCard";
 import AnimeSearchBar from "@/components/anime/AnimeSearchBar";
-import {
-  getRecentAnime,
-  getAnimeTitle,
-} from "@/api/anikoto";
 
 export const revalidate = 300;
 
