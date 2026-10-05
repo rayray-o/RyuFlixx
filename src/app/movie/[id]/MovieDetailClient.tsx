@@ -5,7 +5,8 @@ import { Spinner } from "@heroui/spinner";
 import { Cast } from "tmdb-ts/dist/types/credits";
 import { Image } from "tmdb-ts";
 import dynamic from "next/dynamic";
-import type { tmdb } from "@/api/tmdb";
+import { MovieDetails } from "tmdb-ts/dist/types/movies";
+import { AppendToResponse } from "tmdb-ts/dist/types/options";
 
 const PhotosSection = dynamic(
   () => import("@/components/ui/other/PhotosSection"),
@@ -23,12 +24,23 @@ const RelatedSection = dynamic(
   () => import("@/components/sections/Movie/Detail/Related"),
 );
 
-type MovieDetails = Awaited<
-  ReturnType<typeof tmdb.movies.details>
+type MovieDetailsWithData = AppendToResponse<
+  MovieDetails,
+  (
+    | "images"
+    | "videos"
+    | "credits"
+    | "keywords"
+    | "recommendations"
+    | "similar"
+    | "reviews"
+    | "watch/providers"
+  )[],
+  "movie"
 >;
 
 interface MovieDetailClientProps {
-  movie: MovieDetails;
+  movie: MovieDetailsWithData;
 }
 
 const MovieDetailClient: React.FC<
