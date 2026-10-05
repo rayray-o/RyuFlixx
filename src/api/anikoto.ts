@@ -5,7 +5,8 @@ import type {
   AnikotoSeriesResponse,
 } from "@/types/anikoto";
 
-const ANIKOTO_API_BASE = "https://anikotoapi.site";
+const ANIKOTO_API_BASE =
+  "https://anikotoapi.site";
 
 async function anikotoRequest<T>(
   path: string,
@@ -37,9 +38,21 @@ export async function getRecentAnime(
   page = 1,
   perPage = 24,
 ): Promise<AnikotoRecentResponse> {
-  return anikotoRequest<AnikotoRecentResponse>(
-    `/recent-anime?page=${page}&per_page=${perPage}`,
-  );
+  const response =
+    await anikotoRequest<{
+      ok: boolean;
+      anikoto_domains?: string[];
+      data?: AnikotoAnime[];
+    }>(
+      `/recent-anime?page=${page}&per_page=${perPage}`,
+    );
+
+  return {
+    ok: response.ok,
+    anikoto_domains:
+      response.anikoto_domains,
+    data: response.data ?? [],
+  };
 }
 
 export async function getAnimeSeries(
@@ -65,5 +78,8 @@ export function getEpisodeEmbed(
   episode: AnikotoEpisode,
   language: "sub" | "dub" = "sub",
 ): string | null {
-  return episode.embed_url?.[language] ?? null;
+  return (
+    episode.embed_url?.[language] ??
+    null
+  );
 }
