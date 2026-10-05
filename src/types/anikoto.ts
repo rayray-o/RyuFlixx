@@ -12,6 +12,9 @@ export type AnikotoAnime = {
   title?: string | null;
   name?: string | null;
   romaji?: string | null;
+  alternative?: string | null;
+  native?: string | null;
+  slug?: string | null;
   image?: string | null;
   poster?: string | null;
   cover?: string | null;
@@ -26,11 +29,22 @@ export type AnikotoAnime = {
     string,
     string[]
   >;
+  rating?: string | number | null;
+  duration?: string | number | null;
+  airing?: string | null;
+  is_sub?: number | boolean | null;
+  is_dub?: number | boolean | null;
+  mal_id?: number | null;
+  anilist_id?: number | null;
+  source?: string | null;
+  manga?: string | null;
+  background_image?: string | null;
 };
 
 export type AnikotoRecentResponse = {
   ok: boolean;
-  anime: AnikotoAnime[];
+  anikoto_domains?: string[];
+  data: AnikotoAnime[];
   pagination?: {
     page?: number;
     per_page?: number;
