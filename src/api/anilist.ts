@@ -18,7 +18,7 @@ async function anilistRequest<T>(
   query: string,
   variables: Record<
     string,
-    string | number | boolean | null
+    string | number | boolean | string[] | null
   > = {},
 ): Promise<T> {
   const response = await fetch(
@@ -161,7 +161,7 @@ export async function getAnimePage(
   options: {
     page?: number;
     perPage?: number;
-    sort?: string;
+    sort?: string[];
     status?: string;
     season?: string;
   } = {},
@@ -179,7 +179,9 @@ export async function getAnimePage(
           options.perPage ?? 20,
 
         sort:
-          options.sort ?? "TRENDING_DESC",
+          options.sort ?? [
+            "TRENDING_DESC",
+          ],
 
         status:
           options.status ?? null,
