@@ -84,7 +84,7 @@ async function malRequest<T>(
   );
 }
 
-async function getAnimeRanking(
+export async function getAnimeRanking(
   rankingType: MalRankingType,
   page = 1,
   limit = 24,
