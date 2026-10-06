@@ -1,13 +1,12 @@
-import { Poppins as FontPoppins, Saira as FontSaira } from "next/font/google";
+const fallbackFontClass =
+  "font-sans";
 
-export const Poppins = FontPoppins({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+export const Poppins = {
+  className: fallbackFontClass,
   variable: "--font-poppins",
-});
+};
 
-export const Saira = FontSaira({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+export const Saira = {
+  className: fallbackFontClass,
   variable: "--font-saira",
-});
+};
