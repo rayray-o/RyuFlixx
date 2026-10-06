@@ -473,4 +473,4 @@ export async function getAniListAnimeByMalId(
 
     return null;
   }
-        }
+}
