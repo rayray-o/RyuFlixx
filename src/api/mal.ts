@@ -12,16 +12,27 @@ const MAL_FIELDS = [
   "title",
   "main_picture",
   "alternative_titles",
-  "media_type",
-  "status",
-  "num_episodes",
   "start_date",
   "end_date",
   "synopsis",
   "mean",
-  "genres",
   "rank",
   "popularity",
+  "media_type",
+  "status",
+  "genres",
+  "num_episodes",
+  "start_season",
+  "broadcast",
+  "source",
+  "average_episode_duration",
+  "rating",
+  "studios",
+  "pictures",
+  "background",
+  "related_anime",
+  "recommendations",
+  "statistics",
 ].join(",");
 
 export type MalRankingType =
@@ -124,7 +135,18 @@ export async function getAnimeRanking(
 
   params.set(
     "fields",
-    MAL_FIELDS,
+    [
+      "id",
+      "title",
+      "main_picture",
+      "alternative_titles",
+      "media_type",
+      "status",
+      "num_episodes",
+      "start_date",
+      "mean",
+      "genres",
+    ].join(","),
   );
 
   const response =
@@ -198,7 +220,18 @@ export async function searchAnime(
 
   params.set(
     "fields",
-    MAL_FIELDS,
+    [
+      "id",
+      "title",
+      "main_picture",
+      "alternative_titles",
+      "media_type",
+      "status",
+      "num_episodes",
+      "start_date",
+      "mean",
+      "genres",
+    ].join(","),
   );
 
   const response =
@@ -236,23 +269,17 @@ export async function getAnime(
     MAL_FIELDS,
   );
 
-  const response =
-    await malRequest<MalAnimeDetailResponse>(
-      `/anime/${encodeURIComponent(
-        String(id),
-      )}?${params.toString()}`,
-    );
-
-  return response;
+  return malRequest<MalAnimeDetailResponse>(
+    `/anime/${encodeURIComponent(
+      String(id),
+    )}?${params.toString()}`,
+  );
 }
 
 export async function getLatestAnime(
   page = 1,
   limit = 24,
-): Promise<{
-  anime: MalAnime[];
-  hasNext: boolean;
-}> {
+) {
   return getAnimeRanking(
     "airing",
     page,
@@ -385,4 +412,4 @@ export function getAnimeGenres(
         genre.name,
     ) ?? []
   );
-        }
+    }
