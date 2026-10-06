@@ -14,6 +14,47 @@ export type MalGenre = {
   name: string;
 };
 
+export type MalStudio = {
+  id: number;
+  name: string;
+};
+
+export type MalStartSeason = {
+  year?: number | null;
+  season?: string | null;
+};
+
+export type MalBroadcast = {
+  day_of_the_week?: string | null;
+  start_time?: string | null;
+};
+
+export type MalRelatedAnime = {
+  node: MalAnime;
+
+  relation_type?: string | null;
+
+  relation_type_formatted?: string | null;
+};
+
+export type MalRecommendation = {
+  node: MalAnime;
+
+  num_recommendations?: number | null;
+};
+
+export type MalStatistics = {
+  status?: {
+    watching?: number | null;
+    completed?: number | null;
+    on_hold?: number | null;
+    dropped?: number | null;
+    plan_to_watch?: number | null;
+  } | null;
+
+  num_list_users?: number | null;
+};
+
 export type MalAnime = {
   id: number;
 
@@ -23,12 +64,6 @@ export type MalAnime = {
 
   alternative_titles?: MalAlternativeTitles | null;
 
-  media_type?: string | null;
-
-  status?: string | null;
-
-  num_episodes?: number | null;
-
   start_date?: string | null;
 
   end_date?: string | null;
@@ -37,11 +72,39 @@ export type MalAnime = {
 
   mean?: number | null;
 
-  genres?: MalGenre[];
-
   rank?: number | null;
 
   popularity?: number | null;
+
+  media_type?: string | null;
+
+  status?: string | null;
+
+  genres?: MalGenre[];
+
+  num_episodes?: number | null;
+
+  start_season?: MalStartSeason | null;
+
+  broadcast?: MalBroadcast | null;
+
+  source?: string | null;
+
+  average_episode_duration?: number | null;
+
+  rating?: string | null;
+
+  studios?: MalStudio[];
+
+  pictures?: MalPicture[];
+
+  background?: string | null;
+
+  related_anime?: MalRelatedAnime[];
+
+  recommendations?: MalRecommendation[];
+
+  statistics?: MalStatistics | null;
 };
 
 export type MalAnimeListItem = {
@@ -62,4 +125,5 @@ export type MalAnimeResponse = {
   };
 };
 
-export type MalAnimeDetailResponse = MalAnime;
+export type MalAnimeDetailResponse =
+  MalAnime;
