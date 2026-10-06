@@ -129,7 +129,17 @@ export async function searchAnime(
 
   return {
     anime:
-      response.data ?? [],
+      (response.data ?? [])
+        .map(
+          (item) =>
+            item.node,
+        )
+        .filter(
+          (
+            anime,
+          ): anime is MalAnime =>
+            Boolean(anime),
+        ),
 
     hasNext:
       Boolean(response.paging?.next),
@@ -191,11 +201,6 @@ export async function getLatestAnime(
     MAL_FIELDS,
   );
 
-  params.set(
-    "status",
-    "currently_airing",
-  );
-
   const response =
     await malRequest<MalAnimeResponse>(
       `/anime/ranking?ranking_type=airing&${params.toString()}`,
@@ -203,7 +208,17 @@ export async function getLatestAnime(
 
   return {
     anime:
-      response.data ?? [],
+      (response.data ?? [])
+        .map(
+          (item) =>
+            item.node,
+        )
+        .filter(
+          (
+            anime,
+          ): anime is MalAnime =>
+            Boolean(anime),
+        ),
 
     hasNext:
       Boolean(response.paging?.next),
@@ -258,4 +273,4 @@ export function getAnimeGenres(
         genre.name,
     ) ?? []
   );
-  }
+}
