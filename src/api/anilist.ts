@@ -1,254 +1,297 @@
-import {
-  AnimeEpisode,
-  AnimeMedia,
-  AnimePage,
-} from "@/types/anime";
-
-const ANILIST_GRAPHQL_URL =
+const ANILIST_API =
   "https://graphql.anilist.co";
 
-type AniListResponse<T> = {
-  data?: T;
-  errors?: {
-    message: string;
-  }[];
+export type AniListMediaItem = {
+  id: number;
+
+  idMal?: number | null;
+
+  title?: {
+    romaji?: string | null;
+    english?: string | null;
+    native?: string | null;
+  } | null;
+
+  format?: string | null;
+
+  season?: string | null;
+
+  seasonYear?: number | null;
+
+  episodes?: number | null;
+
+  duration?: number | null;
+
+  startDate?: {
+    year?: number | null;
+    month?: number | null;
+    day?: number | null;
+  } | null;
+
+  coverImage?: {
+    large?: string | null;
+    extraLarge?: string | null;
+  } | null;
 };
 
-async function anilistRequest<T>(
-  query: string,
-  variables: Record<
-    string,
-    string | number | boolean | string[] | null
-  > = {},
-): Promise<T> {
-  const response = await fetch(
-    ANILIST_GRAPHQL_URL,
-    {
-      method: "POST",
+export type AniListCharacter = {
+  role?: string | null;
 
-      headers: {
-        "Content-Type":
-          "application/json",
+  node: {
+    id: number;
 
-        Accept:
-          "application/json",
-      },
+    name?: {
+      full?: string | null;
+      native?: string | null;
+    } | null;
 
-      body: JSON.stringify({
-        query,
-        variables,
-      }),
+    image?: {
+      large?: string | null;
+    } | null;
+  };
 
-      next: {
-        revalidate: 300,
-      },
-    },
-  );
+  voiceActors?: Array<{
+    id: number;
 
-  if (!response.ok) {
-    throw new Error(
-      `AniList request failed with ${response.status}`,
-    );
-  }
+    name?: {
+      full?: string | null;
+    } | null;
 
-  const result =
-    (await response.json()) as AniListResponse<T>;
+    image?: {
+      large?: string | null;
+    } | null;
+  }>;
+};
 
-  if (
-    result.errors &&
-    result.errors.length > 0
-  ) {
-    throw new Error(
-      result.errors
-        .map(
-          (error) =>
-            error.message,
-        )
-        .join(", "),
-    );
-  }
+export type AniListRelation = {
+  relationType?: string | null;
 
-  if (!result.data) {
-    throw new Error(
-      "AniList returned no data",
-    );
-  }
+  node: AniListMediaItem;
+};
 
-  return result.data;
-}
+export type AniListRecommendation = {
+  mediaRecommendation?: AniListMediaItem | null;
+};
 
-const ANIME_FIELDS = `
-  id
-  idMal
+export type AniListAnime = {
+  id: number;
 
-  title {
-    romaji
-    english
-    native
-  }
+  idMal?: number | null;
 
-  description
+  title?: {
+    romaji?: string | null;
+    english?: string | null;
+    native?: string | null;
+  } | null;
 
-  episodes
-  duration
+  format?: string | null;
 
-  status
-  format
+  season?: string | null;
 
-  season
-  seasonYear
+  seasonYear?: number | null;
 
-  averageScore
-  popularity
+  episodes?: number | null;
 
-  genres
+  duration?: number | null;
 
-  coverImage {
-    large
-    extraLarge
-  }
+  bannerImage?: string | null;
 
-  bannerImage
+  trailer?: {
+    id?: string | null;
+    site?: string | null;
+    thumbnail?: string | null;
+  } | null;
 
-  siteUrl
-`;
+  relations?: {
+    edges?: AniListRelation[];
+  } | null;
 
-const ANIME_LIST_QUERY = `
-  query AnimeList(
-    $page: Int
-    $perPage: Int
-    $sort: [MediaSort]
-    $status: MediaStatus
-    $season: MediaSeason
-  ) {
-    Page(
-      page: $page
-      perPage: $perPage
-    ) {
-      pageInfo {
-        currentPage
-        hasNextPage
-        lastPage
-        total
-      }
+  characters?: {
+    edges?: AniListCharacter[];
+  } | null;
 
-      media(
-        type: ANIME
-        sort: $sort
-        status: $status
-        season: $season
-      ) {
-        ${ANIME_FIELDS}
-      }
-    }
-  }
-`;
+  recommendations?: {
+    nodes?: AniListRecommendation[];
+  } | null;
+};
 
-const ANIME_DETAIL_QUERY = `
-  query AnimeDetails(
-    $id: Int!
-  ) {
+const QUERY = `
+  query ($malId: Int) {
     Media(
-      id: $id
+      idMal: $malId
       type: ANIME
     ) {
-      ${ANIME_FIELDS}
+      id
+      idMal
+
+      title {
+        romaji
+        english
+        native
+      }
+
+      format
+      season
+      seasonYear
+      episodes
+      duration
+
+      bannerImage
+
+      trailer {
+        id
+        site
+        thumbnail
+      }
+
+      relations {
+        edges {
+          relationType
+
+          node {
+            id
+            idMal
+
+            title {
+              romaji
+              english
+              native
+            }
+
+            format
+            season
+            seasonYear
+            episodes
+
+            startDate {
+              year
+              month
+              day
+            }
+
+            coverImage {
+              large
+              extraLarge
+            }
+          }
+        }
+      }
+
+      characters(
+        page: 1
+        perPage: 12
+      ) {
+        edges {
+          role
+
+          node {
+            id
+
+            name {
+              full
+              native
+            }
+
+            image {
+              large
+            }
+          }
+
+          voiceActors {
+            id
+
+            name {
+              full
+            }
+
+            image {
+              large
+            }
+          }
+        }
+      }
+
+      recommendations(
+        page: 1
+        perPage: 12
+      ) {
+        nodes {
+          mediaRecommendation {
+            id
+            idMal
+
+            title {
+              romaji
+              english
+              native
+            }
+
+            format
+
+            startDate {
+              year
+            }
+
+            coverImage {
+              large
+              extraLarge
+            }
+          }
+        }
+      }
     }
   }
 `;
 
-export async function getAnimePage(
-  options: {
-    page?: number;
-    perPage?: number;
-    sort?: string[];
-    status?: string;
-    season?: string;
-  } = {},
-): Promise<AnimePage> {
-  const data =
-    await anilistRequest<{
-      Page: AnimePage;
-    }>(
-      ANIME_LIST_QUERY,
-      {
-        page:
-          options.page ?? 1,
+export async function getAniListAnimeByMalId(
+  malId: string | number,
+): Promise<AniListAnime | null> {
+  try {
+    const response =
+      await fetch(
+        ANILIST_API,
+        {
+          method: "POST",
 
-        perPage:
-          options.perPage ?? 20,
+          headers: {
+            "Content-Type":
+              "application/json",
 
-        sort:
-          options.sort ?? [
-            "TRENDING_DESC",
-          ],
+            Accept:
+              "application/json",
+          },
 
-        status:
-          options.status ?? null,
+          body: JSON.stringify({
+            query: QUERY,
 
-        season:
-          options.season ?? null,
-      },
+            variables: {
+              malId:
+                Number(malId),
+            },
+          }),
+
+          next: {
+            revalidate: 1800,
+          },
+        },
+      );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const json =
+      (await response.json()) as {
+        data?: {
+          Media?: AniListAnime | null;
+        };
+      };
+
+    return (
+      json.data?.Media ??
+      null
     );
-
-  return data.Page;
-}
-
-export async function getAnimeById(
-  id: number,
-): Promise<AnimeMedia> {
-  const data =
-    await anilistRequest<{
-      Media: AnimeMedia;
-    }>(
-      ANIME_DETAIL_QUERY,
-      {
-        id,
-      },
-    );
-
-  if (!data.Media) {
-    throw new Error(
-      "Anime not found",
-    );
+  } catch {
+    return null;
   }
-
-  return data.Media;
-}
-
-export function getAnimeTitle(
-  anime: AnimeMedia,
-): string {
-  return (
-    anime.title.english ||
-    anime.title.romaji ||
-    anime.title.native ||
-    "Unknown Anime"
-  );
-}
-
-export function getAnimeEpisodes(
-  anime: AnimeMedia,
-): AnimeEpisode[] {
-  const totalEpisodes =
-    anime.episodes ?? 0;
-
-  if (
-    totalEpisodes <= 0
-  ) {
-    return [];
-  }
-
-  return Array.from(
-    {
-      length: totalEpisodes,
-    },
-    (_, index) => ({
-      episode:
-        index + 1,
-
-      title:
-        `Episode ${index + 1}`,
-    }),
-  );
 }
