@@ -30,9 +30,6 @@ export type MalRankingType =
   | "upcoming"
   | "tv"
   | "movie"
-  | "ova"
-  | "ona"
-  | "special"
   | "bypopularity"
   | "favorite";
 
@@ -329,28 +326,6 @@ export async function getTopMovieAnime(
   );
 }
 
-export async function getTopOvaAnime(
-  page = 1,
-  limit = 24,
-) {
-  return getAnimeRanking(
-    "ova",
-    page,
-    limit,
-  );
-}
-
-export async function getTopOnaAnime(
-  page = 1,
-  limit = 24,
-) {
-  return getAnimeRanking(
-    "ona",
-    page,
-    limit,
-  );
-}
-
 export async function getFavoriteAnime(
   page = 1,
   limit = 24,
@@ -410,4 +385,4 @@ export function getAnimeGenres(
         genre.name,
     ) ?? []
   );
-  }
+        }
