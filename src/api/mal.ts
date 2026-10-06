@@ -24,6 +24,18 @@ const MAL_FIELDS = [
   "popularity",
 ].join(",");
 
+export type MalRankingType =
+  | "all"
+  | "airing"
+  | "upcoming"
+  | "tv"
+  | "movie"
+  | "ova"
+  | "ona"
+  | "special"
+  | "bypopularity"
+  | "favorite";
+
 function getMalClientId(): string {
   const clientId =
     process.env.MAL_CLIENT_ID;
@@ -70,6 +82,76 @@ async function malRequest<T>(
   return (
     (await response.json()) as T
   );
+}
+
+async function getAnimeRanking(
+  rankingType: MalRankingType,
+  page = 1,
+  limit = 24,
+): Promise<{
+  anime: MalAnime[];
+  hasNext: boolean;
+}> {
+  const safePage =
+    Number.isFinite(page) &&
+    page > 0
+      ? Math.floor(page)
+      : 1;
+
+  const safeLimit =
+    Number.isFinite(limit) &&
+    limit > 0
+      ? Math.floor(limit)
+      : 24;
+
+  const offset =
+    (safePage - 1) * safeLimit;
+
+  const params =
+    new URLSearchParams();
+
+  params.set(
+    "ranking_type",
+    rankingType,
+  );
+
+  params.set(
+    "limit",
+    String(safeLimit),
+  );
+
+  params.set(
+    "offset",
+    String(offset),
+  );
+
+  params.set(
+    "fields",
+    MAL_FIELDS,
+  );
+
+  const response =
+    await malRequest<MalAnimeResponse>(
+      `/anime/ranking?${params.toString()}`,
+    );
+
+  return {
+    anime:
+      (response.data ?? [])
+        .map(
+          (item) =>
+            item.node,
+        )
+        .filter(
+          (
+            anime,
+          ): anime is MalAnime =>
+            Boolean(anime),
+        ),
+
+    hasNext:
+      Boolean(response.paging?.next),
+  };
 }
 
 export async function searchAnime(
@@ -174,55 +256,110 @@ export async function getLatestAnime(
   anime: MalAnime[];
   hasNext: boolean;
 }> {
-  const safePage =
-    Number.isFinite(page) &&
-    page > 0
-      ? Math.floor(page)
-      : 1;
-
-  const offset =
-    (safePage - 1) * limit;
-
-  const params =
-    new URLSearchParams();
-
-  params.set(
-    "limit",
-    String(limit),
+  return getAnimeRanking(
+    "airing",
+    page,
+    limit,
   );
+}
 
-  params.set(
-    "offset",
-    String(offset),
+export async function getTopAnime(
+  page = 1,
+  limit = 24,
+) {
+  return getAnimeRanking(
+    "all",
+    page,
+    limit,
   );
+}
 
-  params.set(
-    "fields",
-    MAL_FIELDS,
+export async function getAiringAnime(
+  page = 1,
+  limit = 24,
+) {
+  return getAnimeRanking(
+    "airing",
+    page,
+    limit,
   );
+}
 
-  const response =
-    await malRequest<MalAnimeResponse>(
-      `/anime/ranking?ranking_type=airing&${params.toString()}`,
-    );
+export async function getUpcomingAnime(
+  page = 1,
+  limit = 24,
+) {
+  return getAnimeRanking(
+    "upcoming",
+    page,
+    limit,
+  );
+}
 
-  return {
-    anime:
-      (response.data ?? [])
-        .map(
-          (item) =>
-            item.node,
-        )
-        .filter(
-          (
-            anime,
-          ): anime is MalAnime =>
-            Boolean(anime),
-        ),
+export async function getPopularAnime(
+  page = 1,
+  limit = 24,
+) {
+  return getAnimeRanking(
+    "bypopularity",
+    page,
+    limit,
+  );
+}
 
-    hasNext:
-      Boolean(response.paging?.next),
-  };
+export async function getTopTvAnime(
+  page = 1,
+  limit = 24,
+) {
+  return getAnimeRanking(
+    "tv",
+    page,
+    limit,
+  );
+}
+
+export async function getTopMovieAnime(
+  page = 1,
+  limit = 24,
+) {
+  return getAnimeRanking(
+    "movie",
+    page,
+    limit,
+  );
+}
+
+export async function getTopOvaAnime(
+  page = 1,
+  limit = 24,
+) {
+  return getAnimeRanking(
+    "ova",
+    page,
+    limit,
+  );
+}
+
+export async function getTopOnaAnime(
+  page = 1,
+  limit = 24,
+) {
+  return getAnimeRanking(
+    "ona",
+    page,
+    limit,
+  );
+}
+
+export async function getFavoriteAnime(
+  page = 1,
+  limit = 24,
+) {
+  return getAnimeRanking(
+    "favorite",
+    page,
+    limit,
+  );
 }
 
 export function getAnimeTitle(
@@ -273,4 +410,4 @@ export function getAnimeGenres(
         genre.name,
     ) ?? []
   );
-}
+  }
