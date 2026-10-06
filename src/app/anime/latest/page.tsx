@@ -52,24 +52,6 @@ const RANKING_INFO: Record<
       "Browse the top-ranked anime movies from MyAnimeList.",
   },
 
-  ova: {
-    title: "Top OVA Anime",
-    description:
-      "Browse the top-ranked OVA anime from MyAnimeList.",
-  },
-
-  ona: {
-    title: "Top ONA Anime",
-    description:
-      "Browse the top-ranked ONA anime from MyAnimeList.",
-  },
-
-  special: {
-    title: "Top Special Anime",
-    description:
-      "Browse the top-ranked special anime from MyAnimeList.",
-  },
-
   bypopularity: {
     title: "Most Popular Anime",
     description:
@@ -203,4 +185,4 @@ export default async function AnimeLatestPage(
       </div>
     </main>
   );
-      }
+}
