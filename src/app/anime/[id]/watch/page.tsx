@@ -147,26 +147,17 @@ export default async function AnimeWatchPage(
   const image =
     getAnimeImage(anime);
 
-  /*
-   * Do not read anime.num_episodes directly here.
-   *
-   * Some airing anime can have incomplete/unknown episode
-   * metadata even though their MAL episode page contains
-   * a complete list.
-   *
-   * getAnimeEpisodeCount() handles:
-   *
-   *   MAL metadata
-   *       ↓
-   *   Jikan metadata
-   *       ↓
-   *   Jikan/MAL episode list
-   */
   const episodeCount =
     await getAnimeEpisodeCount(
       anime,
     );
 
+  /*
+   * If the requested episode is greater than the known
+   * episode count, don't allow an invalid episode URL.
+   *
+   * We only perform this validation when a count exists.
+   */
   if (
     episodeCount > 0 &&
     episodeNumber > episodeCount
@@ -421,4 +412,4 @@ export default async function AnimeWatchPage(
       )}
     </main>
   );
-          }
+    }
