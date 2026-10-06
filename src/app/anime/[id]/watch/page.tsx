@@ -13,6 +13,9 @@ import { getAniListAnimeByMalId } from "@/api/anilist";
 import { Params } from "@/types";
 
 import AnimePlayer from "@/components/anime/AnimePlayer";
+import NextEpisodeCountdown from "@/components/anime/NextEpisodeCountdown";
+
+import { isAnimeUpcoming } from "@/utils/animeAiring";
 
 const BASE_URL =
   "https://ryuflix.vercel.app";
@@ -149,21 +152,46 @@ export default async function AnimeWatchPage(
     getAnimeImage(anime);
 
   /*
-   * Use the existing AniList data path directly.
+   * AniList is already part of the existing anime
+   * architecture and provides:
    *
-   * getAniListAnimeByMalId() is already used by the anime
-   * detail page for banner, trailer, characters, relations,
-   * recommendations, etc. Its returned object also contains
-   * the main anime's episode count.
+   * - episode count
+   * - upcoming/airing state
+   * - next episode
+   * - next episode airing timestamp
    *
-   * MAL remains a fallback in case AniList doesn't return
-   * an episode count.
+   * MAL remains the fallback for episode count.
    */
   const aniList =
     await getAniListAnimeByMalId(
       anime.id,
     );
 
+  /*
+   * Never allow the watch page to play an anime
+   * that has not started airing yet.
+   *
+   * This also protects against manually entering
+   * an /anime/:id/watch URL for an upcoming title.
+   */
+  const isUpcoming =
+    isAnimeUpcoming(
+      anime,
+      aniList,
+    );
+
+  if (isUpcoming) {
+    notFound();
+  }
+
+  /*
+   * Resolve episode count.
+   *
+   * IMPORTANT:
+   * Keep AniList as the primary source here because
+   * this is the path that fixed the previous
+   * "Episode information is not available" issue.
+   */
   const aniListEpisodeCount =
     Number(aniList?.episodes);
 
@@ -188,8 +216,8 @@ export default async function AnimeWatchPage(
         : 0;
 
   /*
-   * If the requested episode is greater than the known
-   * episode count, don't allow an invalid episode URL.
+   * If the requested episode is greater than the
+   * known episode count, don't allow an invalid URL.
    *
    * We only perform this validation when a count exists.
    */
@@ -232,6 +260,9 @@ export default async function AnimeWatchPage(
   const backdrop =
     anime.background ||
     image;
+
+  const nextAiringEpisode =
+    aniList?.nextAiringEpisode;
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 pb-12">
@@ -341,6 +372,18 @@ export default async function AnimeWatchPage(
         </div>
       </section>
 
+      {nextAiringEpisode?.airingAt &&
+        nextAiringEpisode?.episode && (
+          <NextEpisodeCountdown
+            airingAt={
+              nextAiringEpisode.airingAt
+            }
+            episode={
+              nextAiringEpisode.episode
+            }
+          />
+        )}
+
       {episodeCount > 0 && (
         <section className="relative mt-7 overflow-hidden rounded-2xl border border-white/10 bg-black">
           <div className="absolute inset-0">
@@ -447,4 +490,4 @@ export default async function AnimeWatchPage(
       )}
     </main>
   );
-  }
+      }
