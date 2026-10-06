@@ -174,6 +174,21 @@ export default async function AnimeWatchPage(
       ? episodeNumber + 1
       : null;
 
+  const episodes =
+    episodeCount > 0
+      ? Array.from(
+          {
+            length: episodeCount,
+          },
+          (_, index) =>
+            index + 1,
+        )
+      : [];
+
+  const backdrop =
+    anime.background ||
+    image;
+
   return (
     <main className="mx-auto w-full max-w-7xl px-4 pb-12">
       <div className="mb-5">
@@ -288,6 +303,111 @@ export default async function AnimeWatchPage(
           </div>
         </div>
       </section>
+
+      {episodeCount > 0 && (
+        <section className="relative mt-7 overflow-hidden rounded-2xl border border-white/10 bg-black">
+          <div className="absolute inset-0">
+            {backdrop && (
+              <img
+                src={backdrop}
+                alt=""
+                aria-hidden="true"
+                className="h-full w-full scale-105 object-cover opacity-25 blur-[2px] grayscale"
+              />
+            )}
+
+            <div className="absolute inset-0 bg-gradient-to-r from-black via-black/90 to-black/75" />
+
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-black/85" />
+          </div>
+
+          <div className="relative p-4 sm:p-5 md:p-6">
+            <div className="mb-4 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-warning/80">
+                  Watch
+                </p>
+
+                <h2 className="mt-1 text-xl font-bold text-white sm:text-2xl">
+                  Episodes
+                </h2>
+              </div>
+
+              <p className="text-xs font-medium text-white/40 sm:text-sm">
+                {episodeNumber} / {episodeCount}
+              </p>
+            </div>
+
+            <div className="max-h-[280px] overflow-y-auto pr-1 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
+                {episodes.map(
+                  (episode) => {
+                    const active =
+                      episode ===
+                      episodeNumber;
+
+                    return (
+                      <Link
+                        key={episode}
+                        href={`/anime/${anime.id}/watch?episode=${episode}&lang=${requestedLanguage}`}
+                        aria-current={
+                          active
+                            ? "page"
+                            : undefined
+                        }
+                        className={`group relative flex h-11 items-center justify-center overflow-hidden rounded-lg border text-sm font-semibold transition-all duration-200 ${
+                          active
+                            ? "border-warning/60 bg-warning/15 text-warning shadow-[0_0_20px_rgba(255,130,190,0.12)]"
+                            : "border-white/10 bg-black/40 text-white/55 hover:border-warning/30 hover:bg-white/10 hover:text-white"
+                        }`}
+                      >
+                        <span className="relative z-10">
+                          {episode}
+                        </span>
+
+                        <span
+                          className={`absolute inset-x-0 bottom-0 h-px origin-left transition-transform duration-200 ${
+                            active
+                              ? "scale-x-100 bg-warning"
+                              : "scale-x-0 bg-warning/60 group-hover:scale-x-100"
+                          }`}
+                        />
+                      </Link>
+                    );
+                  },
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {episodeCount === 0 && (
+        <section className="relative mt-7 overflow-hidden rounded-2xl border border-white/10 bg-black">
+          <div className="absolute inset-0">
+            {backdrop && (
+              <img
+                src={backdrop}
+                alt=""
+                aria-hidden="true"
+                className="h-full w-full scale-105 object-cover opacity-20 blur-[3px] grayscale"
+              />
+            )}
+
+            <div className="absolute inset-0 bg-gradient-to-r from-black via-black/90 to-black/80" />
+          </div>
+
+          <div className="relative px-5 py-8 text-center">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-warning/70">
+              Episodes
+            </p>
+
+            <p className="mt-2 text-sm text-white/45">
+              Episode information is not available for this anime.
+            </p>
+          </div>
+        </section>
+      )}
     </main>
   );
-    }
+  }
