@@ -4,10 +4,11 @@ import Link from "next/link";
 
 import {
   getAnime,
-  getAnimeEpisodeCount,
   getAnimeImage,
   getAnimeTitle,
 } from "@/api/mal";
+
+import { getAniListAnimeByMalId } from "@/api/anilist";
 
 import { Params } from "@/types";
 
@@ -147,10 +148,44 @@ export default async function AnimeWatchPage(
   const image =
     getAnimeImage(anime);
 
-  const episodeCount =
-    await getAnimeEpisodeCount(
-      anime,
+  /*
+   * Use the existing AniList data path directly.
+   *
+   * getAniListAnimeByMalId() is already used by the anime
+   * detail page for banner, trailer, characters, relations,
+   * recommendations, etc. Its returned object also contains
+   * the main anime's episode count.
+   *
+   * MAL remains a fallback in case AniList doesn't return
+   * an episode count.
+   */
+  const aniList =
+    await getAniListAnimeByMalId(
+      anime.id,
     );
+
+  const aniListEpisodeCount =
+    Number(aniList?.episodes);
+
+  const malEpisodeCount =
+    Number(anime.num_episodes);
+
+  const episodeCount =
+    Number.isFinite(
+      aniListEpisodeCount,
+    ) &&
+    aniListEpisodeCount > 0
+      ? Math.floor(
+          aniListEpisodeCount,
+        )
+      : Number.isFinite(
+          malEpisodeCount,
+        ) &&
+        malEpisodeCount > 0
+        ? Math.floor(
+            malEpisodeCount,
+          )
+        : 0;
 
   /*
    * If the requested episode is greater than the known
