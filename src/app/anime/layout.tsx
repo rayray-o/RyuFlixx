@@ -8,7 +8,8 @@ export default function AnimeLayout({
       className="anime-theme"
       style={
         {
-          "--color-warning": "#f9a8d4",
+          "--heroui-warning": "330 81% 75%",
+          "--heroui-warning-foreground": "0 0% 0%",
         } as React.CSSProperties
       }
     >
