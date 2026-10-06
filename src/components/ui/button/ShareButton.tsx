@@ -28,11 +28,17 @@ import { useDisclosure } from "@mantine/hooks";
 
 interface ShareButtonProps {
   title: string;
+
   id: string | number;
-  type?: ContentType;
+
+  type?: ContentType | "anime";
 }
 
-const HASTAGS = ["cinextma", "free", "movies", "streaming"];
+const HASTAGS = [
+  "ryuflix",
+  "anime",
+  "streaming",
+];
 
 const SHARE_BUTTONS = [
   {
@@ -77,35 +83,72 @@ const SHARE_BUTTONS = [
   },
 ];
 
-const ShareButton: React.FC<ShareButtonProps> = ({ title, id, type = "movie" }) => {
-  const url = `https://${location.hostname}/${type}/${id}`;
-  const description = `Check out and stream ${title} on Cinextma for FREE!!`;
+const ShareButton: React.FC<
+  ShareButtonProps
+> = ({
+  title,
+  id,
+  type = "movie",
+}) => {
+  const url =
+    `${location.origin}/${type}/${id}`;
 
-  const [opened, { open, close }] = useDisclosure(false);
+  const description =
+    `Check out ${title} on RyuFlix.`;
+
+  const [opened, { open, close }] =
+    useDisclosure(false);
 
   return (
     <>
-      <IconButton icon={<Share size={20} />} variant="ghost" tooltip="Share" onPress={open} />
-      <VaulDrawer open={opened} onClose={close} backdrop="blur" title="Share via">
+      <IconButton
+        icon={
+          <Share size={20} />
+        }
+        variant="ghost"
+        tooltip="Share"
+        onPress={open}
+      />
+
+      <VaulDrawer
+        open={opened}
+        onClose={close}
+        backdrop="blur"
+        title="Share via"
+      >
         <div className="space-y-8 px-6">
           <div className="grid grid-cols-4 gap-x-5 gap-y-3 md:gap-x-10 md:gap-y-5">
-            {SHARE_BUTTONS.map(({ Component, Icon, label }) => (
-              <Component
-                key={label}
-                title={description}
-                hashtags={HASTAGS}
-                url={url}
-                subject={description}
-                onClick={close}
-                className="flex flex-col items-center justify-center gap-2"
-              >
-                <Icon className="rounded-md" size={45} />
-                <span className="text-xs">{label}</span>
-              </Component>
-            ))}
+            {SHARE_BUTTONS.map(
+              ({
+                Component,
+                Icon,
+                label,
+              }) => (
+                <Component
+                  key={label}
+                  title={description}
+                  hashtags={HASTAGS}
+                  url={url}
+                  subject={description}
+                  onClick={close}
+                  className="flex flex-col items-center justify-center gap-2"
+                >
+                  <Icon
+                    className="rounded-md"
+                    size={45}
+                  />
+
+                  <span className="text-xs">
+                    {label}
+                  </span>
+                </Component>
+              ),
+            )}
           </div>
         </div>
+
         <Divider className="my-4" />
+
         <div className="space-y-4 px-6">
           <CopyButton
             text={url}
