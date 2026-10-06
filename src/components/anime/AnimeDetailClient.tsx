@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   useMemo,
   useState,
+  useEffect,
 } from "react";
 import {
   Modal,
@@ -200,6 +201,214 @@ function convertAniListToMalAnime(
   };
 }
 
+/*
+ * Detect whether the anime itself has not started airing yet.
+ *
+ * AniList is the primary source.
+ * MAL is used as a fallback.
+ */
+function isAnimeUpcoming(
+  anime: MalAnime,
+  aniList: AniListAnime | null,
+): boolean {
+  if (
+    aniList?.notYetAired === true
+  ) {
+    return true;
+  }
+
+  if (
+    aniList?.status ===
+    "NOT_YET_RELEASED"
+  ) {
+    return true;
+  }
+
+  const malStatus =
+    anime.status
+      ?.trim()
+      .toLowerCase();
+
+  if (
+    malStatus ===
+      "not_yet_aired" ||
+    malStatus ===
+      "not yet aired"
+  ) {
+    return true;
+  }
+
+  /*
+   * Final fallback:
+   * if MAL gives us a concrete future
+   * start date, treat the anime as upcoming.
+   */
+  if (anime.start_date) {
+    const start =
+      Date.parse(
+        `${anime.start_date}T00:00:00Z`,
+      );
+
+    if (
+      Number.isFinite(start) &&
+      start > Date.now()
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function NextEpisodeCountdown({
+  airingAt,
+  episode,
+}: {
+  airingAt: number;
+  episode: number;
+}) {
+  const target =
+    airingAt * 1000;
+
+  const [now, setNow] =
+    useState(() =>
+      Date.now(),
+    );
+
+  useEffect(() => {
+    const interval =
+      window.setInterval(
+        () => {
+          setNow(
+            Date.now(),
+          );
+        },
+        1000,
+      );
+
+    return () =>
+      window.clearInterval(
+        interval,
+      );
+  }, []);
+
+  const remaining =
+    Math.max(
+      0,
+      Math.floor(
+        (target - now) /
+          1000,
+      ),
+    );
+
+  const days =
+    Math.floor(
+      remaining / 86400,
+    );
+
+  const hours =
+    Math.floor(
+      (remaining % 86400) /
+        3600,
+    );
+
+  const minutes =
+    Math.floor(
+      (remaining % 3600) /
+        60,
+    );
+
+  const seconds =
+    remaining % 60;
+
+  const airingDate =
+    new Date(target);
+
+  const localDate =
+    new Intl.DateTimeFormat(
+      undefined,
+      {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      },
+    ).format(
+      airingDate,
+    );
+
+  const localTime =
+    new Intl.DateTimeFormat(
+      undefined,
+      {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short",
+      },
+    ).format(
+      airingDate,
+    );
+
+  const timezone =
+    Intl.DateTimeFormat()
+      .resolvedOptions()
+      .timeZone;
+
+  let countdown = "";
+
+  if (days > 0) {
+    countdown = `${days}d ${String(
+      hours,
+    ).padStart(2, "0")}h ${String(
+      minutes,
+    ).padStart(2, "0")}m`;
+  } else {
+    countdown = `${String(
+      hours,
+    ).padStart(2, "0")}:${String(
+      minutes,
+    ).padStart(2, "0")}:${String(
+      seconds,
+    ).padStart(2, "0")}`;
+  }
+
+  return (
+    <section className="mt-8 overflow-hidden rounded-2xl border border-warning/15 bg-warning/[0.04]">
+      <div className="flex flex-col gap-5 p-5 sm:p-6 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-warning/70">
+            Next Episode
+          </p>
+
+          <h2 className="mt-1 text-xl font-bold text-white">
+            Episode {episode}
+          </h2>
+
+          <p className="mt-2 text-sm text-white/45">
+            {remaining <= 0
+              ? "Airing now"
+              : `In ${countdown}`}
+          </p>
+        </div>
+
+        <div className="md:text-right">
+          <p className="text-sm font-semibold text-white/80">
+            {localDate}
+          </p>
+
+          <p className="mt-1 text-sm font-semibold text-warning">
+            {localTime}
+          </p>
+
+          <p className="mt-1 text-[11px] text-white/25">
+            {timezone}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function AnimeDetailClient({
   anime,
   aniList,
@@ -381,6 +590,15 @@ export default function AnimeDetailClient({
   const watchUrl =
     `/anime/${anime.id}/watch?episode=1`;
 
+  const upcoming =
+    isAnimeUpcoming(
+      anime,
+      aniList,
+    );
+
+  const nextAiringEpisode =
+    aniList?.nextAiringEpisode;
+
   return (
     <main className="w-full pb-16">
       <section className="relative min-h-[620px] overflow-hidden md:min-h-[700px]">
@@ -495,12 +713,18 @@ export default function AnimeDetailClient({
               </p>
 
               <div className="mt-7 flex flex-wrap items-center gap-3">
-                <Link
-                  href={watchUrl}
-                  className="rounded-xl bg-warning px-6 py-3 text-sm font-bold text-black shadow-lg transition-transform hover:scale-[1.02]"
-                >
-                  Watch Now
-                </Link>
+                {!upcoming ? (
+                  <Link
+                    href={watchUrl}
+                    className="rounded-xl bg-warning px-6 py-3 text-sm font-bold text-black shadow-lg transition-transform hover:scale-[1.02]"
+                  >
+                    Watch Now
+                  </Link>
+                ) : (
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-bold text-white/45">
+                    Coming Soon
+                  </div>
+                )}
 
                 {trailer && (
                   <Button
@@ -546,6 +770,32 @@ export default function AnimeDetailClient({
       </section>
 
       <div className="mx-auto max-w-7xl px-5 md:px-8">
+        {!upcoming &&
+          nextAiringEpisode?.airingAt &&
+          nextAiringEpisode?.episode && (
+            <NextEpisodeCountdown
+              airingAt={
+                nextAiringEpisode.airingAt
+              }
+              episode={
+                nextAiringEpisode.episode
+              }
+            />
+          )}
+
+        {upcoming &&
+          nextAiringEpisode?.airingAt &&
+          nextAiringEpisode?.episode && (
+            <NextEpisodeCountdown
+              airingAt={
+                nextAiringEpisode.airingAt
+              }
+              episode={
+                nextAiringEpisode.episode
+              }
+            />
+          )}
+
         <section className="mt-10 grid gap-4 md:grid-cols-4">
           <InfoCard
             label="Status"
@@ -915,4 +1165,4 @@ function FranchiseGroup({
       </div>
     </div>
   );
-}
+  }
