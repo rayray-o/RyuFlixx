@@ -157,6 +157,59 @@ export async function getAnime(
   return response;
 }
 
+export async function getLatestAnime(
+  page = 1,
+  limit = 24,
+): Promise<{
+  anime: MalAnime[];
+  hasNext: boolean;
+}> {
+  const safePage =
+    Number.isFinite(page) &&
+    page > 0
+      ? Math.floor(page)
+      : 1;
+
+  const offset =
+    (safePage - 1) * limit;
+
+  const params =
+    new URLSearchParams();
+
+  params.set(
+    "limit",
+    String(limit),
+  );
+
+  params.set(
+    "offset",
+    String(offset),
+  );
+
+  params.set(
+    "fields",
+    MAL_FIELDS,
+  );
+
+  params.set(
+    "status",
+    "currently_airing",
+  );
+
+  const response =
+    await malRequest<MalAnimeResponse>(
+      `/anime/ranking?ranking_type=airing&${params.toString()}`,
+    );
+
+  return {
+    anime:
+      response.data ?? [],
+
+    hasNext:
+      Boolean(response.paging?.next),
+  };
+}
+
 export function getAnimeTitle(
   anime: MalAnime,
 ): string {
@@ -205,4 +258,4 @@ export function getAnimeGenres(
         genre.name,
     ) ?? []
   );
-}
+  }
