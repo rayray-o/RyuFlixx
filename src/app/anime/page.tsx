@@ -2,14 +2,14 @@ import AnimeContinueWatching from "@/components/anime/AnimeContinueWatching";
 import AnimeHomeList from "@/components/anime/AnimeHomeList";
 import AnimeSearchBar from "@/components/anime/AnimeSearchBar";
 import {
-  getRecentAnime,
-} from "@/api/anikoto";
+  getLatestAnime,
+} from "@/api/mal";
 
 export const revalidate = 300;
 
 export default async function AnimePage() {
   const data =
-    await getRecentAnime(
+    await getLatestAnime(
       1,
       24,
     );
