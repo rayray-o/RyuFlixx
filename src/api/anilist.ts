@@ -112,9 +112,6 @@ export type AniListAnime = {
 
   bannerImage?: string | null;
 
-  /*
-   * AniList's direct "next episode" field.
-   */
   nextAiringEpisode?: {
     airingAt?: number | null;
 
@@ -123,12 +120,6 @@ export type AniListAnime = {
     episode?: number | null;
   } | null;
 
-  /*
-   * Full airing schedule.
-   *
-   * We request only the first future episode
-   * from AniList, so this stays lightweight.
-   */
   airingSchedule?: {
     nodes?: AniListAiringSchedule[];
   } | null;
@@ -184,9 +175,6 @@ const QUERY = `
 
       duration
 
-      /*
-       * AniList's direct next-airing field.
-       */
       nextAiringEpisode {
         airingAt
 
@@ -195,16 +183,6 @@ const QUERY = `
         episode
       }
 
-      /*
-       * IMPORTANT:
-       *
-       * This is the reliable fallback.
-       *
-       * AniList exposes the anime's own airing
-       * schedule directly through Media.
-       *
-       * We only need the first future episode.
-       */
       airingSchedule(
         notYetAired: true
         perPage: 1
@@ -391,6 +369,12 @@ export async function getAniListAnimeByMalId(
       );
 
     if (!response.ok) {
+      console.error(
+        "[AniList] HTTP error:",
+        response.status,
+        response.statusText,
+      );
+
       return null;
     }
 
@@ -402,18 +386,29 @@ export async function getAniListAnimeByMalId(
 
         errors?: Array<{
           message?: string;
+
+          locations?: Array<{
+            line?: number;
+
+            column?: number;
+          }>;
+
+          path?: Array<
+            string | number
+          >;
         }>;
       };
 
-    /*
-     * GraphQL can return HTTP 200 while still
-     * returning an "errors" array.
-     *
-     * Don't silently pretend that data exists.
-     */
-    if (
-      json.errors?.length
-    ) {
+    if (json.errors?.length) {
+      console.error(
+        "[AniList] GraphQL errors:",
+        JSON.stringify(
+          json.errors,
+          null,
+          2,
+        ),
+      );
+
       return null;
     }
 
@@ -422,29 +417,21 @@ export async function getAniListAnimeByMalId(
       null;
 
     if (!media) {
+      console.error(
+        "[AniList] No Media returned for MAL ID:",
+        numericMalId,
+      );
+
       return null;
     }
 
-    /*
-     * Prefer the explicit nextAiringEpisode
-     * returned by AniList.
-     */
     const directNext =
       media.nextAiringEpisode;
 
-    /*
-     * If Media.nextAiringEpisode is missing,
-     * use the first future item from the anime's
-     * own airingSchedule.
-     */
     const scheduledNext =
       media.airingSchedule
         ?.nodes?.[0];
 
-    /*
-     * Normalize both AniList sources into the
-     * same property consumed by the existing UI.
-     */
     if (
       directNext?.airingAt &&
       directNext?.episode
@@ -478,7 +465,12 @@ export async function getAniListAnimeByMalId(
     }
 
     return media;
-  } catch {
+  } catch (error) {
+    console.error(
+      "[AniList] Request failed:",
+      error,
+    );
+
     return null;
   }
-            }
+        }
