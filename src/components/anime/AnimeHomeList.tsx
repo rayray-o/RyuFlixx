@@ -2,10 +2,10 @@ import Link from "next/link";
 import SectionTitle from "@/components/ui/other/SectionTitle";
 import Carousel from "@/components/ui/wrapper/Carousel";
 import AnimePosterCard from "./AnimePosterCard";
-import type { AnikotoAnime } from "@/types/anikoto";
+import type { MalAnime } from "@/types/mal";
 
 interface AnimeHomeListProps {
-  anime: AnikotoAnime[];
+  anime: MalAnime[];
 }
 
 const AnimeHomeList: React.FC<
