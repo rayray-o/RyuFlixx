@@ -1,10 +1,9 @@
 import Link from "next/link";
 import {
   searchAnime,
-} from "@/api/anikoto";
+} from "@/api/mal";
 import AnimePosterCard from "@/components/anime/AnimePosterCard";
 import AnimeSearchBar from "@/components/anime/AnimeSearchBar";
-import type { AnikotoAnime } from "@/types/anikoto";
 
 export const revalidate = 300;
 
@@ -41,11 +40,8 @@ export default async function AnimeSearchPage(
         )
       : 1;
 
-  let results: AnikotoAnime[] =
-    [];
+  let results = [];
   let hasNextPage = false;
-  let totalResults =
-    0;
 
   if (search.length > 0) {
     const response =
@@ -55,17 +51,10 @@ export default async function AnimeSearchPage(
       );
 
     results =
-      response.data ?? [];
+      response.anime;
 
     hasNextPage =
-      response.pagination
-        ?.has_next ??
-      false;
-
-    totalResults =
-      response.pagination
-        ?.total ??
-      results.length;
+      response.hasNext;
   }
 
   return (
@@ -119,11 +108,9 @@ export default async function AnimeSearchPage(
         <>
           <div className="mb-5">
             <p className="text-sm text-white/45">
-              {totalResults ||
-                results.length}{" "}
+              {results.length}{" "}
               result
-              {(totalResults ||
-                results.length) ===
+              {results.length ===
               1
                 ? ""
                 : "s"}{" "}
@@ -177,4 +164,4 @@ export default async function AnimeSearchPage(
       )}
     </main>
   );
-}
+            }
