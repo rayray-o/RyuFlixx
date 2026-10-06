@@ -44,8 +44,16 @@ export type MalAnime = {
   popularity?: number | null;
 };
 
+export type MalAnimeListItem = {
+  node: MalAnime;
+
+  ranking?: {
+    rank?: number | null;
+  } | null;
+};
+
 export type MalAnimeResponse = {
-  data: MalAnime[];
+  data: MalAnimeListItem[];
 
   paging?: {
     next?: string | null;
