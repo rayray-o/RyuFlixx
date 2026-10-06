@@ -261,6 +261,11 @@ export default async function AnimeWatchPage(
     anime.background ||
     image;
 
+  /*
+   * Keep AniList's current value as an initial hint.
+   * NextEpisodeCountdown will independently refresh the
+   * airing information through the same-origin API route.
+   */
   const nextAiringEpisode =
     aniList?.nextAiringEpisode;
 
@@ -372,17 +377,15 @@ export default async function AnimeWatchPage(
         </div>
       </section>
 
-      {nextAiringEpisode?.airingAt &&
-        nextAiringEpisode?.episode && (
-          <NextEpisodeCountdown
-            airingAt={
-              nextAiringEpisode.airingAt
-            }
-            episode={
-              nextAiringEpisode.episode
-            }
-          />
-        )}
+      <NextEpisodeCountdown
+        malId={anime.id}
+        initialAiringAt={
+          nextAiringEpisode?.airingAt ?? null
+        }
+        initialEpisode={
+          nextAiringEpisode?.episode ?? null
+        }
+      />
 
       {episodeCount > 0 && (
         <section className="relative mt-7 overflow-hidden rounded-2xl border border-white/10 bg-black">
@@ -490,4 +493,4 @@ export default async function AnimeWatchPage(
       )}
     </main>
   );
-      }
+}
