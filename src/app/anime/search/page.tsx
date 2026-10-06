@@ -4,6 +4,7 @@ import {
 } from "@/api/mal";
 import AnimePosterCard from "@/components/anime/AnimePosterCard";
 import AnimeSearchBar from "@/components/anime/AnimeSearchBar";
+import type { MalAnime } from "@/types/mal";
 
 export const revalidate = 300;
 
@@ -40,8 +41,11 @@ export default async function AnimeSearchPage(
         )
       : 1;
 
-  let results = [];
-  let hasNextPage = false;
+  let results: MalAnime[] =
+    [];
+
+  let hasNextPage =
+    false;
 
   if (search.length > 0) {
     const response =
@@ -164,4 +168,4 @@ export default async function AnimeSearchPage(
       )}
     </main>
   );
-            }
+                }
