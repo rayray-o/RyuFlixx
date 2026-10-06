@@ -306,7 +306,7 @@ const NEXT_AIRING_QUERY = `
       mediaId: $mediaId
       notYetAired: true
       airingAt_greater: $airingAtGreater
-      sort: TIME
+      sort: [TIME]
     ) {
       id
       airingAt
@@ -515,7 +515,7 @@ export async function getAniListAnimeByMalId(
      * Fallback to the direct AiringSchedule lookup.
      *
      * IMPORTANT:
-     * We now use AniList's media ID here,
+     * We use AniList's media ID here,
      * NOT the MAL ID.
      */
     const scheduled =
@@ -536,4 +536,4 @@ export async function getAniListAnimeByMalId(
   } catch {
     return null;
   }
-            }
+  }
