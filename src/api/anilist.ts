@@ -338,59 +338,6 @@ const AIRING_SCHEDULE_QUERY = `
   }
 `;
 
-export async function getAniListAnimeByMalId(
-  malId: string | number,
-): Promise<AniListAnime | null> {
-  try {
-    const response =
-      await fetch(
-        ANILIST_API,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json",
-
-            Accept:
-              "application/json",
-          },
-
-          body: JSON.stringify({
-            query: QUERY,
-
-            variables: {
-              malId:
-                Number(malId),
-            },
-          }),
-
-          next: {
-            revalidate: 1800,
-          },
-        },
-      );
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const json =
-      (await response.json()) as {
-        data?: {
-          Media?: AniListAnime | null;
-        };
-      };
-
-    return (
-      json.data?.Media ??
-      null
-    );
-  } catch {
-    return null;
-  }
-}
-
 export async function getAniListAiringSchedule(
   options: {
     page?: number;
@@ -495,4 +442,209 @@ export async function getAniListAiringSchedule(
       hasNextPage: false,
     };
   }
+}
+
+/*
+ * Find the next scheduled episode for a specific
+ * MAL anime ID using AniList's actual airing schedule.
+ *
+ * This is deliberately separate from Media.nextAiringEpisode
+ * because AniList can sometimes omit nextAiringEpisode
+ * from the Media response even though an airing schedule
+ * entry exists.
+ */
+export async function getNextAiringEpisodeByMalId(
+  malId: string | number,
+): Promise<{
+  airingAt: number;
+  timeUntilAiring: number;
+  episode: number;
+} | null> {
+  const numericMalId =
+    Number(malId);
+
+  if (
+    !Number.isFinite(
+      numericMalId,
+    ) ||
+    numericMalId <= 0
+  ) {
+    return null;
   }
+
+  const now =
+    Math.floor(
+      Date.now() / 1000,
+    );
+
+  /*
+   * Look 30 days ahead.
+   *
+   * Most recurring anime schedules fall
+   * comfortably inside this window.
+   */
+  const thirtyDaysFromNow =
+    now +
+    30 *
+      24 *
+      60 *
+      60;
+
+  /*
+   * AniList sorts schedules by time, so
+   * we only need to inspect a few pages.
+   */
+  for (
+    let page = 1;
+    page <= 3;
+    page += 1
+  ) {
+    const schedule =
+      await getAniListAiringSchedule({
+        page,
+        perPage: 50,
+        from: now,
+        to: thirtyDaysFromNow,
+      });
+
+    const match =
+      schedule.items.find(
+        (item) =>
+          item.media?.idMal ===
+            numericMalId &&
+          item.airingAt > now &&
+          item.episode > 0,
+      );
+
+    if (match) {
+      return {
+        airingAt:
+          match.airingAt,
+
+        timeUntilAiring:
+          match.timeUntilAiring,
+
+        episode:
+          match.episode,
+      };
+    }
+
+    if (
+      !schedule.hasNextPage
+    ) {
+      break;
+    }
+  }
+
+  return null;
+}
+
+export async function getAniListAnimeByMalId(
+  malId: string | number,
+): Promise<AniListAnime | null> {
+  try {
+    const numericMalId =
+      Number(malId);
+
+    if (
+      !Number.isFinite(
+        numericMalId,
+      ) ||
+      numericMalId <= 0
+    ) {
+      return null;
+    }
+
+    const response =
+      await fetch(
+        ANILIST_API,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            Accept:
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            query: QUERY,
+
+            variables: {
+              malId:
+                numericMalId,
+            },
+          }),
+
+          next: {
+            revalidate: 1800,
+          },
+        },
+      );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const json =
+      (await response.json()) as {
+        data?: {
+          Media?: AniListAnime | null;
+        };
+      };
+
+    const media =
+      json.data?.Media ??
+      null;
+
+    if (!media) {
+      return null;
+    }
+
+    /*
+     * AniList's Media query is our first source.
+     *
+     * If it already has nextAiringEpisode,
+     * keep it. This is the fastest path.
+     */
+    if (
+      media.nextAiringEpisode
+        ?.airingAt &&
+      media.nextAiringEpisode
+        ?.episode
+    ) {
+      return media;
+    }
+
+    /*
+     * FALLBACK:
+     *
+     * Some anime have a valid future airing
+     * schedule but AniList doesn't expose it
+     * through Media.nextAiringEpisode.
+     *
+     * Query the actual AiringSchedule and
+     * attach the result to the same object
+     * our existing UI already understands.
+     */
+    const scheduled =
+      await getNextAiringEpisodeByMalId(
+        numericMalId,
+      );
+
+    if (scheduled) {
+      return {
+        ...media,
+
+        nextAiringEpisode:
+          scheduled,
+      };
+    }
+
+    return media;
+  } catch {
+    return null;
+  }
+        }
