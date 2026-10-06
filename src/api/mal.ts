@@ -4,11 +4,12 @@ import type {
   MalAnimeResponse,
 } from "@/types/mal";
 
+import {
+  getAniListAnimeByMalId,
+} from "@/api/anilist";
+
 const MAL_API_BASE =
   "https://api.myanimelist.net/v2";
-
-const JIKAN_API_BASE =
-  "https://api.jikan.moe/v4";
 
 const MAL_FIELDS = [
   "id",
@@ -95,208 +96,69 @@ async function malRequest<T>(
   );
 }
 
-type JikanAnimeResponse = {
-  data?: {
-    episodes?: number | null;
-  } | null;
-};
-
-type JikanEpisode = {
-  mal_id?: number | null;
-  episode?: string | null;
-};
-
-type JikanEpisodesResponse = {
-  data?: JikanEpisode[];
-
-  pagination?: {
-    last_visible_page?: number | null;
-    has_next_page?: boolean | null;
-  };
-};
-
-async function jikanRequest<T>(
-  path: string,
-): Promise<T> {
-  const response =
-    await fetch(
-      `${JIKAN_API_BASE}${path}`,
-      {
-        headers: {
-          Accept:
-            "application/json",
-        },
-
-        next: {
-          revalidate: 300,
-        },
-      },
-    );
-
-  if (!response.ok) {
-    throw new Error(
-      `Jikan request failed with ${response.status}`,
-    );
-  }
-
-  return (
-    (await response.json()) as T
-  );
-}
-
 /**
- * Returns the number of aired/known episodes for an anime.
+ * Resolves the number of episodes available for an anime.
  *
- * Primary source:
- *   MyAnimeList API -> num_episodes
+ * Source priority:
  *
- * Fallback:
- *   Jikan's MAL-backed anime metadata
+ * 1. MyAnimeList
+ * 2. AniList, matched using the MAL ID
  *
- * Final fallback:
- *   Jikan's paginated MAL episode list.
+ * AniList is already part of RyuFlix's anime architecture
+ * and exposes the `episodes` field on its Media object.
  *
- * The final fallback is important for long-running anime such as
- * One Piece, where the episode list can contain more than 100
- * episodes and the anime metadata count may be unavailable.
+ * This function intentionally does NOT depend on Jikan.
  */
 export async function getAnimeEpisodeCount(
   anime: MalAnime,
 ): Promise<number> {
-  const malCount =
-    Number(anime.num_episodes);
+  const malEpisodeCount =
+    Number(
+      anime.num_episodes,
+    );
 
   if (
-    Number.isFinite(malCount) &&
-    malCount > 0
+    Number.isFinite(
+      malEpisodeCount,
+    ) &&
+    malEpisodeCount > 0
   ) {
     return Math.floor(
-      malCount,
+      malEpisodeCount,
     );
   }
 
-  const animeId =
-    Number(anime.id);
-
-  if (
-    !Number.isFinite(animeId) ||
-    animeId <= 0
-  ) {
-    return 0;
-  }
-
-  /*
-   * First fallback:
-   * Ask Jikan for the same MAL anime's main metadata.
-   *
-   * Jikan documents this endpoint as parsing the MAL anime page.
-   */
   try {
-    const jikanAnime =
-      await jikanRequest<JikanAnimeResponse>(
-        `/anime/${animeId}`,
+    const aniListAnime =
+      await getAniListAnimeByMalId(
+        anime.id,
       );
 
-    const jikanCount =
+    const aniListEpisodeCount =
       Number(
-        jikanAnime.data?.episodes,
+        aniListAnime?.episodes,
       );
 
     if (
-      Number.isFinite(jikanCount) &&
-      jikanCount > 0
+      Number.isFinite(
+        aniListEpisodeCount,
+      ) &&
+      aniListEpisodeCount > 0
     ) {
       return Math.floor(
-        jikanCount,
+        aniListEpisodeCount,
       );
     }
   } catch {
     /*
-     * Do not make the whole watch page fail just because
-     * the fallback metadata request failed.
+     * AniList is a fallback source.
+     *
+     * If it fails, keep the page usable instead of
+     * crashing the entire watch page.
      */
   }
 
-  /*
-   * Final fallback:
-   * Read the actual MAL-backed episode list.
-   *
-   * Jikan returns episode lists in pages of up to 100.
-   * We only need the first page to discover the final page,
-   * then request that final page and use its highest episode
-   * number.
-   */
-  try {
-    const firstPage =
-      await jikanRequest<JikanEpisodesResponse>(
-        `/anime/${animeId}/episodes?page=1`,
-      );
-
-    const firstEpisodes =
-      firstPage.data ?? [];
-
-    let highestEpisode =
-      getHighestEpisodeNumber(
-        firstEpisodes,
-      );
-
-    const lastPage =
-      Number(
-        firstPage.pagination
-          ?.last_visible_page,
-      );
-
-    if (
-      Number.isFinite(lastPage) &&
-      lastPage > 1
-    ) {
-      const finalPage =
-        await jikanRequest<JikanEpisodesResponse>(
-          `/anime/${animeId}/episodes?page=${Math.floor(
-            lastPage,
-          )}`,
-        );
-
-      const finalEpisodes =
-        finalPage.data ?? [];
-
-      highestEpisode =
-        Math.max(
-          highestEpisode,
-          getHighestEpisodeNumber(
-            finalEpisodes,
-          ),
-        );
-    }
-
-    return highestEpisode;
-  } catch {
-    return 0;
-  }
-}
-
-function getHighestEpisodeNumber(
-  episodes: JikanEpisode[],
-): number {
-  let highest = 0;
-
-  for (const episode of episodes) {
-    const parsed =
-      Number(
-        episode.mal_id ??
-          episode.episode,
-      );
-
-    if (
-      Number.isFinite(parsed) &&
-      parsed > highest
-    ) {
-      highest =
-        Math.floor(parsed);
-    }
-  }
-
-  return highest;
+  return 0;
 }
 
 export async function getAnimeRanking(
