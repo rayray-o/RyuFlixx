@@ -2,8 +2,8 @@ import Link from "next/link";
 import AnimePosterCard from "@/components/anime/AnimePosterCard";
 import AnimeSearchBar from "@/components/anime/AnimeSearchBar";
 import {
-  getRecentAnime,
-} from "@/api/anikoto";
+  getLatestAnime,
+} from "@/api/mal";
 
 export const revalidate = 300;
 
@@ -31,26 +31,16 @@ export default async function AnimeLatestPage(
       : 1;
 
   const data =
-    await getRecentAnime(
+    await getLatestAnime(
       page,
       24,
     );
-
-  const pagination =
-    data.pagination;
 
   const hasPrevious =
     page > 1;
 
   const hasNext =
-    pagination?.has_next ??
-    (
-      pagination?.total_pages
-        ? page <
-          pagination.total_pages
-        : data.anime.length >=
-          24
-    );
+    data.hasNext;
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 pb-12">
@@ -73,7 +63,7 @@ export default async function AnimeLatestPage(
             </h1>
 
             <p className="mt-3 max-w-2xl text-sm text-white/55 md:text-base">
-              Browse the latest anime added to RyuFlix.
+              Browse currently airing anime from MyAnimeList.
             </p>
           </div>
 
