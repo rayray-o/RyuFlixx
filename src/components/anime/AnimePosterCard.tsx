@@ -1,9 +1,13 @@
 import Link from "next/link";
-import { getAnimeTitle } from "@/api/anikoto";
-import type { AnikotoAnime } from "@/types/anikoto";
+import {
+  getAnimeImage,
+  getAnimeTitle,
+  getAnimeYear,
+} from "@/api/mal";
+import type { MalAnime } from "@/types/mal";
 
 interface AnimePosterCardProps {
-  anime: AnikotoAnime;
+  anime: MalAnime;
 }
 
 const AnimePosterCard: React.FC<
@@ -13,9 +17,10 @@ const AnimePosterCard: React.FC<
     getAnimeTitle(anime);
 
   const image =
-    anime.image ||
-    anime.poster ||
-    anime.cover;
+    getAnimeImage(anime);
+
+  const year =
+    getAnimeYear(anime);
 
   return (
     <Link
@@ -45,11 +50,11 @@ const AnimePosterCard: React.FC<
 
       <div className="flex justify-between px-1 pt-1 text-xs text-white/50">
         <p>
-          {anime.year ?? ""}
+          {year ?? ""}
         </p>
 
         <p>
-          {anime.type ?? ""}
+          {anime.media_type ?? ""}
         </p>
       </div>
     </Link>
