@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+
 import {
   getAnime,
+  getAnimeEpisodeCount,
   getAnimeImage,
   getAnimeTitle,
 } from "@/api/mal";
+
 import { Params } from "@/types";
+
 import AnimePlayer from "@/components/anime/AnimePlayer";
 
 const BASE_URL =
@@ -143,11 +147,25 @@ export default async function AnimeWatchPage(
   const image =
     getAnimeImage(anime);
 
+  /*
+   * Do not read anime.num_episodes directly here.
+   *
+   * Some airing anime can have incomplete/unknown episode
+   * metadata even though their MAL episode page contains
+   * a complete list.
+   *
+   * getAnimeEpisodeCount() handles:
+   *
+   *   MAL metadata
+   *       ↓
+   *   Jikan metadata
+   *       ↓
+   *   Jikan/MAL episode list
+   */
   const episodeCount =
-    anime.num_episodes &&
-    anime.num_episodes > 0
-      ? anime.num_episodes
-      : 0;
+    await getAnimeEpisodeCount(
+      anime,
+    );
 
   if (
     episodeCount > 0 &&
@@ -208,12 +226,8 @@ export default async function AnimeWatchPage(
             title={title}
             episode={episodeNumber}
             episodeTitle={`Episode ${episodeNumber}`}
-            poster={
-              image
-            }
-            image={
-              image
-            }
+            poster={image}
+            image={image}
           />
         </div>
       </section>
@@ -230,8 +244,7 @@ export default async function AnimeWatchPage(
             </h1>
 
             <p className="mt-1 text-sm text-white/45">
-              {requestedLanguage ===
-              "dub"
+              {requestedLanguage === "dub"
                 ? "English Dub"
                 : "English Sub"}
             </p>
@@ -241,8 +254,7 @@ export default async function AnimeWatchPage(
             <Link
               href={`/anime/${anime.id}/watch?episode=${episodeNumber}&lang=sub`}
               className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
-                requestedLanguage ===
-                "sub"
+                requestedLanguage === "sub"
                   ? "border-warning/50 bg-warning/10 text-warning"
                   : "border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white"
               }`}
@@ -253,8 +265,7 @@ export default async function AnimeWatchPage(
             <Link
               href={`/anime/${anime.id}/watch?episode=${episodeNumber}&lang=dub`}
               className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
-                requestedLanguage ===
-                "dub"
+                requestedLanguage === "dub"
                   ? "border-warning/50 bg-warning/10 text-warning"
                   : "border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white"
               }`}
@@ -410,4 +421,4 @@ export default async function AnimeWatchPage(
       )}
     </main>
   );
-  }
+          }
