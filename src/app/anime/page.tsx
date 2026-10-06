@@ -7,8 +7,6 @@ import {
   getPopularAnime,
   getTopAnime,
   getTopMovieAnime,
-  getTopOnaAnime,
-  getTopOvaAnime,
   getTopTvAnime,
   getUpcomingAnime,
 } from "@/api/mal";
@@ -23,8 +21,6 @@ export default async function AnimePage() {
     upcomingAnime,
     topTvAnime,
     topMovieAnime,
-    topOvaAnime,
-    topOnaAnime,
     favoriteAnime,
   ] = await Promise.all([
     getTopAnime(1, 24),
@@ -33,8 +29,6 @@ export default async function AnimePage() {
     getUpcomingAnime(1, 24),
     getTopTvAnime(1, 24),
     getTopMovieAnime(1, 24),
-    getTopOvaAnime(1, 24),
-    getTopOnaAnime(1, 24),
     getFavoriteAnime(1, 24),
   ]);
 
@@ -104,20 +98,6 @@ export default async function AnimePage() {
         />
 
         <AnimeHomeList
-          id="top-ova-anime"
-          title="Top OVA Anime"
-          href="/anime/latest?ranking=ova"
-          anime={topOvaAnime.anime}
-        />
-
-        <AnimeHomeList
-          id="top-ona-anime"
-          title="Top ONA Anime"
-          href="/anime/latest?ranking=ona"
-          anime={topOnaAnime.anime}
-        />
-
-        <AnimeHomeList
           id="favorite-anime"
           title="Most Favorited"
           href="/anime/latest?ranking=favorite"
@@ -126,4 +106,4 @@ export default async function AnimePage() {
       </div>
     </main>
   );
-        }
+      }
