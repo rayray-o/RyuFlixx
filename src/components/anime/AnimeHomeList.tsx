@@ -6,24 +6,32 @@ import type { MalAnime } from "@/types/mal";
 
 interface AnimeHomeListProps {
   anime: MalAnime[];
+  title: string;
+  href: string;
+  id: string;
 }
 
 const AnimeHomeList: React.FC<
   AnimeHomeListProps
-> = ({ anime }) => {
+> = ({
+  anime,
+  title,
+  href,
+  id,
+}) => {
   return (
     <section
-      id="latest-anime"
+      id={id}
       className="min-h-[250px] md:min-h-[300px]"
     >
       <div className="z-3 flex flex-col gap-2">
         <div className="flex grow items-center justify-between">
           <SectionTitle color="warning">
-            Latest Anime
+            {title}
           </SectionTitle>
 
           <Link
-            href="/anime/latest"
+            href={href}
             className="rounded-full px-2 py-1 text-sm text-white transition-colors hover:bg-white/5"
           >
             See All &gt;
