@@ -16,10 +16,10 @@ const TvShowRelatedSection: React.FC<
   TvShowRelatedSectionProps
 > = ({ tv }) => {
   const recommendations =
-    tv.recommendations.results as TV[];
+    tv.recommendations.results as unknown as TV[];
 
   const similar =
-    tv.similar.results as TV[];
+    tv.similar.results as unknown as TV[];
 
   return (
     <section id="related" className="z-3">
@@ -54,7 +54,9 @@ const TvShowRelatedSection: React.FC<
             key="similar"
             title="Similar"
           >
-            <TvShowRelatedList tvs={similar} />
+            <TvShowRelatedList
+              tvs={similar}
+            />
           </Tab>
         )}
       </Tabs>
