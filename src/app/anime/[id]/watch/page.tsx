@@ -8,9 +8,7 @@ import {
   getAnimeTitle,
 } from "@/api/mal";
 
-import {
-  getAniListAnimeByMalId,
-} from "@/api/anilist";
+import { getAniListAnimeByMalId } from "@/api/anilist";
 
 import { Params } from "@/types";
 
@@ -58,278 +56,6 @@ function getMegaPlayUrl(
   return `${MEGAPLAY_BASE}/${encodeURIComponent(
     animeId,
   )}/${episode}/${language}`;
-}
-
-/*
- * Detect whether the anime itself has not started airing yet.
- *
- * AniList is the primary source.
- * MAL is used as a fallback.
- */
-function isAnimeUpcoming(
-  anime: Awaited<
-    ReturnType<typeof getAnime>
-  >,
-  aniList: Awaited<
-    ReturnType<
-      typeof getAniListAnimeByMalId
-    >
-  >,
-): boolean {
-  if (
-    aniList?.notYetAired === true
-  ) {
-    return true;
-  }
-
-  if (
-    aniList?.status ===
-    "NOT_YET_RELEASED"
-  ) {
-    return true;
-  }
-
-  const malStatus =
-    anime.status
-      ?.trim()
-      .toLowerCase();
-
-  if (
-    malStatus ===
-      "not_yet_aired" ||
-    malStatus ===
-      "not yet aired"
-  ) {
-    return true;
-  }
-
-  if (anime.start_date) {
-    const start =
-      Date.parse(
-        `${anime.start_date}T00:00:00Z`,
-      );
-
-    if (
-      Number.isFinite(start) &&
-      start > Date.now()
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function NextEpisodeCountdown({
-  airingAt,
-  episode,
-}: {
-  airingAt: number;
-  episode: number;
-}) {
-  /*
-   * AniList gives us an absolute Unix timestamp.
-   *
-   * The browser automatically displays it in the
-   * user's own timezone.
-   */
-  const target =
-    airingAt * 1000;
-
-  /*
-   * This component is intentionally kept simple here
-   * because the watch page is a server component.
-   *
-   * The actual interactive countdown is rendered by
-   * the small client component below.
-   */
-  return (
-    <NextEpisodeCountdownClient
-      target={target}
-      episode={episode}
-    />
-  );
-}
-
-function NextEpisodeCountdownClient({
-  target,
-  episode,
-}: {
-  target: number;
-  episode: number;
-}) {
-  "use client";
-
-  return (
-    <NextEpisodeCountdownInner
-      target={target}
-      episode={episode}
-    />
-  );
-}
-
-function NextEpisodeCountdownInner({
-  target,
-  episode,
-}: {
-  target: number;
-  episode: number;
-}) {
-  const React =
-    require("react") as typeof import("react");
-
-  const {
-    useEffect,
-    useState,
-    useMemo,
-  } = React;
-
-  const [now, setNow] =
-    useState(() =>
-      Date.now(),
-    );
-
-  useEffect(() => {
-    const interval =
-      window.setInterval(
-        () => {
-          setNow(
-            Date.now(),
-          );
-        },
-        1000,
-      );
-
-    return () =>
-      window.clearInterval(
-        interval,
-      );
-  }, []);
-
-  const remaining =
-    Math.max(
-      0,
-      Math.floor(
-        (target - now) /
-          1000,
-      ),
-    );
-
-  const days =
-    Math.floor(
-      remaining / 86400,
-    );
-
-  const hours =
-    Math.floor(
-      (remaining % 86400) /
-        3600,
-    );
-
-  const minutes =
-    Math.floor(
-      (remaining % 3600) /
-        60,
-    );
-
-  const seconds =
-    remaining % 60;
-
-  const airingDate =
-    useMemo(
-      () =>
-        new Date(target),
-      [target],
-    );
-
-  const localDate =
-    useMemo(
-      () =>
-        new Intl.DateTimeFormat(
-          undefined,
-          {
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          },
-        ).format(
-          airingDate,
-        ),
-      [airingDate],
-    );
-
-  const localTime =
-    useMemo(
-      () =>
-        new Intl.DateTimeFormat(
-          undefined,
-          {
-            hour: "numeric",
-            minute: "2-digit",
-            timeZoneName: "short",
-          },
-        ).format(
-          airingDate,
-        ),
-      [airingDate],
-    );
-
-  const timezone =
-    Intl.DateTimeFormat()
-      .resolvedOptions()
-      .timeZone;
-
-  const countdown =
-    days > 0
-      ? `${days}d ${String(
-          hours,
-        ).padStart(2, "0")}h ${String(
-          minutes,
-        ).padStart(2, "0")}m`
-      : `${String(
-          hours,
-        ).padStart(2, "0")}:${String(
-          minutes,
-        ).padStart(2, "0")}:${String(
-          seconds,
-        ).padStart(2, "0")}`;
-
-  return (
-    <section className="mt-7 overflow-hidden rounded-2xl border border-warning/15 bg-warning/[0.04]">
-      <div className="flex flex-col gap-5 p-5 sm:p-6 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-warning/70">
-            Next Episode
-          </p>
-
-          <h2 className="mt-1 text-xl font-bold text-white">
-            Episode {episode}
-          </h2>
-
-          <p className="mt-2 text-sm text-white/45">
-            {remaining <= 0
-              ? "Airing now"
-              : `In ${countdown}`}
-          </p>
-        </div>
-
-        <div className="md:text-right">
-          <p className="text-sm font-semibold text-white/80">
-            {localDate}
-          </p>
-
-          <p className="mt-1 text-sm font-semibold text-warning">
-            {localTime}
-          </p>
-
-          <p className="mt-1 text-[11px] text-white/25">
-            {timezone}
-          </p>
-        </div>
-      </div>
-    </section>
-  );
 }
 
 export async function generateMetadata(
@@ -423,32 +149,20 @@ export default async function AnimeWatchPage(
     getAnimeImage(anime);
 
   /*
-   * Keep using the existing AniList path.
+   * Use the existing AniList data path directly.
    *
-   * This is also the source of the working episode
-   * count that fixed the previous One Piece issue.
+   * getAniListAnimeByMalId() is already used by the anime
+   * detail page for banner, trailer, characters, relations,
+   * recommendations, etc. Its returned object also contains
+   * the main anime's episode count.
+   *
+   * MAL remains a fallback in case AniList doesn't return
+   * an episode count.
    */
   const aniList =
     await getAniListAnimeByMalId(
       anime.id,
     );
-
-  /*
-   * Never allow an upcoming anime to enter the
-   * actual player route.
-   *
-   * Hiding Watch Now alone is not enough because
-   * someone could manually enter the URL.
-   */
-  const upcoming =
-    isAnimeUpcoming(
-      anime,
-      aniList,
-    );
-
-  if (upcoming) {
-    notFound();
-  }
 
   const aniListEpisodeCount =
     Number(aniList?.episodes);
@@ -627,18 +341,6 @@ export default async function AnimeWatchPage(
         </div>
       </section>
 
-      {aniList?.nextAiringEpisode?.airingAt &&
-        aniList.nextAiringEpisode.episode && (
-          <NextEpisodeCountdown
-            airingAt={
-              aniList.nextAiringEpisode.airingAt
-            }
-            episode={
-              aniList.nextAiringEpisode.episode
-            }
-          />
-        )}
-
       {episodeCount > 0 && (
         <section className="relative mt-7 overflow-hidden rounded-2xl border border-white/10 bg-black">
           <div className="absolute inset-0">
@@ -745,4 +447,4 @@ export default async function AnimeWatchPage(
       )}
     </main>
   );
-}
+  }
