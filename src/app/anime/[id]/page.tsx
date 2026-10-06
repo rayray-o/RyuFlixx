@@ -2,9 +2,12 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
-  getAnimeSeries,
+  getAnime,
+  getAnimeGenres,
+  getAnimeImage,
   getAnimeTitle,
-} from "@/api/anikoto";
+  getAnimeYear,
+} from "@/api/mal";
 import { Params } from "@/types";
 
 const BASE_URL =
@@ -37,27 +40,22 @@ export async function generateMetadata(
     await params;
 
   try {
-    const data =
-      await getAnimeSeries(id);
-
     const anime =
-      data.anime;
+      await getAnime(id);
 
     const title =
       getAnimeTitle(anime);
 
     const description =
       cleanDescription(
-        anime.description,
+        anime.synopsis,
       );
 
     const canonical =
       `${BASE_URL}/anime/${anime.id}`;
 
     const image =
-      anime.poster ||
-      anime.image ||
-      anime.cover ||
+      getAnimeImage(anime) ??
       undefined;
 
     return {
@@ -127,17 +125,14 @@ export default async function AnimeDetailPage(
   const { id } =
     await params;
 
-  let data;
+  let anime;
 
   try {
-    data =
-      await getAnimeSeries(id);
+    anime =
+      await getAnime(id);
   } catch {
     notFound();
   }
-
-  const anime =
-    data.anime;
 
   if (!anime) {
     notFound();
@@ -148,17 +143,33 @@ export default async function AnimeDetailPage(
 
   const description =
     cleanDescription(
-      anime.description,
+      anime.synopsis,
     );
 
   const image =
-    anime.poster ||
-    anime.image ||
-    anime.cover ||
-    null;
+    getAnimeImage(anime);
+
+  const year =
+    getAnimeYear(anime);
+
+  const genres =
+    getAnimeGenres(anime);
+
+  const episodeCount =
+    anime.num_episodes &&
+    anime.num_episodes > 0
+      ? anime.num_episodes
+      : 0;
 
   const episodes =
-    data.episodes || [];
+    Array.from(
+      {
+        length:
+          episodeCount,
+      },
+      (_, index) =>
+        index + 1,
+    );
 
   const canonical =
     `${BASE_URL}/anime/${anime.id}`;
@@ -189,17 +200,16 @@ export default async function AnimeDetailPage(
         }
       : {}),
 
-    ...(anime.year
+    ...(year
       ? {
           dateCreated:
-            `${anime.year}-01-01`,
+            `${year}-01-01`,
         }
       : {}),
 
-    ...(anime.genres?.length
+    ...(genres.length
       ? {
-          genre:
-            anime.genres,
+          genre: genres,
         }
       : {}),
   };
@@ -253,30 +263,30 @@ export default async function AnimeDetailPage(
                 {title}
               </h1>
 
-              {anime.native &&
-                anime.native !==
+              {anime.alternative_titles?.ja &&
+                anime.alternative_titles.ja !==
                   title && (
                   <p className="mt-2 text-sm text-white/45">
-                    {anime.native}
+                    {anime.alternative_titles.ja}
                   </p>
                 )}
 
               <div className="mt-4 flex flex-wrap gap-2 text-xs text-white/55">
-                {anime.year && (
+                {year && (
                   <span>
-                    {anime.year}
+                    {year}
                   </span>
                 )}
 
-                {anime.type && (
+                {anime.media_type && (
                   <span>
-                    {anime.type}
+                    {anime.media_type}
                   </span>
                 )}
 
-                {anime.episodes && (
+                {episodeCount > 0 && (
                   <span>
-                    {anime.episodes} episodes
+                    {episodeCount} episodes
                   </span>
                 )}
 
@@ -286,28 +296,27 @@ export default async function AnimeDetailPage(
                   </span>
                 )}
 
-                {anime.rating && (
+                {anime.mean != null && (
                   <span>
-                    {anime.rating}
+                    MAL {anime.mean}
                   </span>
                 )}
               </div>
 
-              {anime.genres &&
-                anime.genres.length > 0 && (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {anime.genres.map(
-                      (genre) => (
-                        <span
-                          key={genre}
-                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/60"
-                        >
-                          {genre}
-                        </span>
-                      ),
-                    )}
-                  </div>
-                )}
+              {genres.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {genres.map(
+                    (genre) => (
+                      <span
+                        key={genre}
+                        className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/60"
+                      >
+                        {genre}
+                      </span>
+                    ),
+                  )}
+                </div>
+              )}
 
               <p className="mt-5 max-w-3xl text-sm leading-7 text-white/65">
                 {description}
@@ -329,7 +338,9 @@ export default async function AnimeDetailPage(
             </div>
 
             <span className="text-sm text-white/40">
-              {episodes.length} available
+              {episodeCount > 0
+                ? `${episodeCount} available`
+                : "Episode count unavailable"}
             </span>
           </div>
 
@@ -338,13 +349,13 @@ export default async function AnimeDetailPage(
               {episodes.map(
                 (episode) => (
                   <Link
-                    key={episode.episode}
-                    href={`/anime/${anime.id}/watch?episode=${episode.episode}`}
+                    key={episode}
+                    href={`/anime/${anime.id}/watch?episode=${episode}`}
                     className="group rounded-xl border border-white/10 bg-white/[0.03] p-4 transition-colors hover:border-warning/40 hover:bg-white/[0.06]"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-lg font-bold text-white">
-                        {episode.episode}
+                        {episode}
                       </span>
 
                       <span className="text-xs text-warning opacity-0 transition-opacity group-hover:opacity-100">
@@ -352,24 +363,14 @@ export default async function AnimeDetailPage(
                       </span>
                     </div>
 
-                    {episode.title && (
-                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-white/45">
-                        {episode.title}
-                      </p>
-                    )}
+                    <p className="mt-2 text-xs leading-5 text-white/45">
+                      Episode {episode}
+                    </p>
 
-                    <div className="mt-3 flex gap-2">
-                      {episode.embed_url?.sub && (
-                        <span className="rounded-md bg-white/5 px-2 py-1 text-[10px] uppercase tracking-wide text-white/45">
-                          Sub
-                        </span>
-                      )}
-
-                      {episode.embed_url?.dub && (
-                        <span className="rounded-md bg-white/5 px-2 py-1 text-[10px] uppercase tracking-wide text-white/45">
-                          Dub
-                        </span>
-                      )}
+                    <div className="mt-3">
+                      <span className="rounded-md bg-white/5 px-2 py-1 text-[10px] uppercase tracking-wide text-white/45">
+                        SUB / DUB
+                      </span>
                     </div>
                   </Link>
                 ),
@@ -377,11 +378,11 @@ export default async function AnimeDetailPage(
             </div>
           ) : (
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-8 text-center text-sm text-white/40">
-              No episodes available.
+              MAL does not currently provide an episode count for this anime.
             </div>
           )}
         </section>
       </main>
     </>
   );
-}
+        }
