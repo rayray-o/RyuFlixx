@@ -1,70 +1,32 @@
 "use client";
 
 import Rating from "@/components/ui/other/Rating";
-import type {
-  LocalWatchHistory,
-  TvShowContinuation,
-} from "@/utils/localStorage";
-import {
-  clearTvContinuation,
-  removeWatchHistory,
-} from "@/utils/localStorage";
+import type { LocalWatchHistory, TvShowContinuation } from "@/utils/localStorage";
+import { clearTvContinuation, removeWatchHistory } from "@/utils/localStorage";
 import { cn } from "@/utils/helpers";
 import { PlayOutline } from "@/utils/icons";
-import {
-  formatDuration,
-  getImageUrl,
-  timeAgo,
-} from "@/utils/movies";
-import {
-  Chip,
-  Image,
-  Progress,
-} from "@heroui/react";
+import { formatDuration, getImageUrl, timeAgo } from "@/utils/movies";
+import { Chip, Image, Progress } from "@heroui/react";
 import Link from "next/link";
 import { useCallback } from "react";
 
 interface ResumeCardProps {
   media: LocalWatchHistory;
   continuation?: TvShowContinuation | null;
+  onFocus?: () => void;
 }
 
-const ResumeCard: React.FC<ResumeCardProps> = ({
-  media,
-  continuation = null,
-}) => {
-  const releaseYear = new Date(
-    media.release_date,
-  ).getFullYear();
+const ResumeCard: React.FC<ResumeCardProps> = ({ media, continuation = null, onFocus }) => {
+  const releaseYear = new Date(media.release_date).getFullYear();
+  const isUpNext = media.type === "tv" && media.completed && continuation !== null;
+  const season = continuation?.season ?? media.season;
+  const episode = continuation?.episode ?? media.episode;
 
-  const isUpNext =
-    media.type === "tv" &&
-    media.completed &&
-    continuation !== null;
-
-  const season =
-    continuation?.season ??
-    media.season;
-
-  const episode =
-    continuation?.episode ??
-    media.episode;
-
-  const posterImage = getImageUrl(
-    media.backdrop_path ||
-      media.poster_path ||
-      "",
-  );
+  const posterImage = getImageUrl(media.backdrop_path || media.poster_path || "");
 
   const getRedirectLink = useCallback(() => {
-    if (media.type === "movie") {
-      return `/movie/${media.media_id}/player`;
-    }
-
-    if (media.type === "tv") {
-      return `/tv/${media.media_id}/${season}/${episode}/player`;
-    }
-
+    if (media.type === "movie") return `/movie/${media.media_id}/player`;
+    if (media.type === "tv") return `/tv/${media.media_id}/${season}/${episode}/player`;
     return "/";
   }, [media, season, episode]);
 
@@ -73,50 +35,47 @@ const ResumeCard: React.FC<ResumeCardProps> = ({
       event.preventDefault();
       event.stopPropagation();
 
-      removeWatchHistory(
-        media.media_id,
-        media.type,
-        media.season,
-        media.episode,
-      );
-
-      if (media.type === "tv") {
-        clearTvContinuation(media.media_id);
-      }
+      removeWatchHistory(media.media_id, media.type, media.season, media.episode);
+      if (media.type === "tv") clearTvContinuation(media.media_id);
     },
-    [
-      media.media_id,
-      media.type,
-      media.season,
-      media.episode,
-    ],
+    [media.media_id, media.type, media.season, media.episode],
   );
 
   const progress = isUpNext
     ? 0
     : media.duration > 0
-      ? Math.min(
-          100,
-          (media.last_position /
-            media.duration) *
-            100,
-        )
+      ? Math.min(100, (media.last_position / media.duration) * 100)
       : 0;
 
   return (
-    <Link href={getRedirectLink()}>
-      <div
-        className={cn(
-          "group motion-preset-focus relative aspect-video overflow-hidden rounded-lg text-white",
-        )}
-      >
-        {/* Remove from Continue Watching */}
+    <Link
+      href={getRedirectLink()}
+      onMouseEnter={onFocus}
+      onFocus={onFocus}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        const current = event.currentTarget;
+        const rail = current.closest("[data-rail]");
+        if (!rail) return;
+        const items = Array.from(rail.querySelectorAll<HTMLElement>("[data-rail-item]"));
+        const index = items.indexOf(current);
+        const direction = event.key === "ArrowRight" ? 1 : -1;
+        const next = items[index + direction];
+        if (!next) return;
+        event.preventDefault();
+        next.focus();
+        next.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+      }}
+      data-rail-item
+      className="block outline-none"
+    >
+      <div className={cn("group motion-preset-focus relative aspect-video overflow-hidden rounded-[4px] text-white ring-offset-black transition duration-300 focus-within:ring-2 focus-within:ring-white/80")}>
         <button
           type="button"
           aria-label={`Remove ${media.title} from Continue Watching`}
           title="Remove from Continue Watching"
           onClick={handleRemove}
-          className="absolute right-2 top-2 z-40 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-sm font-bold text-white opacity-100 backdrop-blur-sm transition hover:bg-danger hover:text-white md:opacity-0 md:group-hover:opacity-100"
+          className="absolute right-2 top-2 z-40 flex h-8 w-8 items-center justify-center rounded-full bg-black/75 text-sm font-bold text-white opacity-100 backdrop-blur-sm transition hover:bg-danger hover:text-white md:opacity-0 md:group-hover:opacity-100"
         >
           ×
         </button>
@@ -128,16 +87,7 @@ const ResumeCard: React.FC<ResumeCardProps> = ({
         </div>
 
         {media.type === "tv" && (
-          <Chip
-            size="sm"
-            variant="faded"
-            radius="sm"
-            color="warning"
-            className="absolute right-2 top-2 z-20"
-            classNames={{
-              content: "font-bold",
-            }}
-          >
+          <Chip size="sm" variant="faded" radius="sm" color="warning" className="absolute right-2 top-2 z-20" classNames={{ content: "font-bold" }}>
             S{season} E{episode}
           </Chip>
         )}
@@ -147,21 +97,9 @@ const ResumeCard: React.FC<ResumeCardProps> = ({
           size="sm"
           variant="faded"
           className="absolute left-2 top-2 z-20"
-          color={
-            isUpNext
-              ? "warning"
-              : media.completed
-                ? "success"
-                : undefined
-          }
+          color={isUpNext ? "warning" : media.completed ? "success" : undefined}
         >
-          {isUpNext
-            ? "Up Next"
-            : media.completed
-              ? "Completed"
-              : formatDuration(
-                  media.last_position,
-                )}
+          {isUpNext ? "Up Next" : media.completed ? "Completed" : formatDuration(media.last_position)}
         </Chip>
 
         <Progress
@@ -169,11 +107,7 @@ const ResumeCard: React.FC<ResumeCardProps> = ({
           radius="md"
           aria-label="Watch progress"
           className="absolute bottom-0 z-10 w-full"
-          color={
-            media.type === "movie"
-              ? "primary"
-              : "warning"
-          }
+          color={media.type === "movie" ? "primary" : "warning"}
           value={progress}
         />
 
@@ -181,25 +115,13 @@ const ResumeCard: React.FC<ResumeCardProps> = ({
 
         <div className="absolute bottom-0 z-3 flex w-full flex-col gap-1 p-3">
           <div className="grid grid-cols-[1fr_auto] items-end justify-between gap-5">
-            <h6 className="truncate text-sm font-semibold">
-              {media.title}
-            </h6>
-
-            <p className="truncate text-xs">
-              {timeAgo(media.updated_at)}
-            </p>
+            <h6 className="truncate text-sm font-semibold">{media.title}</h6>
+            <p className="truncate text-xs">{timeAgo(media.updated_at)}</p>
           </div>
 
           <div className="flex justify-between text-xs">
-            <p>
-              {Number.isFinite(releaseYear)
-                ? releaseYear
-                : ""}
-            </p>
-
-            <Rating
-              rate={media.vote_average}
-            />
+            <p>{Number.isFinite(releaseYear) ? releaseYear : ""}</p>
+            <Rating rate={media.vote_average} />
           </div>
         </div>
 
@@ -207,10 +129,8 @@ const ResumeCard: React.FC<ResumeCardProps> = ({
           alt={media.title}
           src={posterImage}
           radius="none"
-          className="z-0 aspect-video h-[150px] object-cover object-center transition group-hover:scale-110 md:h-[200px]"
-          classNames={{
-            img: "group-hover:opacity-70",
-          }}
+          className="z-0 aspect-video h-[150px] object-cover object-center transition duration-700 group-hover:scale-105 md:h-[200px]"
+          classNames={{ img: "group-hover:opacity-70" }}
         />
       </div>
     </Link>
