@@ -218,7 +218,7 @@ function Rail({
   content: Content;
   onFocus: (candidate: HeroCandidate) => void;
 }) {
-  const { ref, inViewport } = useInViewport({ threshold: 0.05 });
+  const { ref, inViewport } = useInViewport();
   const key = `${content}-${name}`;
   const { data, isPending } = useQuery({
     queryKey: ["cinematic-home", key],
