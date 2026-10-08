@@ -7,7 +7,8 @@ import { usePathname } from "next/navigation";
 const Sidebar: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const pathName = usePathname();
   const hrefs = siteConfig.navItems.map((item) => item.href);
-  const shouldShowSidebar = hrefs.includes(pathName);
+  const shouldShowSidebar =
+    hrefs.includes(pathName) && pathName !== "/";
 
   return (
     <div className="flex h-full">
@@ -16,11 +17,17 @@ const Sidebar: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           <div className="left-0 top-0 w-20" />
           <aside className="fixed left-0 top-0 h-screen w-fit">
             <nav className="flex h-full flex-col justify-center bg-background pl-2 text-foreground">
-              <NavbarMenuItems size="sm" isVertical withIcon variant="light" />
+              <NavbarMenuItems
+                size="sm"
+                isVertical
+                withIcon
+                variant="light"
+              />
             </nav>
           </aside>
         </div>
       )}
+
       {children}
     </div>
   );
