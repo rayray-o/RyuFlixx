@@ -27,6 +27,8 @@ const tmdbBackdrop = (path?: string | null) =>
 const tmdbPoster = (path?: string | null) =>
   path ? `https://image.tmdb.org/t/p/w780${path}` : "";
 
+const BACKDROP_FADE_MS = 1800;
+
 type Media = Movie | TV;
 type Content = "movie" | "tv";
 
@@ -40,6 +42,12 @@ type HeroCandidate = {
   rating: number;
   year: string;
   history?: LocalWatchHistory;
+};
+
+type HeroLogoState = {
+  key: string;
+  url: string | null;
+  resolved: boolean;
 };
 
 function mediaTitle(media: Media): string {
@@ -122,10 +130,7 @@ function progress(item: LocalWatchHistory): number {
 
   return Math.max(
     0,
-    Math.min(
-      100,
-      (item.last_position / item.duration) * 100,
-    ),
+    Math.min(100, (item.last_position / item.duration) * 100),
   );
 }
 
@@ -376,8 +381,15 @@ export default function CinematicHome() {
   const [history, setHistory] = useState<LocalWatchHistory[]>([]);
   const [selected, setSelected] = useState<HeroCandidate | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+
   const [displayedBackdrop, setDisplayedBackdrop] = useState("");
   const [previousBackdrop, setPreviousBackdrop] = useState("");
+
+  const [heroLogo, setHeroLogo] = useState<HeroLogoState>({
+    key: "",
+    url: null,
+    resolved: false,
+  });
 
   const backdropTimer = useRef<number | null>(null);
   const heroTimer = useRef<number | null>(null);
@@ -466,8 +478,7 @@ export default function CinematicHome() {
     });
   }, [heroCandidates]);
 
-  // Preload the next backdrop before changing the visible image.
-  // Two image layers crossfade instead of replacing one another.
+  // Load the selected backdrop before animating it into view.
   useEffect(() => {
     const nextBackdrop = selected?.backdrop;
 
@@ -478,34 +489,91 @@ export default function CinematicHome() {
     let cancelled = false;
     const preload = new window.Image();
 
-    preload.onload = () => {
+    const showBackdrop = () => {
       if (cancelled) return;
-
-      setPreviousBackdrop(displayedBackdrop);
-      setDisplayedBackdrop(nextBackdrop);
 
       if (backdropTimer.current !== null) {
         window.clearTimeout(backdropTimer.current);
       }
 
+      setPreviousBackdrop(displayedBackdrop);
+      setDisplayedBackdrop(nextBackdrop);
+
       backdropTimer.current = window.setTimeout(() => {
         setPreviousBackdrop("");
         backdropTimer.current = null;
-      }, 1600);
+      }, BACKDROP_FADE_MS);
     };
 
-    preload.onerror = () => {
-      if (cancelled) return;
-      setPreviousBackdrop(displayedBackdrop);
-      setDisplayedBackdrop(nextBackdrop);
-    };
-
+    preload.onload = showBackdrop;
+    preload.onerror = showBackdrop;
     preload.src = nextBackdrop;
 
     return () => {
       cancelled = true;
+      preload.onload = null;
+      preload.onerror = null;
     };
   }, [selected?.backdrop, displayedBackdrop]);
+
+  // Fetch the actual TMDB title logo using the existing movie/TV logo routes.
+  useEffect(() => {
+    if (!selected) {
+      setHeroLogo({
+        key: "",
+        url: null,
+        resolved: true,
+      });
+      return;
+    }
+
+    const key = `${selected.content}:${selected.id}`;
+    const controller = new AbortController();
+
+    setHeroLogo({
+      key,
+      url: null,
+      resolved: false,
+    });
+
+    const endpoint =
+      selected.content === "movie"
+        ? "/api/movie-logo"
+        : "/api/tv-logo";
+
+    fetch(`${endpoint}?id=${selected.id}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          return { logo: null as string | null };
+        }
+
+        return (await response.json()) as {
+          logo: string | null;
+        };
+      })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+
+        setHeroLogo({
+          key,
+          url: data.logo || null,
+          resolved: true,
+        });
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+
+        setHeroLogo({
+          key,
+          url: null,
+          resolved: true,
+        });
+      });
+
+    return () => controller.abort();
+  }, [selected?.id, selected?.content]);
 
   useEffect(() => {
     if (!isMobile || heroCandidates.length < 2) return;
@@ -555,6 +623,10 @@ export default function CinematicHome() {
   const lists = content === "movie" ? movies : tvShows;
   const hero = selected;
 
+  const heroKey = hero ? `${hero.content}:${hero.id}` : "";
+  const currentLogo =
+    heroLogo.key === heroKey ? heroLogo : null;
+
   const handleRemoveHistory = (item: LocalWatchHistory) => {
     removeWatchHistory(
       item.media_id,
@@ -567,7 +639,6 @@ export default function CinematicHome() {
       clearTvContinuation(item.media_id);
     }
 
-    // Refresh immediately; also listen for the storage events above.
     setHistory(getWatchHistory());
 
     if (
@@ -580,28 +651,51 @@ export default function CinematicHome() {
 
   return (
     <div className="relative -mx-4 -mt-5 min-h-screen overflow-hidden bg-black md:-mx-6 md:-mt-8">
-      {/* Absolute page layer: it scrolls with the hero instead of jittering
-          as a fixed viewport background. */}
+      <style jsx>{`
+        @keyframes hero-backdrop-fade-in {
+          0% {
+            opacity: 0;
+            transform: scale(1.035);
+          }
+          100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+
+        .hero-backdrop-incoming {
+          animation: hero-backdrop-fade-in ${BACKDROP_FADE_MS}ms
+            cubic-bezier(0.22, 1, 0.36, 1) both;
+          will-change: opacity, transform;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .hero-backdrop-incoming {
+            animation-duration: 1ms;
+          }
+        }
+      `}</style>
+
       <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-[850px] overflow-hidden md:h-[950px]">
         {previousBackdrop && (
           <img
             src={previousBackdrop}
             alt=""
             aria-hidden="true"
-            className="absolute inset-0 h-full w-full object-cover object-center opacity-0 transition-opacity duration-[1500ms] ease-in-out"
+            className="absolute inset-0 h-full w-full object-cover object-center"
           />
         )}
 
         {displayedBackdrop && (
           <img
+            key={displayedBackdrop}
             src={displayedBackdrop}
             alt=""
             aria-hidden="true"
-            className="absolute inset-0 h-full w-full object-cover object-center opacity-100 transition-opacity duration-[1500ms] ease-in-out"
+            className="hero-backdrop-incoming absolute inset-0 h-full w-full object-cover object-center"
           />
         )}
 
-        {/* Keep the artwork visible; only use enough shading for readable text. */}
         <div className="absolute inset-0 bg-gradient-to-r from-black/65 via-black/20 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/5 to-transparent" />
         <div className="absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-black/35 to-transparent" />
@@ -612,9 +706,11 @@ export default function CinematicHome() {
           <div className="max-w-2xl transition-all duration-700">
             <div className="mb-4 flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.25em] text-white/70">
               <span>{hero?.content === "tv" ? "Series" : "Movie"}</span>
+
               {hero?.year && (
                 <span className="text-white/50">{hero.year}</span>
               )}
+
               {hero && (
                 <span className="text-white/50">
                   ★ {hero.rating.toFixed(1)}
@@ -622,14 +718,34 @@ export default function CinematicHome() {
               )}
             </div>
 
-            <h1 className="max-w-3xl text-4xl font-semibold leading-[0.95] tracking-[-0.04em] text-white sm:text-5xl md:text-6xl lg:text-7xl">
-              {hero?.title ?? "Welcome to RyuFlixx"}
-            </h1>
-
-            <p className="mt-5 line-clamp-3 max-w-xl text-sm leading-6 text-white/75 sm:text-base">
-              {hero?.overview ||
-                "A cinematic home for everything you want to watch."}
-            </p>
+            <div className="flex min-h-[100px] items-center sm:min-h-[120px] md:min-h-[145px]">
+              {hero && currentLogo?.url ? (
+                <img
+                  key={heroKey}
+                  src={currentLogo.url}
+                  alt={hero.title}
+                  className="max-h-[115px] max-w-full object-contain object-left drop-shadow-2xl sm:max-h-[135px] md:max-h-[155px]"
+                  style={{ width: "min(100%, 520px)" }}
+                  onError={() => {
+                    setHeroLogo((current) =>
+                      current.key === heroKey
+                        ? {
+                            ...current,
+                            url: null,
+                            resolved: true,
+                          }
+                        : current,
+                    );
+                  }}
+                />
+              ) : (
+                (currentLogo?.resolved || !hero) && (
+                  <h1 className="max-w-3xl text-4xl font-semibold leading-[0.95] tracking-[-0.04em] text-white sm:text-5xl md:text-6xl lg:text-7xl">
+                    {hero?.title ?? "Welcome to RyuFlixx"}
+                  </h1>
+                )
+              )}
+            </div>
 
             <div className="mt-7 flex flex-wrap items-center gap-3">
               {hero && (
@@ -679,6 +795,7 @@ export default function CinematicHome() {
                 <p className="text-[9px] font-bold uppercase tracking-[0.32em] text-white/45">
                   Pick up where you left off
                 </p>
+
                 <h2 className="mt-1 text-lg font-semibold text-white md:text-xl">
                   Continue Watching
                 </h2>
@@ -736,7 +853,6 @@ export default function CinematicHome() {
             </div>
           </section>
 
-          {/* Restored personalized recommendations. */}
           <div className="px-5 pb-4 md:px-10 lg:px-14">
             <ForYou type={content} />
           </div>
