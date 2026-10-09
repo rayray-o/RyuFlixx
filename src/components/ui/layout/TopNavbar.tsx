@@ -20,7 +20,13 @@ import BrandLogo from "../other/BrandLogo";
 
 const TopNavbar = () => {
   const pathName = usePathname();
+
   const [{ y }] = useWindowScroll();
+
+  const opacity = Math.min(
+    (y / 1000) * 5,
+    1,
+  );
 
   const hrefs = siteConfig.navItems.map(
     (item) => item.href,
@@ -30,8 +36,8 @@ const TopNavbar = () => {
     hrefs.includes(pathName) ||
     pathName === "/personalize";
 
-  const home = pathName === "/";
   const tv = pathName.includes("/tv/");
+
   const player = pathName.includes("/player");
 
   const personalizeItem =
@@ -46,11 +52,6 @@ const TopNavbar = () => {
     return null;
   }
 
-  const pageOpacity = Math.min(
-    (y / 700) * 2.5,
-    1,
-  );
-
   return (
     <Navbar
       disableScrollHandler
@@ -58,29 +59,26 @@ const TopNavbar = () => {
       position="sticky"
       maxWidth="full"
       classNames={{
-        wrapper: "px-3 md:px-5",
+        wrapper: "px-2 md:px-4",
       }}
       className={cn(
-        "z-50 h-min bg-transparent transition-colors duration-500",
-        home
-          ? "absolute inset-x-0 top-0"
-          : "inset-0",
-        !home &&
-          show &&
-          "bg-background",
+        "inset-0 h-min bg-transparent",
+        {
+          "bg-background": show,
+        },
       )}
     >
-      {!home && !show && (
+      {!show && (
         <div
-          className="absolute inset-0 -z-10 border-b border-background bg-background"
+          className="border-background bg-background absolute inset-0 h-full w-full border-b"
           style={{
-            opacity: pageOpacity,
+            opacity,
           }}
         />
       )}
 
       <NavbarBrand>
-        {show || home ? (
+        {show ? (
           <BrandLogo />
         ) : (
           <BackButton
@@ -93,9 +91,10 @@ const TopNavbar = () => {
         )}
       </NavbarBrand>
 
-      {!home &&
-        show &&
-        !pathName.startsWith("/search") && (
+      {show &&
+        !pathName.startsWith(
+          "/search",
+        ) && (
           <NavbarContent
             className="hidden w-full max-w-lg gap-2 md:flex"
             justify="center"
@@ -125,7 +124,7 @@ const TopNavbar = () => {
                 isIconOnly
                 variant="light"
                 className={cn(
-                  "p-2 text-white hover:bg-white/10",
+                  "p-2",
                   personalizeActive &&
                     "text-primary",
                 )}
@@ -137,13 +136,9 @@ const TopNavbar = () => {
             </Link>
           )}
 
-          <div className="text-white [&_button]:text-white [&_button:hover]:bg-white/10">
-            <ThemeSwitchDropdown />
-          </div>
+          <ThemeSwitchDropdown />
 
-          <div className="text-white [&_button]:text-white [&_button:hover]:bg-white/10">
-            <FullscreenToggleButton />
-          </div>
+          <FullscreenToggleButton />
         </NavbarItem>
       </NavbarContent>
     </Navbar>
