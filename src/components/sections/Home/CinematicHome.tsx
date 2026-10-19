@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -194,7 +195,6 @@ function Rail({
     <section ref={ref} className="relative py-5 md:py-7">
       <div className="mb-4 flex items-end justify-between gap-4 px-5 md:px-10 lg:px-14">
         <div>
-          <p className="mb-1 text-[9px] font-bold uppercase tracking-[0.32em] text-white/40">RyuFlixx</p>
           <h2 className="text-lg font-semibold tracking-tight text-white md:text-xl">{name.replace(/ Movies| TV Shows/g, "")}</h2>
         </div>
         <span className="hidden text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40 md:block">See all</span>
