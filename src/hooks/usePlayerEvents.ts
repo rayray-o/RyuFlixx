@@ -26,13 +26,17 @@ const SAVE_DISTANCE_SECONDS = 2;
 const MAX_DURATION_SECONDS = 8 * 60 * 60;
 const SUPPORTED_EVENTS: PlayerEventType[] = ["play", "pause", "seeked", "ended", "timeupdate"];
 
-function isRecord(value: unknown): value is Record<string, any> { return Boolean(value) && typeof value === "object"; }
-function firstDefined<T>(...values: (T | undefined | null)[]): T | undefined { return values.find((v) => v !== undefined && v !== null) as T | undefined; }
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object";
+}
+function firstDefined<T>(...values: (T | undefined | null)[]): T | undefined {
+  return values.find((value) => value !== undefined && value !== null) as T | undefined;
+}
 function toNumber(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string" || !value.trim()) return undefined;
-  const n = Number(value.trim());
-  return Number.isFinite(n) ? n : undefined;
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 function parseMaybeJson(value: unknown): unknown {
   if (typeof value !== "string") return value;
@@ -41,7 +45,7 @@ function parseMaybeJson(value: unknown): unknown {
 function unwrapData(raw: unknown): Record<string, any> | null {
   let current = parseMaybeJson(raw);
   if (!isRecord(current)) return null;
-  for (let i = 0; i < 6; i++) {
+  for (let depth = 0; depth < 6; depth += 1) {
     if (!isRecord(current.data)) break;
     current = parseMaybeJson(current.data);
     if (!isRecord(current)) return null;
@@ -59,14 +63,11 @@ function normalizeEvent(value: unknown): PlayerEventType | undefined {
   return SUPPORTED_EVENTS.includes(v as PlayerEventType) ? v as PlayerEventType : undefined;
 }
 
-/** Correct common seconds/milliseconds mismatches; reject impossible pairs instead of clamping them to 100%. */
+/** Normalize common seconds/milliseconds mismatches and reject impossible time pairs. */
 function normalizeTiming(current: number, duration: number) {
   let time = Math.max(0, current);
   let length = Math.max(0, duration);
   if (length > MAX_DURATION_SECONDS && length / 1000 <= MAX_DURATION_SECONDS) length /= 1000;
-  // If the position looks like milliseconds while duration is seconds,
-  // normalize it here. Do not reject a time/duration mismatch yet: the
-  // movie's known TMDB runtime is applied later, before accepting the event.
   if (length > 0 && time > length + 2 && time / 1000 <= length + 2) time /= 1000;
   return { currentTime: time, duration: length };
 }
@@ -76,45 +77,70 @@ function parseGenericPlayerMessage(raw: Record<string, any>): UnifiedPlayerEvent
   if (!isRecord(root)) return null;
   const data = unwrapData(root);
   if (!data) return null;
-  const pi = isRecord(data.player_info) ? data.player_info : isRecord(data.playerInfo) ? data.playerInfo : undefined;
+  const playerInfo = isRecord(data.player_info) ? data.player_info : isRecord(data.playerInfo) ? data.playerInfo : undefined;
   const value = isRecord(data.value) ? data.value : undefined;
-  const p = isRecord(data.progress) ? data.progress : undefined;
-  const current = toNumber(firstDefined(data.currentTime, data.current_time, data.position, data.current, data.time, data.seconds, data.watched, data.player_progress, value?.currentTime, value?.current_time, value?.position, value?.seconds, value?.watched, p?.watched, p?.currentTime)) ?? 0;
-  const duration = toNumber(firstDefined(data.duration, data.totalDuration, data.total_duration, data.length, data.videoDuration, data.video_duration, data.player_duration, value?.duration, value?.totalDuration, value?.total_duration, p?.duration)) ?? 0;
-  const progress = toNumber(firstDefined(typeof data.progress === "number" ? data.progress : undefined, data.percent, data.percentage, value?.progress, value?.percent, value?.percentage, p?.percentage));
-  const event = normalizeEvent(firstDefined(data.event, data.eventType, data.event_type, data.action, data.name, data.player_status, data.playerStatus, data.status, data.state, data.playerState, value?.event, value?.eventType, value?.status, value?.state)) ?? (current > 0 || duration > 0 || progress !== undefined ? "timeupdate" : undefined);
-  if (!event) return null;
+  const progressObject = isRecord(data.progress) ? data.progress : undefined;
+
+  const current = toNumber(firstDefined(
+    data.currentTime, data.current_time, data.position, data.current, data.time, data.seconds,
+    data.watched, data.player_progress, value?.currentTime, value?.current_time, value?.position,
+    value?.seconds, value?.watched, progressObject?.watched, progressObject?.currentTime,
+  )) ?? 0;
+  const duration = toNumber(firstDefined(
+    data.duration, data.totalDuration, data.total_duration, data.length, data.videoDuration,
+    data.video_duration, data.player_duration, value?.duration, value?.totalDuration,
+    value?.total_duration, progressObject?.duration,
+  )) ?? 0;
+  const progress = toNumber(firstDefined(
+    typeof data.progress === "number" ? data.progress : undefined, data.percent, data.percentage,
+    value?.progress, value?.percent, value?.percentage, progressObject?.percentage,
+  ));
+  const eventType = normalizeEvent(firstDefined(
+    data.event, data.eventType, data.event_type, data.action, data.name, data.player_status,
+    data.playerStatus, data.status, data.state, data.playerState, value?.event,
+    value?.eventType, value?.status, value?.state,
+  )) ?? (current > 0 || duration > 0 || progress !== undefined ? "timeupdate" : undefined);
+  if (!eventType) return null;
+
   const timing = normalizeTiming(current, duration);
-  if (!timing) return null;
-  const mediaTypeRaw = firstDefined(data.mediaType, data.media_type, data.contentType, data.content_type, pi?.mediaType, pi?.media_type);
+  const mediaTypeRaw = firstDefined(
+    data.mediaType, data.media_type, data.contentType, data.content_type,
+    playerInfo?.mediaType, playerInfo?.media_type,
+  );
+
   return {
-    event, currentTime: timing.currentTime, duration: timing.duration,
-    mediaId: firstDefined(data.mtmdbId, data.tmdbId, data.tmdb_id, data.mediaId, data.media_id, data.id, data.videoId, data.video_id, pi?.tmdb, pi?.tmdbId, pi?.tmdb_id, pi?.id) ?? 0,
+    event: eventType,
+    currentTime: timing.currentTime,
+    duration: timing.duration,
+    mediaId: firstDefined(data.mtmdbId, data.tmdbId, data.tmdb_id, data.mediaId, data.media_id, data.id,
+      data.videoId, data.video_id, playerInfo?.tmdb, playerInfo?.tmdbId, playerInfo?.tmdb_id, playerInfo?.id) ?? 0,
     mediaType: mediaTypeRaw === "tv" ? "tv" : "movie",
-    season: toNumber(firstDefined(data.season, data.seasonNumber, data.season_number, data.s, pi?.season, pi?.seasonNumber, pi?.season_number)),
-    episode: toNumber(firstDefined(data.episode, data.episodeNumber, data.episode_number, data.e, pi?.episode, pi?.episodeNumber, pi?.episode_number)),
+    season: toNumber(firstDefined(data.season, data.seasonNumber, data.season_number, data.s, playerInfo?.season, playerInfo?.seasonNumber, playerInfo?.season_number)),
+    episode: toNumber(firstDefined(data.episode, data.episodeNumber, data.episode_number, data.e, playerInfo?.episode, playerInfo?.episodeNumber, playerInfo?.episode_number)),
     progress,
   };
 }
+
 function parseVidLinkMessage(raw: Record<string, any>): UnifiedPlayerEventData | null {
   const root = parseMaybeJson(raw);
-  if (!isRecord(root) || root.type !== "MEDIA_DATA") return parseGenericPlayerMessage(raw);
+  if (!isRecord(root)) return null;
+  if (root.type !== "MEDIA_DATA") return parseGenericPlayerMessage(root);
   const data = unwrapData(root);
   if (!data) return null;
-  const p = isRecord(data.progress) ? data.progress : undefined;
-  const current = toNumber(p?.watched) ?? 0;
-  const duration = toNumber(p?.duration) ?? 0;
-  if (current <= 0 && duration <= 0) return null;
-  const timing = normalizeTiming(current, duration);
-  if (!timing) return null;
+  const progress = isRecord(data.progress) ? data.progress : undefined;
+  const currentTime = toNumber(progress?.watched) ?? 0;
+  const duration = toNumber(progress?.duration) ?? 0;
+  if (currentTime <= 0 && duration <= 0) return null;
+  const timing = normalizeTiming(currentTime, duration);
   return {
-    event: "timeupdate", currentTime: timing.currentTime, duration: timing.duration,
+    event: "timeupdate", ...timing,
     mediaId: firstDefined(data.id, data.tmdbId, data.tmdb_id) ?? 0,
     mediaType: data.type === "tv" ? "tv" : "movie",
     season: toNumber(firstDefined(data.last_season_watched, data.season)),
     episode: toNumber(firstDefined(data.last_episode_watched, data.episode)),
   };
 }
+
 function parseFilmUMessage(raw: Record<string, any>): UnifiedPlayerEventData | null {
   const root = parseMaybeJson(raw);
   if (!isRecord(root)) return null;
@@ -122,30 +148,39 @@ function parseFilmUMessage(raw: Record<string, any>): UnifiedPlayerEventData | n
   if (!data) return null;
   if (root.type === "SYNC_HISTORY") {
     const timing = normalizeTiming(toNumber(data.watched) ?? 0, toNumber(data.duration) ?? 0);
-    if (!timing) return null;
-    return { event: "timeupdate", ...timing, mediaId: firstDefined(data.media_id, data.tmdbId, data.id) ?? 0, mediaType: data.media_type === "tv" ? "tv" : "movie", season: toNumber(data.season), episode: toNumber(data.episode) };
+    return { event: "timeupdate", ...timing, mediaId: firstDefined(data.media_id, data.tmdbId, data.id) ?? 0,
+      mediaType: data.media_type === "tv" ? "tv" : "movie", season: toNumber(data.season), episode: toNumber(data.episode) };
   }
   if (root.type === "FILMU_PLAYER_EVENT") {
     const event = normalizeEvent(data.event);
     if (!event) return null;
     const timing = normalizeTiming(toNumber(data.currentTime) ?? 0, toNumber(data.duration) ?? 0);
-    if (!timing) return null;
-    return { event, ...timing, mediaId: firstDefined(data.tmdbId, data.media_id) ?? 0, mediaType: data.mediaType === "tv" ? "tv" : "movie", season: toNumber(data.season), episode: toNumber(data.episode) };
+    return { event, ...timing, mediaId: firstDefined(data.tmdbId, data.media_id) ?? 0,
+      mediaType: data.mediaType === "tv" ? "tv" : "movie", season: toNumber(data.season), episode: toNumber(data.episode) };
   }
   return parseGenericPlayerMessage(root);
 }
+
 function parseVidRiftMessage(raw: Record<string, any>): UnifiedPlayerEventData | null {
   const root = parseMaybeJson(raw);
-  if (!isRecord(root) || (root.type !== "vidrift:progress" && root.type !== "vidrift:ended")) return null;
+  if (!isRecord(root) || !["vidrift:progress", "vidrift:paused", "vidrift:unpaused", "vidrift:ended"].includes(String(root.type))) return null;
   const timing = normalizeTiming(toNumber(root.currentTime) ?? 0, toNumber(root.duration) ?? 0);
-  if (!timing) return null;
-  return { event: root.type === "vidrift:ended" ? "ended" : "timeupdate", ...timing, mediaId: firstDefined(root.tmdbId, root.tmdb_id, root.mediaId) ?? 0, mediaType: root.mediaType === "tv" ? "tv" : "movie", season: toNumber(root.season), episode: toNumber(root.episode) };
+  const eventType: PlayerEventType = root.type === "vidrift:ended" ? "ended" : root.type === "vidrift:paused" ? "pause" : root.type === "vidrift:unpaused" ? "play" : "timeupdate";
+  return { event: eventType, ...timing,
+    mediaId: firstDefined(root.tmdbId, root.tmdb_id, root.mediaId) ?? 0,
+    mediaType: root.mediaType === "tv" ? "tv" : "movie", season: toNumber(root.season), episode: toNumber(root.episode) };
 }
 
 const PLAYER_ORIGINS = [
-  "https://vidlink.pro", "https://embed.filmu.in", "https://embed.vidrift.net", "https://embed.vidrift.in",
-  "https://vidsrc.in", "https://vidsrc.ru", "https://vidsrc.su", "https://vidsrc.ir", "https://vidsrcme.ru", "https://vidsrcme.su", "https://vidsrc-me.ru", "https://vidsrc-me.ir",
-  "https://multiembed.mov", "https://www.nontongo.win", "https://vidcore.org", "https://vidcore.io", "https://filmku.stream", "https://www.2embed.cc", "https://2embed.cc", "https://vidstuck.xyz", "https://player.videasy.to",
+  "https://vidlink.pro",
+  "https://embed.filmu.in",
+  "https://embed.vidrift.net",
+  "https://embed.vidrift.in",
+  "https://vidsrc.in", "https://vidsrc.ru", "https://vidsrc.su", "https://vidsrc.ir",
+  "https://vidsrcme.ru", "https://vidsrcme.su", "https://vidsrc-me.ru", "https://vidsrc-me.ir",
+  "https://multiembed.mov", "https://www.nontongo.win", "https://vidcore.org", "https://vidcore.io",
+  "https://filmku.stream", "https://www.2embed.cc", "https://2embed.cc", "https://vidstuck.xyz",
+  "https://player.videasy.to", "https://player.videasy.ws",
 ] as const;
 export type PlayerOrigin = (typeof PLAYER_ORIGINS)[number];
 const PLAYER_ORIGIN_SET = new Set<string>(PLAYER_ORIGINS);
@@ -154,14 +189,19 @@ export const playerAdapters = Object.fromEntries([
   ["https://embed.filmu.in", { origin: "https://embed.filmu.in", parse: parseFilmUMessage }],
   ["https://embed.vidrift.net", { origin: "https://embed.vidrift.net", parse: parseVidRiftMessage }],
   ["https://embed.vidrift.in", { origin: "https://embed.vidrift.in", parse: parseVidRiftMessage }],
-  ...["https://vidsrc.in", "https://vidsrc.ru", "https://vidsrc.su", "https://vidsrc.ir", "https://vidsrcme.ru", "https://vidsrcme.su", "https://vidsrc-me.ru", "https://vidsrc-me.ir", "https://multiembed.mov", "https://www.nontongo.win", "https://vidcore.org", "https://vidcore.io", "https://filmku.stream", "https://www.2embed.cc", "https://2embed.cc", "https://vidstuck.xyz", "https://player.videasy.to"].map((origin) => [origin, { origin, parse: parseGenericPlayerMessage }]),
+  ...[
+    "https://vidsrc.in", "https://vidsrc.ru", "https://vidsrc.su", "https://vidsrc.ir",
+    "https://vidsrcme.ru", "https://vidsrcme.su", "https://vidsrc-me.ru", "https://vidsrc-me.ir",
+    "https://multiembed.mov", "https://www.nontongo.win", "https://vidcore.org", "https://vidcore.io",
+    "https://filmku.stream", "https://www.2embed.cc", "https://2embed.cc", "https://vidstuck.xyz",
+    "https://player.videasy.to", "https://player.videasy.ws",
+  ].map((origin) => [origin, { origin, parse: parseGenericPlayerMessage }]),
 ]) as AdapterMap;
 
 export interface UsePlayerEventsOptions {
   metadata?: {
     mediaId?: number; mediaType?: ContentType; title?: string; backdrop_path?: string; poster_path?: string;
     release_date?: string; vote_average?: number; season?: number; episode?: number;
-    /** Known runtime in seconds, used to reject provider durations that are clearly wrong. */
     expectedDuration?: number;
   };
   saveHistory?: boolean;
@@ -224,7 +264,6 @@ export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
       console.warn("RyuFlixx: ignored implausible playback timing", { mediaId, currentTime: raw.currentTime, duration: raw.duration });
       return;
     }
-    // Stale zero-time metadata/heartbeat messages must not erase real progress.
     if (data.currentTime <= 0 && !completed && !allowZero) return;
     saveWatchProgress({
       mediaId, mediaType: meta.mediaType ?? data.mediaType, title: meta.title,
@@ -292,8 +331,7 @@ export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
         case "timeupdate": cb.onTimeUpdate?.(normalized); maybeSaveProgress(normalized); break;
         case "ended": saveLocalProgress(normalized, true); cb.onEnded?.(normalized); break;
       }
-      // Do not auto-complete at 90%: provider duration/progress can be inaccurate.
-      // A title is completed only when the active provider emits an explicit ended event.
+      // Never infer completion from 90%: only an explicit provider ended event completes an item.
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
