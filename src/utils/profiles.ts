@@ -16,10 +16,21 @@ export interface RyuProfile {
 }
 
 export const PROFILE_AVATARS = [
-  "🎬", "🍿", "🌙", "🦊", "🐈", "🐉",
-  "👾", "🎭", "🦇", "🌸", "⚡", "🪐",
+  "/profile-avatars/01-noir-detective.webp",
+  "/profile-avatars/02-popcorn-mascot.webp",
+  "/profile-avatars/03-moon-rogue.webp",
+  "/profile-avatars/04-fox-spirit.webp",
+  "/profile-avatars/05-lion-cub.webp",
+  "/profile-avatars/06-emerald-dragon.webp",
+  "/profile-avatars/07-cosmic-alien.webp",
+  "/profile-avatars/08-masquerade.webp",
+  "/profile-avatars/09-raven.webp",
+  "/profile-avatars/10-sakura.webp",
+  "/profile-avatars/11-storm-warrior.webp",
+  "/profile-avatars/12-space-explorer.webp",
 ];
 
+const DEFAULT_AVATAR = PROFILE_AVATARS[0];
 const BEHAVIOR_MEMORY_KEY = "ryuflix_behavioral_memory_v1";
 
 function isBrowser() {
@@ -31,6 +42,7 @@ function parseProfiles(value: string | null): RyuProfile[] {
 
   try {
     const parsed = JSON.parse(value);
+
     if (!Array.isArray(parsed)) return [];
 
     return parsed.filter(
@@ -51,7 +63,7 @@ export function getProfiles(): RyuProfile[] {
     return [{
       id: DEFAULT_PROFILE_ID,
       name: "Default",
-      avatar: "🎬",
+      avatar: DEFAULT_AVATAR,
       createdAt: new Date(0).toISOString(),
       isDefault: true,
     }];
@@ -64,7 +76,7 @@ export function getProfiles(): RyuProfile[] {
   const defaultProfile: RyuProfile = {
     id: DEFAULT_PROFILE_ID,
     name: "Default",
-    avatar: "🎬",
+    avatar: DEFAULT_AVATAR,
     createdAt: new Date(0).toISOString(),
     isDefault: true,
   };
@@ -94,17 +106,13 @@ export function getActiveProfile(): RyuProfile {
     getProfiles().find((profile) => profile.id === id) ?? {
       id: DEFAULT_PROFILE_ID,
       name: "Default",
-      avatar: "🎬",
+      avatar: DEFAULT_AVATAR,
       createdAt: new Date(0).toISOString(),
       isDefault: true,
     }
   );
 }
 
-/**
- * The Default profile deliberately uses the original storage keys.
- * Existing history and watchlist data therefore remain untouched.
- */
 export function getProfileStorageKey(baseKey: string): string {
   const profileId = getActiveProfileId();
 
@@ -130,11 +138,6 @@ function profileStorageKey(profileId: string, baseKey: string) {
     : `${baseKey}__profile_${profileId}`;
 }
 
-/**
- * Behavioral memory currently uses one legacy global key.
- * Preserve that existing implementation by parking the outgoing
- * profile's memory and restoring the incoming profile's memory.
- */
 function saveOutgoingBehaviorMemory(profileId: string) {
   if (!isBrowser()) return;
 
@@ -165,8 +168,6 @@ function notifyProfileChanged() {
   if (!isBrowser()) return;
 
   window.dispatchEvent(new CustomEvent(PROFILE_UPDATED_EVENT));
-
-  // Refresh existing components that listen to these events.
   window.dispatchEvent(new CustomEvent("ryuflix-history-updated"));
   window.dispatchEvent(new CustomEvent("ryuflix-watchlist-updated"));
   window.dispatchEvent(new CustomEvent("ryuflix-tv-continuation-updated"));
@@ -174,7 +175,7 @@ function notifyProfileChanged() {
 
 export function createProfile(
   name: string,
-  avatar = "🎬",
+  avatar = DEFAULT_AVATAR,
 ): RyuProfile | null {
   if (!isBrowser()) return null;
 
@@ -194,7 +195,9 @@ export function createProfile(
   const profile: RyuProfile = {
     id,
     name: cleanName,
-    avatar: PROFILE_AVATARS.includes(avatar) ? avatar : "🎬",
+    avatar: PROFILE_AVATARS.includes(avatar)
+      ? avatar
+      : DEFAULT_AVATAR,
     createdAt: new Date().toISOString(),
   };
 
@@ -210,6 +213,7 @@ export function renameProfile(
   if (!isBrowser() || profileId === DEFAULT_PROFILE_ID) return false;
 
   const cleanName = name.trim().slice(0, 24);
+
   if (!cleanName) return false;
 
   const profiles = getProfiles();
@@ -245,7 +249,9 @@ export function updateProfileAvatar(
 
   saveProfiles(
     profiles.map((profile) =>
-      profile.id === profileId ? { ...profile, avatar } : profile,
+      profile.id === profileId
+        ? { ...profile, avatar }
+        : profile,
     ),
   );
 
@@ -302,24 +308,28 @@ export function deleteProfile(profileId: string): boolean {
     restoreBehaviorMemory(DEFAULT_PROFILE_ID);
   }
 
-  // Remove only this profile's namespaced data.
   const suffix = `__profile_${profileId}`;
 
-  for (let index = window.localStorage.length - 1; index >= 0; index--) {
-    const key = window.localStorage.key(index);
+  for (
+    let index = window.localStorage.length - 1;
+    index >= 0;
+    index--
+  ) {
+    const storageKey = window.localStorage.key(index);
 
-    if (key?.endsWith(suffix)) {
-      window.localStorage.removeItem(key);
+    if (storageKey?.endsWith(suffix)) {
+      window.localStorage.removeItem(storageKey);
     }
   }
 
-  // Behavioral memory is stored separately while inactive.
   window.localStorage.removeItem(
     profileStorageKey(profileId, BEHAVIOR_MEMORY_KEY),
   );
 
-  saveProfiles(profiles.filter((profile) => profile.id !== profileId));
-  notifyProfileChanged();
+  saveProfiles(
+    profiles.filter((profile) => profile.id !== profileId),
+  );
 
+  notifyProfileChanged();
   return true;
 }
