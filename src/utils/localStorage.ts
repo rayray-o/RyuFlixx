@@ -1,21 +1,20 @@
+
 "use client";
 
 import { ContentType } from "@/types";
+import { getProfileStorageKey } from "@/utils/profiles";
 
 export interface LocalWatchHistory {
   key: string;
   media_id: number;
   type: ContentType;
-
   title: string;
   backdrop_path: string;
   poster_path?: string;
   release_date: string;
   vote_average: number;
-
   season?: number;
   episode?: number;
-
   last_position: number;
   duration: number;
   completed: boolean;
@@ -37,13 +36,11 @@ export interface LocalWatchlistItem {
 export interface WatchProgressMetadata {
   mediaId: number;
   mediaType: ContentType;
-
   title: string;
   backdrop_path: string;
   poster_path?: string;
   release_date: string;
   vote_average: number;
-
   season?: number;
   episode?: number;
 }
@@ -58,9 +55,6 @@ const WATCH_HISTORY_KEY = "ryuflix_watch_history_v1";
 const WATCHLIST_KEY = "ryuflix_watchlist_v1";
 const TV_CONTINUATION_KEY = "ryuflix_tv_continuation_v1";
 
-/*
- * TV episodes use separate history keys, so keep plenty of entries.
- */
 const MAX_HISTORY_ITEMS = 100;
 
 const HISTORY_EVENT = "ryuflix-history-updated";
@@ -71,16 +65,16 @@ function isBrowser() {
   return typeof window !== "undefined";
 }
 
+function key(baseKey: string) {
+  return getProfileStorageKey(baseKey);
+}
+
 function emit(name: string) {
   if (!isBrowser()) return;
-
   window.dispatchEvent(new CustomEvent(name));
 }
 
-function safelyParse<T>(
-  value: string | null,
-  fallback: T,
-): T {
+function safelyParse<T>(value: string | null, fallback: T): T {
   if (!value) return fallback;
 
   try {
@@ -111,7 +105,7 @@ export function getWatchHistory(): LocalWatchHistory[] {
   if (!isBrowser()) return [];
 
   const history = safelyParse<LocalWatchHistory[]>(
-    window.localStorage.getItem(WATCH_HISTORY_KEY),
+    window.localStorage.getItem(key(WATCH_HISTORY_KEY)),
     [],
   );
 
@@ -143,21 +137,14 @@ export function getWatchHistory(): LocalWatchHistory[] {
     );
 }
 
-export function getMovieLastPosition(
-  mediaId: number,
-): number {
-  const key = getHistoryKey(mediaId, "movie");
-
+export function getMovieLastPosition(mediaId: number): number {
   const item = getWatchHistory().find(
-    (entry) => entry.key === key,
+    (entry) => entry.key === getHistoryKey(mediaId, "movie"),
   );
 
   if (!item || item.completed) return 0;
 
-  if (
-    item.duration > 0 &&
-    item.last_position >= item.duration
-  ) {
+  if (item.duration > 0 && item.last_position >= item.duration) {
     return 0;
   }
 
@@ -169,23 +156,14 @@ export function getTvShowLastPosition(
   season: number,
   episode: number,
 ): number {
-  const key = getHistoryKey(
-    mediaId,
-    "tv",
-    season,
-    episode,
-  );
-
   const item = getWatchHistory().find(
-    (entry) => entry.key === key,
+    (entry) =>
+      entry.key === getHistoryKey(mediaId, "tv", season, episode),
   );
 
   if (!item || item.completed) return 0;
 
-  if (
-    item.duration > 0 &&
-    item.last_position >= item.duration
-  ) {
+  if (item.duration > 0 && item.last_position >= item.duration) {
     return 0;
   }
 
@@ -198,18 +176,14 @@ export function saveWatchProgress(
   duration: number,
   completed = false,
 ) {
-  if (!isBrowser()) return;
-
-  if (!Number.isFinite(currentTime)) return;
+  if (!isBrowser() || !Number.isFinite(currentTime)) return;
 
   const safeCurrentTime = Math.max(0, currentTime);
 
   const reportedDuration =
-    Number.isFinite(duration) && duration > 0
-      ? duration
-      : 0;
+    Number.isFinite(duration) && duration > 0 ? duration : 0;
 
-  const key = getHistoryKey(
+  const historyKey = getHistoryKey(
     metadata.mediaId,
     metadata.mediaType,
     metadata.season,
@@ -219,97 +193,60 @@ export function saveWatchProgress(
   const history = getWatchHistory();
 
   const existingIndex = history.findIndex(
-    (item) => item.key === key,
+    (item) => item.key === historyKey,
   );
 
   const existing =
-    existingIndex >= 0
-      ? history[existingIndex]
-      : undefined;
+    existingIndex >= 0 ? history[existingIndex] : undefined;
 
-  /*
-   * Never allow a temporary duration=0 provider event
-   * to erase a duration we already know.
-   */
   const safeDuration =
     reportedDuration > 0
       ? reportedDuration
-      : existing?.duration &&
-          existing.duration > 0
+      : existing?.duration && existing.duration > 0
         ? existing.duration
         : 0;
 
-  /*
-   * Don't create a useless history record at 0 seconds.
-   */
-  if (
-    safeCurrentTime <= 0 &&
-    !completed &&
-    !existing
-  ) {
-    return;
-  }
+  if (safeCurrentTime <= 0 && !completed && !existing) return;
 
   const normalizedPosition =
     safeDuration > 0
-      ? Math.min(
-          safeCurrentTime,
-          safeDuration,
-        )
+      ? Math.min(safeCurrentTime, safeDuration)
       : safeCurrentTime;
 
   const finalPosition = completed
     ? safeDuration || normalizedPosition
     : normalizedPosition;
 
-  const now = new Date().toISOString();
-
   const item: LocalWatchHistory = {
-    key,
-
+    key: historyKey,
     media_id: metadata.mediaId,
     type: metadata.mediaType,
-
     title: metadata.title,
     backdrop_path: metadata.backdrop_path,
     poster_path: metadata.poster_path,
     release_date: metadata.release_date,
     vote_average: metadata.vote_average,
-
     season: metadata.season,
     episode: metadata.episode,
-
     last_position: finalPosition,
     duration: safeDuration,
-
     completed,
-
-    updated_at: now,
+    updated_at: new Date().toISOString(),
   };
 
-  if (existingIndex >= 0) {
-    history.splice(existingIndex, 1);
-  }
+  if (existingIndex >= 0) history.splice(existingIndex, 1);
 
   history.unshift(item);
 
-  const trimmed = history.slice(
-    0,
-    MAX_HISTORY_ITEMS,
-  );
-
   try {
     window.localStorage.setItem(
-      WATCH_HISTORY_KEY,
-      JSON.stringify(trimmed),
+      key(WATCH_HISTORY_KEY),
+      JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)),
     );
 
     emit(HISTORY_EVENT);
   } catch (error) {
-    console.error(
-      "RyuFlixx: failed to save watch history",
-      error,
-    );
+    console.error("RyuFlixx: failed to save watch history", error);
   }
 }
 
@@ -317,12 +254,7 @@ export function markWatchCompleted(
   metadata: WatchProgressMetadata,
   duration: number,
 ) {
-  saveWatchProgress(
-    metadata,
-    duration,
-    duration,
-    true,
-  );
+  saveWatchProgress(metadata, duration, duration, true);
 }
 
 export function removeWatchHistory(
@@ -333,7 +265,7 @@ export function removeWatchHistory(
 ) {
   if (!isBrowser()) return;
 
-  const key = getHistoryKey(
+  const historyKey = getHistoryKey(
     mediaId,
     mediaType,
     season,
@@ -341,11 +273,11 @@ export function removeWatchHistory(
   );
 
   const history = getWatchHistory().filter(
-    (item) => item.key !== key,
+    (item) => item.key !== historyKey,
   );
 
   window.localStorage.setItem(
-    WATCH_HISTORY_KEY,
+    key(WATCH_HISTORY_KEY),
     JSON.stringify(history),
   );
 
@@ -355,10 +287,7 @@ export function removeWatchHistory(
 export function clearWatchHistory() {
   if (!isBrowser()) return;
 
-  window.localStorage.removeItem(
-    WATCH_HISTORY_KEY,
-  );
-
+  window.localStorage.removeItem(key(WATCH_HISTORY_KEY));
   emit(HISTORY_EVENT);
 }
 
@@ -366,22 +295,13 @@ export function clearWatchHistory() {
    TV SHOW CONTINUATION
    ========================================================= */
 
-/*
- * Stores the episode the user should continue from
- * when opening a TV show from a show-level Continue Watching
- * surface.
- */
 export function getTvContinuation(
   mediaId: number,
 ): TvShowContinuation | null {
   if (!isBrowser()) return null;
 
-  const all = safelyParse<
-    Record<string, TvShowContinuation>
-  >(
-    window.localStorage.getItem(
-      TV_CONTINUATION_KEY,
-    ),
+  const all = safelyParse<Record<string, TvShowContinuation>>(
+    window.localStorage.getItem(key(TV_CONTINUATION_KEY)),
     {},
   );
 
@@ -413,12 +333,8 @@ export function setTvContinuation(
     return;
   }
 
-  const all = safelyParse<
-    Record<string, TvShowContinuation>
-  >(
-    window.localStorage.getItem(
-      TV_CONTINUATION_KEY,
-    ),
+  const all = safelyParse<Record<string, TvShowContinuation>>(
+    window.localStorage.getItem(key(TV_CONTINUATION_KEY)),
     {},
   );
 
@@ -430,37 +346,28 @@ export function setTvContinuation(
 
   try {
     window.localStorage.setItem(
-      TV_CONTINUATION_KEY,
+      key(TV_CONTINUATION_KEY),
       JSON.stringify(all),
     );
 
     emit(TV_CONTINUATION_EVENT);
   } catch (error) {
-    console.error(
-      "RyuFlixx: failed to save TV continuation",
-      error,
-    );
+    console.error("RyuFlixx: failed to save TV continuation", error);
   }
 }
 
-export function clearTvContinuation(
-  mediaId: number,
-) {
+export function clearTvContinuation(mediaId: number) {
   if (!isBrowser()) return;
 
-  const all = safelyParse<
-    Record<string, TvShowContinuation>
-  >(
-    window.localStorage.getItem(
-      TV_CONTINUATION_KEY,
-    ),
+  const all = safelyParse<Record<string, TvShowContinuation>>(
+    window.localStorage.getItem(key(TV_CONTINUATION_KEY)),
     {},
   );
 
   delete all[String(mediaId)];
 
   window.localStorage.setItem(
-    TV_CONTINUATION_KEY,
+    key(TV_CONTINUATION_KEY),
     JSON.stringify(all),
   );
 
@@ -475,13 +382,11 @@ export function getLocalWatchlist(): LocalWatchlistItem[] {
   if (!isBrowser()) return [];
 
   const list = safelyParse<LocalWatchlistItem[]>(
-    window.localStorage.getItem(WATCHLIST_KEY),
+    window.localStorage.getItem(key(WATCHLIST_KEY)),
     [],
   );
 
-  if (!Array.isArray(list)) return [];
-
-  return list;
+  return Array.isArray(list) ? list : [];
 }
 
 export function isInLocalWatchlist(
@@ -489,26 +394,19 @@ export function isInLocalWatchlist(
   type: ContentType,
 ) {
   return getLocalWatchlist().some(
-    (item) =>
-      item.id === id &&
-      item.type === type,
+    (item) => item.id === id && item.type === type,
   );
 }
 
 export function addToLocalWatchlist(
-  item: Omit<
-    LocalWatchlistItem,
-    "saved_date"
-  >,
+  item: Omit<LocalWatchlistItem, "saved_date">,
 ) {
   if (!isBrowser()) return;
 
   const list = getLocalWatchlist();
 
   const exists = list.some(
-    (entry) =>
-      entry.id === item.id &&
-      entry.type === item.type,
+    (entry) => entry.id === item.id && entry.type === item.type,
   );
 
   if (exists) return;
@@ -519,7 +417,7 @@ export function addToLocalWatchlist(
   });
 
   window.localStorage.setItem(
-    WATCHLIST_KEY,
+    key(WATCHLIST_KEY),
     JSON.stringify(list),
   );
 
@@ -533,41 +431,32 @@ export function removeFromLocalWatchlist(
   if (!isBrowser()) return;
 
   const list = getLocalWatchlist().filter(
-    (item) =>
-      !(
-        item.id === id &&
-        item.type === type
-      ),
+    (item) => !(item.id === id && item.type === type),
   );
 
   window.localStorage.setItem(
-    WATCHLIST_KEY,
+    key(WATCHLIST_KEY),
     JSON.stringify(list),
   );
 
   emit(WATCHLIST_EVENT);
 }
 
-export function clearLocalWatchlist(
-  type?: ContentType,
-) {
+export function clearLocalWatchlist(type?: ContentType) {
   if (!isBrowser()) return;
 
   if (!type) {
-    window.localStorage.removeItem(
-      WATCHLIST_KEY,
-    );
+    window.localStorage.removeItem(key(WATCHLIST_KEY));
   } else {
-    const filtered =
-      getLocalWatchlist().filter(
-        (item) => item.type !== type,
-      );
+    const filtered = getLocalWatchlist().filter(
+      (item) => item.type !== type,
+    );
 
     window.localStorage.setItem(
-      WATCHLIST_KEY,
+      key(WATCHLIST_KEY),
       JSON.stringify(filtered),
     );
   }
 
   emit(WATCHLIST_EVENT);
-  }
+}
