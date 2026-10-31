@@ -1,3 +1,4 @@
+
 import { Image } from "@heroui/image";
 import { useWindowScroll } from "@mantine/hooks";
 import { MovieDetails } from "tmdb-ts/dist/types/movies";
@@ -35,7 +36,11 @@ const BackdropSection: React.FC<{
     <section
       id="backdrop"
       aria-hidden="true"
-      className="pointer-events-none fixed left-1/2 top-0 z-0 h-[62vh] min-h-[430px] w-screen -translate-x-1/2 md:h-[68vh] lg:h-[76vh]"
+      className="pointer-events-none fixed top-0 z-0 h-[62vh] min-h-[430px] md:h-[68vh] lg:h-[76vh]"
+      style={{
+        left: "calc(50% - 50vw)",
+        width: "100vw",
+      }}
     >
       <div
         className="absolute inset-0 overflow-hidden"
