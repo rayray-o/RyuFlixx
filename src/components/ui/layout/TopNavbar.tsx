@@ -22,17 +22,15 @@ import { User } from "@/utils/icons";
 
 const TopNavbar = () => {
   const pathName = usePathname();
-
   const [{ y }] = useWindowScroll();
 
   const opacity = Math.min((y / 1000) * 5, 1);
-
   const hrefs = siteConfig.navItems.map((item) => item.href);
 
   const show =
     hrefs.includes(pathName) ||
     pathName === "/personalize" ||
-    pathName === "/profiles";
+    pathName === "/switch-profile";
 
   const tv = pathName.includes("/tv/");
   const player = pathName.includes("/player");
@@ -42,7 +40,7 @@ const TopNavbar = () => {
   );
 
   const personalizeActive = pathName === "/personalize";
-  const profilesActive = pathName === "/profiles";
+  const profilesActive = pathName === "/switch-profile";
 
   if (player) return null;
 
@@ -92,7 +90,10 @@ const TopNavbar = () => {
 
       <NavbarContent justify="end">
         <NavbarItem className="flex gap-1">
-          <Link href="/profiles" aria-label="Switch RyuFlixx profile">
+          <Link
+            href="/switch-profile"
+            aria-label="Switch RyuFlixx profile"
+          >
             <Button
               isIconOnly
               variant="light"
