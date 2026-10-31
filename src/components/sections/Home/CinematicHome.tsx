@@ -23,12 +23,15 @@ import { cn } from "@/utils/helpers";
 
 const tmdbBackdrop = (path?: string | null) =>
   path ? `https://image.tmdb.org/t/p/original${path}` : "";
+
 const tmdbPoster = (path?: string | null) =>
   path ? `https://image.tmdb.org/t/p/w780${path}` : "";
 
 const FADE_MS = 2400;
+
 type Media = Movie | TV;
 type Content = "movie" | "tv";
+
 type Candidate = {
   id: number;
   content: Content;
@@ -40,138 +43,298 @@ type Candidate = {
   year: string;
   history?: LocalWatchHistory;
 };
-type Transition = { from: string; to: string; phase: "prepare" | "fade" };
+
+type Transition = {
+  from: string;
+  to: string;
+  phase: "prepare" | "fade";
+};
 
 function mediaTitle(media: Media) {
   return "title" in media
     ? mutateMovieTitle(media as Movie)
     : mutateTvShowTitle(media as TV);
 }
+
 function mediaYear(media: Media) {
-  const date = "release_date" in media ? media.release_date : media.first_air_date;
+  const date =
+    "release_date" in media
+      ? media.release_date
+      : media.first_air_date;
+
   return date ? date.slice(0, 4) : "";
 }
+
 function mediaContent(media: Media): Content {
   return "title" in media ? "movie" : "tv";
 }
+
 function mediaLink(media: Media) {
   return `/${mediaContent(media)}/${media.id}`;
 }
+
 function fromMedia(media: Media): Candidate {
   return {
     id: media.id,
     content: mediaContent(media),
     title: mediaTitle(media),
     overview: media.overview || "",
-    backdrop: tmdbBackdrop(media.backdrop_path) || tmdbPoster(media.poster_path),
+    backdrop:
+      tmdbBackdrop(media.backdrop_path) ||
+      tmdbPoster(media.poster_path),
     poster: tmdbPoster(media.poster_path),
     rating: media.vote_average || 0,
     year: mediaYear(media),
   };
 }
+
 function fromHistory(item: LocalWatchHistory): Candidate {
   return {
     id: item.media_id,
     content: item.type,
     title: item.title,
     overview: "",
-    backdrop: tmdbBackdrop(item.backdrop_path) || tmdbPoster(item.poster_path),
+    backdrop:
+      tmdbBackdrop(item.backdrop_path) ||
+      tmdbPoster(item.poster_path),
     poster: tmdbPoster(item.poster_path),
     rating: item.vote_average || 0,
-    year: item.release_date ? item.release_date.slice(0, 4) : "",
+    year: item.release_date
+      ? item.release_date.slice(0, 4)
+      : "",
     history: item,
   };
 }
+
 function playLink(item: Candidate) {
-  if (item.history?.type === "movie") return `/movie/${item.id}/player`;
+  if (item.history?.type === "movie") {
+    return `/movie/${item.id}/player`;
+  }
+
   if (item.history?.type === "tv") {
     const continuation = getTvContinuation(item.id);
-    return `/tv/${item.id}/${continuation?.season ?? item.history.season ?? 1}/${continuation?.episode ?? item.history.episode ?? 1}/player`;
+
+    return `/tv/${item.id}/${
+      continuation?.season ?? item.history.season ?? 1
+    }/${
+      continuation?.episode ?? item.history.episode ?? 1
+    }/player`;
   }
+
   return `/${item.content}/${item.id}`;
 }
+
 function progress(item: LocalWatchHistory) {
   if (item.completed) return 100;
   if (!item.duration || item.duration <= 0) return 0;
-  return Math.max(0, Math.min(100, (item.last_position / item.duration) * 100));
+
+  return Math.max(
+    0,
+    Math.min(100, (item.last_position / item.duration) * 100),
+  );
 }
 
 function ResumeTile({
-  item, onFocus, onRemove,
+  item,
+  onFocus,
+  onRemove,
 }: {
-  item: LocalWatchHistory; onFocus: () => void; onRemove: () => void;
+  item: LocalWatchHistory;
+  onFocus: () => void;
+  onRemove: () => void;
 }) {
-  const continuation = item.type === "tv" ? getTvContinuation(item.media_id) : null;
-  const season = continuation?.season ?? item.season ?? 1;
-  const episode = continuation?.episode ?? item.episode ?? 1;
-  const href = item.type === "movie"
-    ? `/movie/${item.media_id}/player`
-    : `/tv/${item.media_id}/${season}/${episode}/player`;
+  const continuation =
+    item.type === "tv"
+      ? getTvContinuation(item.media_id)
+      : null;
+
+  const season =
+    continuation?.season ?? item.season ?? 1;
+
+  const episode =
+    continuation?.episode ?? item.episode ?? 1;
+
+  const href =
+    item.type === "movie"
+      ? `/movie/${item.media_id}/player`
+      : `/tv/${item.media_id}/${season}/${episode}/player`;
 
   return (
-    <div data-rail-item className="group relative block w-[230px] shrink-0 outline-none sm:w-[270px] lg:w-[300px]">
-      <Link href={href} onMouseEnter={onFocus} onFocus={onFocus}
+    <div
+      data-rail-item
+      className={cn(
+        "group relative block shrink-0 outline-none",
+        "w-[230px] sm:w-[270px]",
+        "lg:w-[340px] xl:w-[380px] 2xl:w-[420px]",
+      )}
+    >
+      <Link
+        href={href}
+        onMouseEnter={onFocus}
+        onFocus={onFocus}
         onKeyDown={(event) => {
-          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-          const rail = event.currentTarget.closest("[data-rail]");
+          if (
+            event.key !== "ArrowLeft" &&
+            event.key !== "ArrowRight"
+          ) {
+            return;
+          }
+
+          const rail =
+            event.currentTarget.closest("[data-rail]");
+
           if (!rail) return;
-          const items = Array.from(rail.querySelectorAll<HTMLElement>("[data-rail-item]"));
-          const index = items.indexOf(event.currentTarget);
-          const next = items[index + (event.key === "ArrowRight" ? 1 : -1)];
+
+          const items = Array.from(
+            rail.querySelectorAll<HTMLElement>(
+              "[data-rail-item]",
+            ),
+          );
+
+          const index = items.indexOf(
+            event.currentTarget,
+          );
+
+          const next =
+            items[
+              index +
+                (event.key === "ArrowRight" ? 1 : -1)
+            ];
+
           if (!next) return;
+
           event.preventDefault();
           next.focus();
-          next.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-        }} className="block">
-        <div className="relative aspect-video overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] shadow-2xl transition duration-300 ease-out group-hover:-translate-y-1 group-hover:border-white/20 group-hover:shadow-black/40">
-          <img src={tmdbBackdrop(item.backdrop_path) || tmdbPoster(item.poster_path)} alt=""
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]" loading="lazy" />
+
+          next.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+            inline: "center",
+          });
+        }}
+        className="block"
+      >
+        <div
+          className={cn(
+            "relative aspect-video overflow-hidden rounded-xl",
+            "border border-white/[0.08] bg-white/[0.03] shadow-2xl",
+            "transition duration-300 ease-out",
+            "group-hover:-translate-y-1 group-hover:border-white/20",
+          )}
+        >
+          <img
+            src={
+              tmdbBackdrop(item.backdrop_path) ||
+              tmdbPoster(item.poster_path)
+            }
+            alt=""
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+            loading="lazy"
+          />
+
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
+
           <div className="absolute inset-x-0 bottom-0 h-1 bg-white/15">
-            <div className="h-full bg-primary transition-all" style={{ width: `${progress(item)}%` }} />
+            <div
+              className="h-full bg-primary transition-all"
+              style={{ width: `${progress(item)}%` }}
+            />
           </div>
-          <div className="absolute inset-x-3 bottom-3 flex items-end justify-between gap-3">
+
+          <div className="absolute inset-x-3 bottom-3 flex items-end justify-between gap-3 md:inset-x-4 md:bottom-4">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white">{item.title}</p>
-              <p className="mt-0.5 text-[11px] text-white/65">
-                {item.type === "tv" ? `S${season} · E${episode}` : item.release_date?.slice(0, 4) || "Movie"}
+              <p className="truncate text-sm font-semibold text-white md:text-base">
+                {item.title}
+              </p>
+
+              <p className="mt-0.5 text-[11px] text-white/65 md:text-xs">
+                {item.type === "tv"
+                  ? `S${season} · E${episode}`
+                  : item.release_date?.slice(0, 4) || "Movie"}
               </p>
             </div>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/20 bg-black/45 text-white backdrop-blur-sm transition group-hover:bg-white group-hover:text-black">
-              <PlayOutline className="h-4 w-4" />
+
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-white/20 bg-black/45 text-white backdrop-blur-sm transition group-hover:bg-white group-hover:text-black md:size-11">
+              <PlayOutline className="size-4 md:size-5" />
             </span>
           </div>
         </div>
       </Link>
-      <button type="button" aria-label={`Remove ${item.title} from Continue Watching`}
+
+      <button
+        type="button"
+        aria-label={`Remove ${item.title} from Continue Watching`}
         title="Remove from Continue Watching"
-        onClick={(event) => { event.preventDefault(); event.stopPropagation(); onRemove(); }}
-        className="absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/75 text-lg leading-none text-white opacity-100 shadow-sm backdrop-blur-sm transition hover:bg-white hover:text-black sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onRemove();
+        }}
+        className="absolute right-2 top-2 z-20 flex size-8 items-center justify-center rounded-full border border-white/20 bg-black/75 text-lg leading-none text-white opacity-100 shadow-sm backdrop-blur-sm transition hover:bg-white hover:text-black sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+      >
         ×
       </button>
     </div>
   );
 }
 
-function MediaTile({ media, onFocus }: { media: Media; onFocus: () => void }) {
+function MediaTile({
+  media,
+  onFocus,
+}: {
+  media: Media;
+  onFocus: () => void;
+}) {
   const title = mediaTitle(media);
   const content = mediaContent(media);
+
   return (
-    <Link href={mediaLink(media)} onMouseEnter={onFocus} onFocus={onFocus}
-      className="group block w-[185px] shrink-0 sm:w-[210px] lg:w-[225px]">
-      <div className="relative aspect-[16/10] overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025] transition duration-500 ease-out group-hover:-translate-y-1 group-hover:scale-[1.015] group-hover:border-white/20">
-        <img src={tmdbBackdrop(media.backdrop_path) || tmdbPoster(media.poster_path)} alt={title}
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" />
+    <Link
+      href={mediaLink(media)}
+      onMouseEnter={onFocus}
+      onFocus={onFocus}
+      className={cn(
+        "group block shrink-0",
+        "w-[185px] sm:w-[210px]",
+        "lg:w-[270px] xl:w-[310px] 2xl:w-[350px]",
+      )}
+    >
+      <div
+        className={cn(
+          "relative aspect-[16/10] overflow-hidden rounded-xl",
+          "border border-white/[0.07] bg-white/[0.025]",
+          "transition duration-500 ease-out",
+          "group-hover:-translate-y-1 group-hover:scale-[1.015] group-hover:border-white/20",
+        )}
+      >
+        <img
+          src={
+            tmdbBackdrop(media.backdrop_path) ||
+            tmdbPoster(media.poster_path)
+          }
+          alt={title}
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          loading="lazy"
+        />
+
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
-        <div className="absolute inset-x-3 bottom-3">
+
+        <div className="absolute inset-x-3 bottom-3 md:inset-x-4 md:bottom-4">
           <div className="flex items-end justify-between gap-2">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white">{title}</p>
-              <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/60">
-                {content === "movie" ? "Movie" : "Series"}{mediaYear(media) && ` · ${mediaYear(media)}`}
+              <p className="truncate text-sm font-semibold text-white md:text-base lg:text-lg">
+                {title}
+              </p>
+
+              <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/60 md:text-xs">
+                {content === "movie" ? "Movie" : "Series"}
+                {mediaYear(media) && ` · ${mediaYear(media)}`}
               </p>
             </div>
-            <span className="shrink-0 text-[11px] font-semibold text-white/80">{media.vote_average?.toFixed(1) ?? "—"}</span>
+
+            <span className="shrink-0 text-[11px] font-semibold text-white/80 md:text-sm">
+              {media.vote_average?.toFixed(1) ?? "—"}
+            </span>
           </div>
         </div>
       </div>
@@ -180,32 +343,68 @@ function MediaTile({ media, onFocus }: { media: Media; onFocus: () => void }) {
 }
 
 function Rail({
-  name, query, content, onFocus,
+  name,
+  query,
+  content,
+  onFocus,
 }: {
-  name: string; query: () => Promise<{ results: Media[] }>; content: Content;
+  name: string;
+  query: () => Promise<{ results: Media[] }>;
+  content: Content;
   onFocus: (candidate: Candidate) => void;
 }) {
   const { ref, inViewport } = useInViewport();
+
   const key = `${content}-${name}`;
+
   const { data, isPending } = useQuery({
-    queryKey: ["cinematic-home", key], queryFn: query, enabled: inViewport,
-    staleTime: 1000 * 60 * 10, gcTime: 1000 * 60 * 30,
+    queryKey: ["cinematic-home", key],
+    queryFn: query,
+    enabled: inViewport,
+    staleTime: 1000 * 60 * 10,
+    gcTime: 1000 * 60 * 30,
   });
+
   return (
-    <section ref={ref} className="relative py-5 md:py-7">
-      <div className="mb-4 flex items-end justify-between gap-4 px-5 md:px-10 lg:px-14">
+    <section
+      ref={ref}
+      className="relative py-5 md:py-7 lg:py-9"
+    >
+      <div className="mb-4 flex items-end justify-between gap-4 px-5 md:px-10 lg:px-14 2xl:px-20">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight text-white md:text-xl">{name.replace(/ Movies| TV Shows/g, "")}</h2>
+          <h2 className="text-lg font-semibold tracking-tight text-white md:text-xl lg:text-2xl">
+            {name.replace(/ Movies| TV Shows/g, "")}
+          </h2>
         </div>
-        <span className="hidden text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40 md:block">See all</span>
+
+        <span className="hidden text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40 md:block lg:text-xs">
+          See all
+        </span>
       </div>
-      <div className="overflow-hidden pl-5 md:pl-10 lg:pl-14">
-        <div data-rail className="flex gap-3 overflow-x-auto overscroll-x-contain pr-5 pb-2 scrollbar-none md:gap-4 md:pr-10 lg:pr-14">
-          {isPending && !data ? Array.from({ length: 6 }).map((_, i) =>
-            <div key={i} className="aspect-[16/10] w-[185px] shrink-0 animate-pulse rounded-xl bg-white/[0.05] sm:w-[210px] lg:w-[225px]" />
-          ) : data?.results?.map((media) =>
-            <MediaTile key={media.id} media={media} onFocus={() => onFocus(fromMedia(media))} />
-          )}
+
+      <div className="overflow-hidden pl-5 md:pl-10 lg:pl-14 2xl:pl-20">
+        <div
+          data-rail
+          className="flex gap-3 overflow-x-auto overscroll-x-contain pr-5 pb-3 scrollbar-none md:gap-4 md:pr-10 lg:gap-5 lg:pr-14 2xl:gap-6 2xl:pr-20"
+        >
+          {isPending && !data
+            ? Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={index}
+                  className={cn(
+                    "aspect-[16/10] shrink-0 animate-pulse rounded-xl bg-white/[0.05]",
+                    "w-[185px] sm:w-[210px]",
+                    "lg:w-[270px] xl:w-[310px] 2xl:w-[350px]",
+                  )}
+                />
+              ))
+            : data?.results?.map((media) => (
+                <MediaTile
+                  key={media.id}
+                  media={media}
+                  onFocus={() => onFocus(fromMedia(media))}
+                />
+              ))}
         </div>
       </div>
     </section>
@@ -214,31 +413,50 @@ function Rail({
 
 export default function CinematicHome() {
   const { content, setContent } = useDiscoverFilters();
+
   const [history, setHistory] = useState<LocalWatchHistory[]>([]);
   const [selected, setSelected] = useState<Candidate | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+
   const [displayedBackdrop, setDisplayedBackdrop] = useState("");
   const [transition, setTransition] = useState<Transition | null>(null);
+
   const transitionRef = useRef<Transition | null>(null);
   const displayedRef = useRef("");
   const sequenceRef = useRef(0);
+
   const timeoutRef = useRef<number | null>(null);
   const rafOneRef = useRef<number | null>(null);
   const rafTwoRef = useRef<number | null>(null);
   const heroTimer = useRef<number | null>(null);
-  const [heroLogo, setHeroLogo] = useState<{ key: string; url: string | null; resolved: boolean }>({
-    key: "", url: null, resolved: false,
+
+  const [heroLogo, setHeroLogo] = useState<{
+    key: string;
+    url: string | null;
+    resolved: boolean;
+  }>({
+    key: "",
+    url: null,
+    resolved: false,
   });
 
-  useEffect(() => { displayedRef.current = displayedBackdrop; }, [displayedBackdrop]);
-  useEffect(() => { transitionRef.current = transition; }, [transition]);
+  useEffect(() => {
+    displayedRef.current = displayedBackdrop;
+  }, [displayedBackdrop]);
+
+  useEffect(() => {
+    transitionRef.current = transition;
+  }, [transition]);
 
   useEffect(() => {
     const refresh = () => setHistory(getWatchHistory());
+
     refresh();
+
     window.addEventListener("ryuflix-history-updated", refresh);
     window.addEventListener("ryuflix-tv-continuation-updated", refresh);
     window.addEventListener("storage", refresh);
+
     return () => {
       window.removeEventListener("ryuflix-history-updated", refresh);
       window.removeEventListener("ryuflix-tv-continuation-updated", refresh);
@@ -248,58 +466,113 @@ export default function CinematicHome() {
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
+
     const update = () => setIsMobile(media.matches);
+
     update();
+
     media.addEventListener?.("change", update);
+
     return () => media.removeEventListener?.("change", update);
   }, []);
 
-  const currentHistory = useMemo(() => history.filter((item) =>
-    item.type === content && (!item.completed ||
-      (item.type === "tv" && !!getTvContinuation(item.media_id)))
-  ), [history, content]);
+  const currentHistory = useMemo(
+    () =>
+      history.filter(
+        (item) =>
+          item.type === content &&
+          (!item.completed ||
+            (item.type === "tv" &&
+              !!getTvContinuation(item.media_id))),
+      ),
+    [history, content],
+  );
 
-  const fallbackQuery = siteConfig.queryLists[content === "movie" ? "movies" : "tvShows"][0]?.query;
+  const fallbackQuery =
+    siteConfig.queryLists[
+      content === "movie" ? "movies" : "tvShows"
+    ][0]?.query;
+
   const { data: fallbackData } = useQuery({
     queryKey: ["cinematic-home", "hero-fallback", content],
-    queryFn: async () => (await (fallbackQuery ? fallbackQuery() : Promise.resolve({ results: [] }))) as { results: Media[] },
+    queryFn: async () =>
+      (await (fallbackQuery
+        ? fallbackQuery()
+        : Promise.resolve({ results: [] }))) as {
+        results: Media[];
+      },
     enabled: currentHistory.length === 0,
     staleTime: 1000 * 60 * 10,
   });
 
-  const heroCandidates = useMemo(() => currentHistory.length
-    ? currentHistory.map(fromHistory)
-    : (fallbackData?.results ?? []).slice(0, 8).map(fromMedia),
-  [currentHistory, fallbackData]);
+  const heroCandidates = useMemo(
+    () =>
+      currentHistory.length
+        ? currentHistory.map(fromHistory)
+        : (fallbackData?.results ?? [])
+            .slice(0, 8)
+            .map(fromMedia),
+    [currentHistory, fallbackData],
+  );
 
   useEffect(() => {
     if (!heroCandidates.length) return;
-    setSelected((current) => current && heroCandidates.some((item) => item.id === current.id && item.content === current.content)
-      ? current : heroCandidates[0]);
+
+    setSelected((current) =>
+      current &&
+      heroCandidates.some(
+        (item) =>
+          item.id === current.id &&
+          item.content === current.content,
+      )
+        ? current
+        : heroCandidates[0],
+    );
   }, [heroCandidates]);
 
-  // Incoming image is preloaded first, then mounted at opacity 0. Two animation
-  // frames ensure the browser paints that starting state before opacity changes.
   useEffect(() => {
     const next = selected?.backdrop;
+
     if (!next) return;
     if (transitionRef.current?.to === next) return;
-    if (displayedRef.current === next && !transitionRef.current) return;
+
+    if (
+      displayedRef.current === next &&
+      !transitionRef.current
+    ) {
+      return;
+    }
 
     const sequence = ++sequenceRef.current;
     let cancelled = false;
+
     const clearScheduled = () => {
-      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
-      if (rafOneRef.current !== null) window.cancelAnimationFrame(rafOneRef.current);
-      if (rafTwoRef.current !== null) window.cancelAnimationFrame(rafTwoRef.current);
-      timeoutRef.current = rafOneRef.current = rafTwoRef.current = null;
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+      }
+
+      if (rafOneRef.current !== null) {
+        window.cancelAnimationFrame(rafOneRef.current);
+      }
+
+      if (rafTwoRef.current !== null) {
+        window.cancelAnimationFrame(rafTwoRef.current);
+      }
+
+      timeoutRef.current = null;
+      rafOneRef.current = null;
+      rafTwoRef.current = null;
     };
+
     clearScheduled();
 
     const image = new window.Image();
+
     const begin = () => {
       if (cancelled || sequence !== sequenceRef.current) return;
+
       const from = displayedRef.current;
+
       if (!from) {
         displayedRef.current = next;
         setDisplayedBackdrop(next);
@@ -307,25 +580,41 @@ export default function CinematicHome() {
         setTransition(null);
         return;
       }
+
       if (from === next) return;
 
-      const prepare: Transition = { from, to: next, phase: "prepare" };
+      const prepare: Transition = {
+        from,
+        to: next,
+        phase: "prepare",
+      };
+
       transitionRef.current = prepare;
       setTransition(prepare);
 
       rafOneRef.current = window.requestAnimationFrame(() => {
         if (cancelled || sequence !== sequenceRef.current) return;
-        // Force layout so the transparent incoming layer becomes its own frame.
+
         void document.documentElement.offsetHeight;
+
         rafTwoRef.current = window.requestAnimationFrame(() => {
           if (cancelled || sequence !== sequenceRef.current) return;
-          const fade: Transition = { from, to: next, phase: "fade" };
+
+          const fade: Transition = {
+            from,
+            to: next,
+            phase: "fade",
+          };
+
           transitionRef.current = fade;
           setTransition(fade);
+
           timeoutRef.current = window.setTimeout(() => {
             if (cancelled || sequence !== sequenceRef.current) return;
+
             displayedRef.current = next;
             setDisplayedBackdrop(next);
+
             transitionRef.current = null;
             setTransition(null);
             timeoutRef.current = null;
@@ -333,9 +622,11 @@ export default function CinematicHome() {
         });
       });
     };
+
     image.onload = begin;
     image.onerror = begin;
     image.src = next;
+
     return () => {
       cancelled = true;
       image.onload = null;
@@ -345,143 +636,417 @@ export default function CinematicHome() {
 
   useEffect(() => {
     if (!selected) {
-      setHeroLogo({ key: "", url: null, resolved: true });
+      setHeroLogo({
+        key: "",
+        url: null,
+        resolved: true,
+      });
+
       return;
     }
+
     const key = `${selected.content}:${selected.id}`;
     const controller = new AbortController();
-    setHeroLogo({ key, url: null, resolved: false });
-    const endpoint = selected.content === "movie" ? "/api/movie-logo" : "/api/tv-logo";
-    fetch(`${endpoint}?id=${selected.id}`, { signal: controller.signal })
-      .then(async (response) => response.ok ? await response.json() as { logo: string | null } : { logo: null })
+
+    setHeroLogo({
+      key,
+      url: null,
+      resolved: false,
+    });
+
+    const endpoint =
+      selected.content === "movie"
+        ? "/api/movie-logo"
+        : "/api/tv-logo";
+
+    fetch(`${endpoint}?id=${selected.id}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) =>
+        response.ok
+          ? (await response.json()) as {
+              logo: string | null;
+            }
+          : { logo: null },
+      )
       .then((data) => {
-        if (!controller.signal.aborted) setHeroLogo({ key, url: data.logo || null, resolved: true });
+        if (!controller.signal.aborted) {
+          setHeroLogo({
+            key,
+            url: data.logo || null,
+            resolved: true,
+          });
+        }
       })
       .catch(() => {
-        if (!controller.signal.aborted) setHeroLogo({ key, url: null, resolved: true });
+        if (!controller.signal.aborted) {
+          setHeroLogo({
+            key,
+            url: null,
+            resolved: true,
+          });
+        }
       });
+
     return () => controller.abort();
   }, [selected?.id, selected?.content]);
 
   useEffect(() => {
     if (!isMobile || heroCandidates.length < 2) return;
+
     const advance = () => {
       if (document.hidden) return;
+
       setSelected((current) => {
         if (!current) return heroCandidates[0];
-        const index = heroCandidates.findIndex((item) => item.id === current.id && item.content === current.content);
-        return heroCandidates[(index + 1) % heroCandidates.length];
+
+        const index = heroCandidates.findIndex(
+          (item) =>
+            item.id === current.id &&
+            item.content === current.content,
+        );
+
+        return heroCandidates[
+          (index + 1) % heroCandidates.length
+        ];
       });
     };
+
     heroTimer.current = window.setInterval(advance, 7500);
+
     return () => {
-      if (heroTimer.current !== null) window.clearInterval(heroTimer.current);
+      if (heroTimer.current !== null) {
+        window.clearInterval(heroTimer.current);
+      }
+
       heroTimer.current = null;
     };
   }, [isMobile, heroCandidates]);
 
-  useEffect(() => () => {
-    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
-    if (rafOneRef.current !== null) window.cancelAnimationFrame(rafOneRef.current);
-    if (rafTwoRef.current !== null) window.cancelAnimationFrame(rafTwoRef.current);
-    if (heroTimer.current !== null) window.clearInterval(heroTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+      }
+
+      if (rafOneRef.current !== null) {
+        window.cancelAnimationFrame(rafOneRef.current);
+      }
+
+      if (rafTwoRef.current !== null) {
+        window.cancelAnimationFrame(rafTwoRef.current);
+      }
+
+      if (heroTimer.current !== null) {
+        window.clearInterval(heroTimer.current);
+      }
+    },
+    [],
+  );
 
   const movies = siteConfig.queryLists.movies;
   const tvShows = siteConfig.queryLists.tvShows;
+
   const lists = content === "movie" ? movies : tvShows;
+
   const hero = selected;
-  const heroKey = hero ? `${hero.content}:${hero.id}` : "";
-  const logo = heroLogo.key === heroKey ? heroLogo : null;
+
+  const heroKey = hero
+    ? `${hero.content}:${hero.id}`
+    : "";
+
+  const logo = heroLogo.key === heroKey
+    ? heroLogo
+    : null;
 
   const handleRemoveHistory = (item: LocalWatchHistory) => {
-    removeWatchHistory(item.media_id, item.type, item.season, item.episode);
-    if (item.type === "tv") clearTvContinuation(item.media_id);
+    removeWatchHistory(
+      item.media_id,
+      item.type,
+      item.season,
+      item.episode,
+    );
+
+    if (item.type === "tv") {
+      clearTvContinuation(item.media_id);
+    }
+
     setHistory(getWatchHistory());
-    if (selected?.history?.media_id === item.media_id && selected.history.type === item.type) {
+
+    if (
+      selected?.history?.media_id === item.media_id &&
+      selected.history.type === item.type
+    ) {
       setSelected(null);
     }
   };
 
-  const fromBackdrop = transition?.from || displayedBackdrop;
+  const fromBackdrop =
+    transition?.from || displayedBackdrop;
+
   const toBackdrop = transition?.to || "";
-  const incomingOpacity = transition?.phase === "fade" ? 1 : 0;
-  const oldOpacity = toBackdrop ? 1 - incomingOpacity : 1;
+
+  const incomingOpacity =
+    transition?.phase === "fade" ? 1 : 0;
+
+  const oldOpacity =
+    toBackdrop ? 1 - incomingOpacity : 1;
 
   return (
-    <div className="relative -mx-4 -mt-5 min-h-screen overflow-hidden bg-black md:-mx-6 md:-mt-8">
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-[850px] overflow-hidden md:h-[950px]">
-        {fromBackdrop && <img key={`old-${fromBackdrop}`} src={fromBackdrop} alt="" aria-hidden="true"
-          className="absolute inset-0 h-full w-full object-cover object-center"
-          style={{ opacity: oldOpacity, transition: `opacity ${FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`, transform: "translateZ(0)", backfaceVisibility: "hidden" }} />}
-        {toBackdrop && <img key={`new-${toBackdrop}`} src={toBackdrop} alt="" aria-hidden="true"
-          className="absolute inset-0 h-full w-full object-cover object-center"
-          style={{ opacity: incomingOpacity, transition: `opacity ${FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`, transform: "translateZ(0)", backfaceVisibility: "hidden" }} />}
+    <div
+      className={cn(
+        "relative -mx-4 -mt-5 min-h-screen w-full min-w-0 overflow-hidden bg-black",
+        "md:-mx-6 md:-mt-8",
+      )}
+    >
+      {/* Hero background */}
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-x-0 top-0 z-0 overflow-hidden",
+          "h-[720px] sm:h-[800px]",
+          "md:h-[850px] lg:h-[900px]",
+          "2xl:h-[1000px]",
+        )}
+      >
+        {fromBackdrop && (
+          <img
+            key={`old-${fromBackdrop}`}
+            src={fromBackdrop}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 size-full object-cover object-center"
+            style={{
+              opacity: oldOpacity,
+              transition: `opacity ${FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+              transform: "translateZ(0)",
+              backfaceVisibility: "hidden",
+            }}
+          />
+        )}
+
+        {toBackdrop && (
+          <img
+            key={`new-${toBackdrop}`}
+            src={toBackdrop}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 size-full object-cover object-center"
+            style={{
+              opacity: incomingOpacity,
+              transition: `opacity ${FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+              transform: "translateZ(0)",
+              backfaceVisibility: "hidden",
+            }}
+          />
+        )}
+
         <div className="absolute inset-0 bg-gradient-to-r from-black/65 via-black/20 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/5 to-transparent" />
         <div className="absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-black/35 to-transparent" />
       </div>
 
-      <div className="relative z-10">
-        <section className="relative flex min-h-[620px] items-end px-5 pb-16 pt-24 sm:min-h-[680px] md:min-h-[730px] md:px-10 md:pb-20 lg:px-14">
-          <div className="max-w-2xl transition-all duration-700">
-            <div className="mb-4 flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.25em] text-white/70">
-              <span>{hero?.content === "tv" ? "Series" : "Movie"}</span>
-              {hero?.year && <span className="text-white/50">{hero.year}</span>}
-              {hero && <span className="text-white/50">★ {hero.rating.toFixed(1)}</span>}
+      <div className="relative z-10 min-w-0">
+        {/* Hero */}
+        <section
+          className={cn(
+            "relative flex items-end",
+            "min-h-[560px] px-5 pb-14 pt-24",
+            "sm:min-h-[620px] sm:pb-16",
+            "md:min-h-[min(66svh,720px)] md:px-10 md:pb-20",
+            "lg:min-h-[min(66svh,760px)] lg:px-14 lg:pb-24",
+            "2xl:min-h-[min(70svh,900px)] 2xl:px-20",
+          )}
+        >
+          <div className="w-full max-w-3xl transition-all duration-700 lg:max-w-4xl 2xl:max-w-5xl">
+            <div className="mb-4 flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.25em] text-white/70 md:text-xs lg:mb-5 lg:text-sm">
+              <span>
+                {hero?.content === "tv" ? "Series" : "Movie"}
+              </span>
+
+              {hero?.year && (
+                <span className="text-white/50">
+                  {hero.year}
+                </span>
+              )}
+
+              {hero && (
+                <span className="text-white/50">
+                  ★ {hero.rating.toFixed(1)}
+                </span>
+              )}
             </div>
-            <div className="flex min-h-[100px] items-center sm:min-h-[120px] md:min-h-[145px]">
-              {hero && logo?.url ? <img key={heroKey} src={logo.url} alt={hero.title}
-                className="max-h-[115px] max-w-full object-contain object-left drop-shadow-2xl sm:max-h-[135px] md:max-h-[155px]"
-                style={{ width: "min(100%, 520px)" }}
-                onError={() => setHeroLogo((current) => current.key === heroKey ? { ...current, url: null, resolved: true } : current)} />
-                : (logo?.resolved || !hero) && <h1 className="max-w-3xl text-4xl font-semibold leading-[0.95] tracking-[-0.04em] text-white sm:text-5xl md:text-6xl lg:text-7xl">{hero?.title ?? "Welcome to RyuFlixx"}</h1>}
+
+            <div className="flex min-h-[100px] items-center sm:min-h-[120px] md:min-h-[145px] lg:min-h-[175px] 2xl:min-h-[210px]">
+              {hero && logo?.url ? (
+                <img
+                  key={heroKey}
+                  src={logo.url}
+                  alt={hero.title}
+                  className="max-h-[115px] max-w-full object-contain object-left drop-shadow-2xl sm:max-h-[135px] md:max-h-[155px] lg:max-h-[190px] 2xl:max-h-[220px]"
+                  style={{
+                    width: "min(100%, 760px)",
+                  }}
+                  onError={() =>
+                    setHeroLogo((current) =>
+                      current.key === heroKey
+                        ? {
+                            ...current,
+                            url: null,
+                            resolved: true,
+                          }
+                        : current,
+                    )
+                  }
+                />
+              ) : (
+                (logo?.resolved || !hero) && (
+                  <h1 className="max-w-5xl text-4xl font-semibold leading-[0.95] tracking-[-0.04em] text-white sm:text-5xl md:text-6xl lg:text-7xl 2xl:text-8xl">
+                    {hero?.title ?? "Welcome to RyuFlixx"}
+                  </h1>
+                )
+              )}
             </div>
-            <div className="mt-7 flex flex-wrap items-center gap-3">
-              {hero && <Link href={playLink(hero)} className="group inline-flex h-11 items-center gap-2 rounded-full bg-white px-6 text-sm font-bold text-black transition duration-300 hover:scale-[1.02] hover:bg-white/90">
-                <PlayOutline className="h-4 w-4 transition-transform group-hover:scale-110" />{hero.history ? "Continue" : "Explore"}
-              </Link>}
-              {hero && <Link href={`/${hero.content}/${hero.id}`} className="inline-flex h-11 items-center rounded-full border border-white/20 bg-black/15 px-6 text-sm font-semibold text-white backdrop-blur-sm transition hover:border-white/35 hover:bg-white/10">More info</Link>}
+
+            {hero?.overview && (
+              <p className="mt-4 hidden max-w-2xl text-sm leading-7 text-white/75 md:line-clamp-3 lg:block lg:text-base lg:leading-8 2xl:text-lg">
+                {hero.overview}
+              </p>
+            )}
+
+            <div className="mt-6 flex flex-wrap items-center gap-3 lg:mt-8">
+              {hero && (
+                <Link
+                  href={playLink(hero)}
+                  className="group inline-flex h-11 items-center gap-2 rounded-full bg-white px-6 text-sm font-bold text-black transition duration-300 hover:scale-[1.02] hover:bg-white/90 lg:h-13 lg:px-8 lg:text-base"
+                >
+                  <PlayOutline className="size-4 transition-transform group-hover:scale-110 lg:size-5" />
+                  {hero.history ? "Continue" : "Explore"}
+                </Link>
+              )}
+
+              {hero && (
+                <Link
+                  href={`/${hero.content}/${hero.id}`}
+                  className="inline-flex h-11 items-center rounded-full border border-white/20 bg-black/15 px-6 text-sm font-semibold text-white backdrop-blur-sm transition hover:border-white/35 hover:bg-white/10 lg:h-13 lg:px-8 lg:text-base"
+                >
+                  More info
+                </Link>
+              )}
             </div>
-            {hero?.history && <div className="mt-6 max-w-sm">
-              <div className="mb-2 flex justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-white/60">
-                <span>Continue watching</span><span>{Math.round(progress(hero.history))}%</span>
+
+            {hero?.history && (
+              <div className="mt-6 max-w-sm lg:mt-8 lg:max-w-lg">
+                <div className="mb-2 flex justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-white/60 lg:text-xs">
+                  <span>Continue watching</span>
+                  <span>
+                    {Math.round(progress(hero.history))}%
+                  </span>
+                </div>
+
+                <div className="h-0.5 overflow-hidden rounded-full bg-white/20 lg:h-1">
+                  <div
+                    className="h-full bg-white"
+                    style={{
+                      width: `${progress(hero.history)}%`,
+                    }}
+                  />
+                </div>
               </div>
-              <div className="h-0.5 overflow-hidden rounded-full bg-white/20">
-                <div className="h-full bg-white" style={{ width: `${progress(hero.history)}%` }} />
-              </div>
-            </div>}
+            )}
           </div>
         </section>
 
+        {/* Content */}
         <div className="relative bg-gradient-to-b from-transparent via-black/90 to-black pt-1">
-          {currentHistory.length > 0 && <section className="py-6">
-            <div className="mb-4 px-5 md:px-10 lg:px-14">
-              <p className="text-[9px] font-bold uppercase tracking-[0.32em] text-white/45">Pick up where you left off</p>
-              <h2 className="mt-1 text-lg font-semibold text-white md:text-xl">Continue Watching</h2>
-            </div>
-            <div className="overflow-hidden pl-5">
-              <div data-rail className="flex gap-3 overflow-x-auto pr-5 pb-2 scrollbar-none md:gap-4 md:pl-5 lg:pl-9">
-                {currentHistory.map((item) => <ResumeTile key={item.key} item={item}
-                  onFocus={() => { if (!isMobile) setSelected(fromHistory(item)); }}
-                  onRemove={() => handleRemoveHistory(item)} />)}
-              </div>
-            </div>
-          </section>}
+          {currentHistory.length > 0 && (
+            <section className="py-6 lg:py-9 2xl:py-11">
+              <div className="mb-4 px-5 md:px-10 lg:px-14 2xl:px-20">
+                <p className="text-[9px] font-bold uppercase tracking-[0.32em] text-white/45 md:text-[10px] lg:text-xs">
+                  Pick up where you left off
+                </p>
 
-          <section className="flex justify-center px-5 py-7 md:px-10 lg:px-14">
+                <h2 className="mt-1 text-lg font-semibold text-white md:text-xl lg:text-2xl 2xl:text-3xl">
+                  Continue Watching
+                </h2>
+              </div>
+
+              <div className="overflow-hidden pl-5 md:pl-10 lg:pl-14 2xl:pl-20">
+                <div
+                  data-rail
+                  className="flex gap-3 overflow-x-auto pr-5 pb-3 scrollbar-none md:gap-4 md:pr-10 lg:gap-5 lg:pr-14 2xl:gap-6 2xl:pr-20"
+                >
+                  {currentHistory.map((item) => (
+                    <ResumeTile
+                      key={item.key}
+                      item={item}
+                      onFocus={() => {
+                        if (!isMobile) {
+                          setSelected(fromHistory(item));
+                        }
+                      }}
+                      onRemove={() =>
+                        handleRemoveHistory(item)
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Movie / TV selector */}
+          <section className="flex justify-center px-5 py-7 md:px-10 lg:py-9">
             <div className="inline-flex rounded-full border border-white/10 bg-white/[0.035] p-1 backdrop-blur-xl">
-              <button type="button" onClick={() => setContent("movie")}
-                className={cn("rounded-full px-5 py-2 text-xs font-semibold transition-all", content === "movie" ? "bg-white text-black" : "text-white/55 hover:text-white")}>Movies</button>
-              <button type="button" onClick={() => setContent("tv")}
-                className={cn("rounded-full px-5 py-2 text-xs font-semibold transition-all", content === "tv" ? "bg-white text-black" : "text-white/55 hover:text-white")}>TV</button>
+              <button
+                type="button"
+                onClick={() => setContent("movie")}
+                className={cn(
+                  "rounded-full px-5 py-2 text-xs font-semibold transition-all lg:px-7 lg:py-3 lg:text-sm",
+                  content === "movie"
+                    ? "bg-white text-black"
+                    : "text-white/55 hover:text-white",
+                )}
+              >
+                Movies
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setContent("tv")}
+                className={cn(
+                  "rounded-full px-5 py-2 text-xs font-semibold transition-all lg:px-7 lg:py-3 lg:text-sm",
+                  content === "tv"
+                    ? "bg-white text-black"
+                    : "text-white/55 hover:text-white",
+                )}
+              >
+                TV
+              </button>
             </div>
           </section>
-          <div className="px-5 pb-4 md:px-10 lg:px-14"><ForYou type={content} /></div>
-          <div className="pb-20">
-            {lists.map((list) => <Rail key={list.name} name={list.name}
-              query={list.query as () => Promise<{ results: Media[] }>} content={content}
-              onFocus={(candidate) => { if (!isMobile) setSelected(candidate); }} />)}
+
+          <div className="px-5 pb-4 md:px-10 lg:px-14 2xl:px-20">
+            <ForYou type={content} />
+          </div>
+
+          <div className="pb-24 lg:pb-28 2xl:pb-32">
+            {lists.map((list) => (
+              <Rail
+                key={list.name}
+                name={list.name}
+                query={
+                  list.query as () => Promise<{
+                    results: Media[];
+                  }>
+                }
+                content={content}
+                onFocus={(candidate) => {
+                  if (!isMobile) {
+                    setSelected(candidate);
+                  }
+                }}
+              />
+            ))}
           </div>
         </div>
       </div>
