@@ -1,3 +1,4 @@
+
 "use client";
 
 import BackButton from "@/components/ui/button/BackButton";
@@ -17,40 +18,33 @@ import FullscreenToggleButton from "../button/FullscreenToggleButton";
 import SearchInput from "../input/SearchInput";
 import ThemeSwitchDropdown from "../input/ThemeSwitchDropdown";
 import BrandLogo from "../other/BrandLogo";
+import { User } from "@/utils/icons";
 
 const TopNavbar = () => {
   const pathName = usePathname();
 
   const [{ y }] = useWindowScroll();
 
-  const opacity = Math.min(
-    (y / 1000) * 5,
-    1,
-  );
+  const opacity = Math.min((y / 1000) * 5, 1);
 
-  const hrefs = siteConfig.navItems.map(
-    (item) => item.href,
-  );
+  const hrefs = siteConfig.navItems.map((item) => item.href);
 
   const show =
     hrefs.includes(pathName) ||
-    pathName === "/personalize";
+    pathName === "/personalize" ||
+    pathName === "/profiles";
 
   const tv = pathName.includes("/tv/");
-
   const player = pathName.includes("/player");
 
-  const personalizeItem =
-    siteConfig.navItems.find(
-      (item) => item.href === "/personalize",
-    );
+  const personalizeItem = siteConfig.navItems.find(
+    (item) => item.href === "/personalize",
+  );
 
-  const personalizeActive =
-    pathName === "/personalize";
+  const personalizeActive = pathName === "/personalize";
+  const profilesActive = pathName === "/profiles";
 
-  if (player) {
-    return null;
-  }
+  if (player) return null;
 
   return (
     <Navbar
@@ -61,19 +55,14 @@ const TopNavbar = () => {
       classNames={{
         wrapper: "px-2 md:px-4",
       }}
-      className={cn(
-        "inset-0 h-min bg-transparent",
-        {
-          "bg-background": show,
-        },
-      )}
+      className={cn("inset-0 h-min bg-transparent", {
+        "bg-background": show,
+      })}
     >
       {!show && (
         <div
           className="border-background bg-background absolute inset-0 h-full w-full border-b"
-          style={{
-            opacity,
-          }}
+          style={{ opacity }}
         />
       )}
 
@@ -81,40 +70,41 @@ const TopNavbar = () => {
         {show ? (
           <BrandLogo />
         ) : (
-          <BackButton
-            href={
-              tv
-                ? "/?content=tv"
-                : "/"
-            }
-          />
+          <BackButton href={tv ? "/?content=tv" : "/"} />
         )}
       </NavbarBrand>
 
-      {show &&
-        !pathName.startsWith(
-          "/search",
-        ) && (
-          <NavbarContent
-            className="hidden w-full max-w-lg gap-2 md:flex"
-            justify="center"
-          >
-            <NavbarItem className="w-full">
-              <Link
-                href="/search"
-                className="w-full"
-              >
-                <SearchInput
-                  className="pointer-events-none"
-                  placeholder="Search your favorite movies..."
-                />
-              </Link>
-            </NavbarItem>
-          </NavbarContent>
-        )}
+      {show && !pathName.startsWith("/search") && (
+        <NavbarContent
+          className="hidden w-full max-w-lg gap-2 md:flex"
+          justify="center"
+        >
+          <NavbarItem className="w-full">
+            <Link href="/search" className="w-full">
+              <SearchInput
+                className="pointer-events-none"
+                placeholder="Search your favorite movies..."
+              />
+            </Link>
+          </NavbarItem>
+        </NavbarContent>
+      )}
 
       <NavbarContent justify="end">
         <NavbarItem className="flex gap-1">
+          <Link href="/profiles" aria-label="Switch RyuFlixx profile">
+            <Button
+              isIconOnly
+              variant="light"
+              className={cn(
+                "p-2",
+                profilesActive && "text-primary",
+              )}
+            >
+              <User className="size-5" />
+            </Button>
+          </Link>
+
           {personalizeItem && (
             <Link
               href={personalizeItem.href}
@@ -125,8 +115,7 @@ const TopNavbar = () => {
                 variant="light"
                 className={cn(
                   "p-2",
-                  personalizeActive &&
-                    "text-primary",
+                  personalizeActive && "text-primary",
                 )}
               >
                 {personalizeActive
@@ -137,7 +126,6 @@ const TopNavbar = () => {
           )}
 
           <ThemeSwitchDropdown />
-
           <FullscreenToggleButton />
         </NavbarItem>
       </NavbarContent>
