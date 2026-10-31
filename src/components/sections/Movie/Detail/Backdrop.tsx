@@ -1,5 +1,8 @@
 
-import { Image } from "@heroui/image";
+"use client";
+
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useWindowScroll } from "@mantine/hooks";
 import { MovieDetails } from "tmdb-ts/dist/types/movies";
 import { AppendToResponse } from "tmdb-ts/dist/types/options";
@@ -9,6 +12,12 @@ const BackdropSection: React.FC<{
   movie: AppendToResponse<MovieDetails, "images"[], "movie"> | undefined;
 }> = ({ movie }) => {
   const [{ y }] = useWindowScroll();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
 
   const fadeProgress = Math.min(y / 700, 1);
   const backdropOpacity = Math.max(1 - fadeProgress * 0.85, 0.15);
@@ -32,31 +41,38 @@ const BackdropSection: React.FC<{
       ? movie?.original_title
       : movie?.title;
 
-  return (
+  if (!mounted || !backdropImage) return null;
+
+  return createPortal(
     <section
-      id="backdrop"
+      id="ryuflix-movie-backdrop"
       aria-hidden="true"
-      className="pointer-events-none fixed top-0 z-0 h-[62vh] min-h-[430px] md:h-[68vh] lg:h-[76vh]"
+      className="pointer-events-none"
       style={{
-        left: "calc(50% - 50vw)",
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
         width: "100vw",
+        maxWidth: "100vw",
+        height: "62vh",
+        minHeight: "430px",
+        zIndex: 1,
+        overflow: "hidden",
+        isolation: "isolate",
       }}
     >
       <div
         className="absolute inset-0 overflow-hidden"
-        style={{
-          opacity: backdropOpacity,
-        }}
+        style={{ opacity: backdropOpacity }}
       >
-        <Image
-          radius="none"
-          alt={movieTitle || ""}
-          className="h-full w-full object-cover object-center"
-          classNames={{
-            wrapper: "absolute inset-0 h-full w-full",
-          }}
+        <img
           src={backdropImage}
+          alt={movieTitle || ""}
+          draggable={false}
+          className="absolute inset-0 h-full w-full object-cover"
           style={{
+            objectPosition: "center center",
             transform: `scale(${backdropScale})`,
             transformOrigin: "center center",
           }}
@@ -80,20 +96,16 @@ const BackdropSection: React.FC<{
             opacity: Math.max(1 - fadeProgress * 1.5, 0),
           }}
         >
-          <Image
-            isBlurred
-            radius="none"
-            alt={movieTitle || ""}
-            classNames={{
-              wrapper:
-                "flex w-[min(72vw,420px)] justify-center md:w-[min(45vw,520px)]",
-            }}
-            className="max-h-28 w-full object-contain object-center drop-shadow-[0_8px_30px_rgba(0,0,0,0.8)] md:max-h-40"
+          <img
             src={titleImage}
+            alt={movieTitle || ""}
+            draggable={false}
+            className="max-h-28 w-[min(72vw,420px)] object-contain object-center drop-shadow-[0_8px_30px_rgba(0,0,0,0.8)] md:max-h-40 md:w-[min(45vw,520px)]"
           />
         </div>
       )}
-    </section>
+    </section>,
+    document.body,
   );
 };
 
