@@ -795,8 +795,8 @@ export default function CinematicHome() {
   return (
     <div
       className={cn(
-        "relative -mx-4 -mt-5 min-h-screen w-full min-w-0 overflow-hidden bg-black",
-        "md:-mx-6 md:-mt-8",
+        "relative -mx-4 -mt-5 min-h-screen w-[calc(100%+2rem)] min-w-0 overflow-hidden bg-black",
+        "md:-mx-6 md:-mt-8 md:w-[calc(100%+3rem)]",
       )}
     >
       {/* Hero background */}
