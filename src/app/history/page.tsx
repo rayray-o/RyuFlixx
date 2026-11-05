@@ -1,5 +1,4 @@
-import { siteConfig } from "@/config/site";
-import { Metadata, NextPage } from "next/types";
+import type { Metadata } from "next";
 import dynamic from "next/dynamic";
 
 const HistoryList = dynamic(
@@ -7,10 +6,12 @@ const HistoryList = dynamic(
 );
 
 export const metadata: Metadata = {
-  title: `History | ${siteConfig.name}`,
+  title: "Watch History",
+  description:
+    "Revisit movies and TV shows you've watched and continue watching on Ryuflix.",
 };
 
-const HistoryPage: NextPage = () => {
+const HistoryPage = () => {
   return <HistoryList />;
 };
 
