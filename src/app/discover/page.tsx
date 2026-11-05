@@ -1,14 +1,19 @@
-import { Metadata, NextPage } from "next/types";
+import type { Metadata } from "next";
 import { siteConfig } from "@/config/site";
 import dynamic from "next/dynamic";
 import { Suspense } from "react";
-const DiscoverListGroup = dynamic(() => import("@/components/sections/Discover/ListGroup"));
+
+const DiscoverListGroup = dynamic(
+  () => import("@/components/sections/Discover/ListGroup"),
+);
 
 export const metadata: Metadata = {
-  title: `Discover Movies | ${siteConfig.name}`,
+  title: "Discover Movies and TV Shows",
+  description:
+    "Discover trending, popular, upcoming and top-rated movies and TV shows on Ryuflix.",
 };
 
-const DiscoverPage: NextPage = () => {
+const DiscoverPage = () => {
   return (
     <Suspense>
       <DiscoverListGroup />
