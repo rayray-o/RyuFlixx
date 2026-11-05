@@ -1,5 +1,4 @@
-import { siteConfig } from "@/config/site";
-import { Metadata, NextPage } from "next/types";
+import type { Metadata } from "next";
 import dynamic from "next/dynamic";
 
 const LibraryList = dynamic(
@@ -7,10 +6,12 @@ const LibraryList = dynamic(
 );
 
 export const metadata: Metadata = {
-  title: `Library | ${siteConfig.name}`,
+  title: "My Library",
+  description:
+    "Explore your saved movies and TV shows in your personal Ryuflix library.",
 };
 
-const LibraryPage: NextPage = () => {
+const LibraryPage = () => {
   return <LibraryList />;
 };
 
