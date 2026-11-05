@@ -1,14 +1,18 @@
-import { siteConfig } from "@/config/site";
+import type { Metadata } from "next";
 import dynamic from "next/dynamic";
-import { Metadata, NextPage } from "next/types";
 import { Suspense } from "react";
-const SearchList = dynamic(() => import("@/components/sections/Search/List"));
+
+const SearchList = dynamic(
+  () => import("@/components/sections/Search/List"),
+);
 
 export const metadata: Metadata = {
-  title: `Search Movies | ${siteConfig.name}`,
+  title: "Search Movies and TV Shows",
+  description:
+    "Search for movies and TV shows by title and discover what to watch on Ryuflix.",
 };
 
-const SearchPage: NextPage = () => {
+const SearchPage = () => {
   return (
     <Suspense>
       <SearchList />
