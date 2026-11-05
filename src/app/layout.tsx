@@ -1,7 +1,4 @@
-import type {
-  Metadata,
-  Viewport,
-} from "next";
+import type { Metadata, Viewport } from "next";
 
 import { siteConfig } from "@/config/site";
 import { Poppins } from "@/utils/fonts";
@@ -33,7 +30,13 @@ import { Suspense } from "react";
 import PopAds from "@/components/ads/PopAds";
 
 export const metadata: Metadata = {
-  title: siteConfig.name,
+  metadataBase: new URL("https://ryuflix.vercel.app"),
+
+  title: {
+    default: siteConfig.name,
+    template: `%s | ${siteConfig.name}`,
+  },
+
   applicationName: siteConfig.name,
   description: siteConfig.description,
 
@@ -47,7 +50,7 @@ export const metadata: Metadata = {
     card: "summary",
     title: {
       default: siteConfig.name,
-      template: siteConfig.name,
+      template: `%s | ${siteConfig.name}`,
     },
     description: siteConfig.description,
   },
@@ -57,7 +60,7 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     title: {
       default: siteConfig.name,
-      template: siteConfig.name,
+      template: `%s | ${siteConfig.name}`,
     },
     description: siteConfig.description,
   },
@@ -70,13 +73,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: [
     {
-      media:
-        "(prefers-color-scheme: light)",
+      media: "(prefers-color-scheme: light)",
       color: "#FFFFFF",
     },
     {
-      media:
-        "(prefers-color-scheme: dark)",
+      media: "(prefers-color-scheme: dark)",
       color: "#0D0C0F",
     },
   ],
@@ -88,10 +89,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      suppressHydrationWarning
-      lang="en"
-    >
+    <html suppressHydrationWarning lang="en">
       <body
         className={cn(
           "antialiased select-none",
@@ -137,4 +135,4 @@ export default function RootLayout({
       </body>
     </html>
   );
-}
+        }
