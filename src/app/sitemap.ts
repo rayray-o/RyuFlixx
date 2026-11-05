@@ -1,8 +1,7 @@
 import type { MetadataRoute } from "next";
 import { tmdb } from "@/api/tmdb";
 
-const BASE_URL =
-  "https://ryuflix.vercel.app";
+const BASE_URL = "https://ryuflix.vercel.app";
 
 const MAX_PAGES_PER_LIST = 5;
 
@@ -24,16 +23,12 @@ async function getMoviePages(
       ? await Promise.all(
           Array.from(
             { length: totalPages - 1 },
-            (_, index) =>
-              query(index + 2),
+            (_, index) => query(index + 2),
           ),
         )
       : [];
 
-  return [
-    firstPage,
-    ...remainingPages,
-  ];
+  return [firstPage, ...remainingPages];
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -47,28 +42,34 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 1,
     },
     {
-      url: `${BASE_URL}/about`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.7,
-    },
-    {
       url: `${BASE_URL}/discover`,
       lastModified: now,
       changeFrequency: "daily",
-      priority: 0.8,
-    },
-    {
-      url: `${BASE_URL}/library`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.5,
+      priority: 0.9,
     },
     {
       url: `${BASE_URL}/search`,
       lastModified: now,
       changeFrequency: "weekly",
-      priority: 0.5,
+      priority: 0.7,
+    },
+    {
+      url: `${BASE_URL}/library`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.6,
+    },
+    {
+      url: `${BASE_URL}/history`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.6,
+    },
+    {
+      url: `${BASE_URL}/about`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.7,
     },
   ];
 
@@ -87,77 +88,47 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       topRatedTv,
     ] = await Promise.all([
       getMoviePages((page) =>
-        tmdb.trending.trending(
-          "movie",
-          "day",
-          { page },
-        ),
+        tmdb.trending.trending("movie", "day", { page }),
       ),
 
       getMoviePages((page) =>
-        tmdb.trending.trending(
-          "movie",
-          "week",
-          { page },
-        ),
+        tmdb.trending.trending("movie", "week", { page }),
       ),
 
       getMoviePages((page) =>
-        tmdb.movies.popular({
-          page,
-        }),
+        tmdb.movies.popular({ page }),
       ),
 
       getMoviePages((page) =>
-        tmdb.movies.nowPlaying({
-          page,
-        }),
+        tmdb.movies.nowPlaying({ page }),
       ),
 
       getMoviePages((page) =>
-        tmdb.movies.upcoming({
-          page,
-        }),
+        tmdb.movies.upcoming({ page }),
       ),
 
       getMoviePages((page) =>
-        tmdb.movies.topRated({
-          page,
-        }),
+        tmdb.movies.topRated({ page }),
       ),
 
       getMoviePages((page) =>
-        tmdb.trending.trending(
-          "tv",
-          "day",
-          { page },
-        ),
+        tmdb.trending.trending("tv", "day", { page }),
       ),
 
       getMoviePages((page) =>
-        tmdb.trending.trending(
-          "tv",
-          "week",
-          { page },
-        ),
+        tmdb.trending.trending("tv", "week", { page }),
       ),
 
       getMoviePages((page) =>
-        tmdb.tvShows.popular({
-          page,
-        }),
+        tmdb.tvShows.popular({ page }),
       ),
 
       getMoviePages((page) =>
-        tmdb.tvShows.onTheAir({
-          page,
-        }),
+        tmdb.tvShows.onTheAir({ page }),
       ),
 
       getMoviePages((page) =>
-        tmdb.tvShows.topRated({
-          page,
-        }),
+        tmdb.tvShows.topRated({ page }),
       ),
     ]);
 
