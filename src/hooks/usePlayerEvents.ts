@@ -6,7 +6,12 @@ import { saveWatchProgress } from "@/utils/localStorage";
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 
 export type PlayerEventType = "play" | "pause" | "seeked" | "ended" | "timeupdate";
-export interface BasePlayerEventEnvelope<T = any> { type: string; data?: T }
+
+export interface BasePlayerEventEnvelope<T = any> {
+  type: string;
+  data?: T;
+}
+
 export interface UnifiedPlayerEventData {
   event: PlayerEventType;
   currentTime: number;
@@ -17,33 +22,56 @@ export interface UnifiedPlayerEventData {
   episode?: number;
   progress?: number;
 }
-export interface PlayerAdapter<RawMessage extends BasePlayerEventEnvelope<any> = BasePlayerEventEnvelope<any>> {
+
+export interface PlayerAdapter<
+  RawMessage extends BasePlayerEventEnvelope<any> = BasePlayerEventEnvelope<any>
+> {
   origin: `https://${string}`;
   parse: (raw: RawMessage) => UnifiedPlayerEventData | null;
 }
+
 export type AdapterMap = Record<string, PlayerAdapter<any>>;
 
 const SAVE_DISTANCE_SECONDS = 2;
 const MAX_DURATION_SECONDS = 8 * 60 * 60;
-const SUPPORTED_EVENTS: PlayerEventType[] = ["play", "pause", "seeked", "ended", "timeupdate"];
+
+const SUPPORTED_EVENTS: PlayerEventType[] = [
+  "play",
+  "pause",
+  "seeked",
+  "ended",
+  "timeupdate",
+];
 
 function isRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object";
 }
 
-function firstDefined<T>(...values: (T | undefined | null)[]): T | undefined {
-  return values.find((value) => value !== undefined && value !== null) as T | undefined;
+function firstDefined<T>(
+  ...values: (T | undefined | null)[]
+): T | undefined {
+  return values.find(
+    (value) => value !== undefined && value !== null,
+  ) as T | undefined;
 }
 
 function toNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "string" || !value.trim()) return undefined;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+
   const parsed = Number(value.trim());
+
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function parseMaybeJson(value: unknown): unknown {
   if (typeof value !== "string") return value;
+
   try {
     return JSON.parse(value);
   } catch {
@@ -53,52 +81,82 @@ function parseMaybeJson(value: unknown): unknown {
 
 function unwrapData(raw: unknown): Record<string, any> | null {
   let current = parseMaybeJson(raw);
+
   if (!isRecord(current)) return null;
 
   for (let depth = 0; depth < 6; depth += 1) {
     if (!isRecord(current.data)) break;
+
     current = parseMaybeJson(current.data);
+
     if (!isRecord(current)) return null;
   }
 
   return current;
 }
 
-function normalizeEvent(value: unknown): PlayerEventType | undefined {
+function normalizeEvent(
+  value: unknown,
+): PlayerEventType | undefined {
   if (typeof value !== "string") return undefined;
 
   const v = value.trim().toLowerCase();
 
-  if (["play", "playing", "started", "start", "resume", "resumed"].includes(v)) return "play";
-  if (["pause", "paused"].includes(v)) return "pause";
-  if (["seek", "seeked"].includes(v)) return "seeked";
-  if (["ended", "completed", "complete", "finished"].includes(v)) return "ended";
-  if (["timeupdate", "time_update", "time-update"].includes(v)) return "timeupdate";
+  if (
+    ["play", "playing", "started", "start", "resume", "resumed"].includes(v)
+  ) return "play";
 
-  return SUPPORTED_EVENTS.includes(v as PlayerEventType) ? v as PlayerEventType : undefined;
+  if (["pause", "paused"].includes(v)) return "pause";
+
+  if (["seek", "seeked"].includes(v)) return "seeked";
+
+  if (
+    ["ended", "completed", "complete", "finished"].includes(v)
+  ) return "ended";
+
+  if (
+    ["timeupdate", "time_update", "time-update"].includes(v)
+  ) return "timeupdate";
+
+  return SUPPORTED_EVENTS.includes(v as PlayerEventType)
+    ? v as PlayerEventType
+    : undefined;
 }
 
-/** Normalize common seconds/milliseconds mismatches and reject impossible time pairs. */
 function normalizeTiming(current: number, duration: number) {
   let time = Math.max(0, current);
   let length = Math.max(0, duration);
 
-  if (length > MAX_DURATION_SECONDS && length / 1000 <= MAX_DURATION_SECONDS) {
+  if (
+    length > MAX_DURATION_SECONDS &&
+    length / 1000 <= MAX_DURATION_SECONDS
+  ) {
     length /= 1000;
   }
 
-  if (length > 0 && time > length + 2 && time / 1000 <= length + 2) {
+  if (
+    length > 0 &&
+    time > length + 2 &&
+    time / 1000 <= length + 2
+  ) {
     time /= 1000;
   }
 
-  return { currentTime: time, duration: length };
+  return {
+    currentTime: time,
+    duration: length,
+  };
 }
 
-function parseGenericPlayerMessage(raw: Record<string, any>): UnifiedPlayerEventData | null {
+function parseGenericPlayerMessage(
+  raw: Record<string, any>,
+): UnifiedPlayerEventData | null {
   const root = parseMaybeJson(raw);
+
   if (!isRecord(root)) return null;
 
   const data = unwrapData(root);
+
   if (!data) return null;
 
   const playerInfo = isRecord(data.player_info)
@@ -107,74 +165,157 @@ function parseGenericPlayerMessage(raw: Record<string, any>): UnifiedPlayerEvent
       ? data.playerInfo
       : undefined;
 
-  const value = isRecord(data.value) ? data.value : undefined;
-  const progressObject = isRecord(data.progress) ? data.progress : undefined;
+  const value = isRecord(data.value)
+    ? data.value
+    : undefined;
+
+  const progressObject = isRecord(data.progress)
+    ? data.progress
+    : undefined;
 
   const current = toNumber(firstDefined(
-    data.currentTime, data.current_time, data.position, data.current, data.time, data.seconds,
-    data.watched, data.player_progress, value?.currentTime, value?.current_time, value?.position,
-    value?.seconds, value?.watched, progressObject?.watched, progressObject?.currentTime,
+    data.currentTime,
+    data.current_time,
+    data.position,
+    data.current,
+    data.time,
+    data.seconds,
+    data.watched,
+    data.player_progress,
+    value?.currentTime,
+    value?.current_time,
+    value?.position,
+    value?.seconds,
+    value?.watched,
+    progressObject?.watched,
+    progressObject?.currentTime,
   )) ?? 0;
 
   const duration = toNumber(firstDefined(
-    data.duration, data.totalDuration, data.total_duration, data.length, data.videoDuration,
-    data.video_duration, data.player_duration, value?.duration, value?.totalDuration,
-    value?.total_duration, progressObject?.duration,
+    data.duration,
+    data.totalDuration,
+    data.total_duration,
+    data.length,
+    data.videoDuration,
+    data.video_duration,
+    data.player_duration,
+    value?.duration,
+    value?.totalDuration,
+    value?.total_duration,
+    progressObject?.duration,
   )) ?? 0;
 
   const progress = toNumber(firstDefined(
-    typeof data.progress === "number" ? data.progress : undefined,
-    data.percent, data.percentage, value?.progress, value?.percent, value?.percentage,
+    typeof data.progress === "number"
+      ? data.progress
+      : undefined,
+    data.percent,
+    data.percentage,
+    value?.progress,
+    value?.percent,
+    value?.percentage,
     progressObject?.percentage,
   ));
 
   const eventType = normalizeEvent(firstDefined(
-    data.event, data.eventType, data.event_type, data.action, data.name, data.player_status,
-    data.playerStatus, data.status, data.state, data.playerState, value?.event,
-    value?.eventType, value?.status, value?.state,
-  )) ?? (current > 0 || duration > 0 || progress !== undefined ? "timeupdate" : undefined);
+    data.event,
+    data.eventType,
+    data.event_type,
+    data.action,
+    data.name,
+    data.player_status,
+    data.playerStatus,
+    data.status,
+    data.state,
+    data.playerState,
+    value?.event,
+    value?.eventType,
+    value?.status,
+    value?.state,
+  )) ?? (
+    current > 0 || duration > 0 || progress !== undefined
+      ? "timeupdate"
+      : undefined
+  );
 
   if (!eventType) return null;
 
   const timing = normalizeTiming(current, duration);
 
   const mediaTypeRaw = firstDefined(
-    data.mediaType, data.media_type, data.contentType, data.content_type,
-    playerInfo?.mediaType, playerInfo?.media_type,
+    data.mediaType,
+    data.media_type,
+    data.contentType,
+    data.content_type,
+    playerInfo?.mediaType,
+    playerInfo?.media_type,
   );
 
   return {
     event: eventType,
     currentTime: timing.currentTime,
     duration: timing.duration,
+
     mediaId: firstDefined(
-      data.mtmdbId, data.tmdbId, data.tmdb_id, data.mediaId, data.media_id, data.id,
-      data.videoId, data.video_id, playerInfo?.tmdb, playerInfo?.tmdbId,
-      playerInfo?.tmdb_id, playerInfo?.id,
+      data.mtmdbId,
+      data.tmdbId,
+      data.tmdb_id,
+      data.mediaId,
+      data.media_id,
+      data.id,
+      data.videoId,
+      data.video_id,
+      playerInfo?.tmdb,
+      playerInfo?.tmdbId,
+      playerInfo?.tmdb_id,
+      playerInfo?.id,
     ) ?? 0,
+
     mediaType: mediaTypeRaw === "tv" ? "tv" : "movie",
+
     season: toNumber(firstDefined(
-      data.season, data.seasonNumber, data.season_number, data.s,
-      playerInfo?.season, playerInfo?.seasonNumber, playerInfo?.season_number,
+      data.season,
+      data.seasonNumber,
+      data.season_number,
+      data.s,
+      playerInfo?.season,
+      playerInfo?.seasonNumber,
+      playerInfo?.season_number,
     )),
+
     episode: toNumber(firstDefined(
-      data.episode, data.episodeNumber, data.episode_number, data.e,
-      playerInfo?.episode, playerInfo?.episodeNumber, playerInfo?.episode_number,
+      data.episode,
+      data.episodeNumber,
+      data.episode_number,
+      data.e,
+      playerInfo?.episode,
+      playerInfo?.episodeNumber,
+      playerInfo?.episode_number,
     )),
+
     progress,
   };
 }
 
-function parseVidLinkMessage(raw: Record<string, any>): UnifiedPlayerEventData | null {
+function parseVidLinkMessage(
+  raw: Record<string, any>,
+): UnifiedPlayerEventData | null {
   const root = parseMaybeJson(raw);
+
   if (!isRecord(root)) return null;
 
-  if (root.type !== "MEDIA_DATA") return parseGenericPlayerMessage(root);
+  if (root.type !== "MEDIA_DATA") {
+    return parseGenericPlayerMessage(root);
+  }
 
   const data = unwrapData(root);
+
   if (!data) return null;
 
-  const progress = isRecord(data.progress) ? data.progress : undefined;
+  const progress = isRecord(data.progress)
+    ? data.progress
+    : undefined;
+
   const currentTime = toNumber(progress?.watched) ?? 0;
   const duration = toNumber(progress?.duration) ?? 0;
 
@@ -185,18 +326,32 @@ function parseVidLinkMessage(raw: Record<string, any>): UnifiedPlayerEventData |
   return {
     event: "timeupdate",
     ...timing,
-    mediaId: firstDefined(data.id, data.tmdbId, data.tmdb_id) ?? 0,
+    mediaId: firstDefined(
+      data.id,
+      data.tmdbId,
+      data.tmdb_id,
+    ) ?? 0,
     mediaType: data.type === "tv" ? "tv" : "movie",
-    season: toNumber(firstDefined(data.last_season_watched, data.season)),
-    episode: toNumber(firstDefined(data.last_episode_watched, data.episode)),
+    season: toNumber(firstDefined(
+      data.last_season_watched,
+      data.season,
+    )),
+    episode: toNumber(firstDefined(
+      data.last_episode_watched,
+      data.episode,
+    )),
   };
 }
 
-function parseFilmUMessage(raw: Record<string, any>): UnifiedPlayerEventData | null {
+function parseFilmUMessage(
+  raw: Record<string, any>,
+): UnifiedPlayerEventData | null {
   const root = parseMaybeJson(raw);
+
   if (!isRecord(root)) return null;
 
   const data = unwrapData(root);
+
   if (!data) return null;
 
   if (root.type === "SYNC_HISTORY") {
@@ -208,7 +363,11 @@ function parseFilmUMessage(raw: Record<string, any>): UnifiedPlayerEventData | n
     return {
       event: "timeupdate",
       ...timing,
-      mediaId: firstDefined(data.media_id, data.tmdbId, data.id) ?? 0,
+      mediaId: firstDefined(
+        data.media_id,
+        data.tmdbId,
+        data.id,
+      ) ?? 0,
       mediaType: data.media_type === "tv" ? "tv" : "movie",
       season: toNumber(data.season),
       episode: toNumber(data.episode),
@@ -217,6 +376,7 @@ function parseFilmUMessage(raw: Record<string, any>): UnifiedPlayerEventData | n
 
   if (root.type === "FILMU_PLAYER_EVENT") {
     const event = normalizeEvent(data.event);
+
     if (!event) return null;
 
     const timing = normalizeTiming(
@@ -227,7 +387,10 @@ function parseFilmUMessage(raw: Record<string, any>): UnifiedPlayerEventData | n
     return {
       event,
       ...timing,
-      mediaId: firstDefined(data.tmdbId, data.media_id) ?? 0,
+      mediaId: firstDefined(
+        data.tmdbId,
+        data.media_id,
+      ) ?? 0,
       mediaType: data.mediaType === "tv" ? "tv" : "movie",
       season: toNumber(data.season),
       episode: toNumber(data.episode),
@@ -237,12 +400,19 @@ function parseFilmUMessage(raw: Record<string, any>): UnifiedPlayerEventData | n
   return parseGenericPlayerMessage(root);
 }
 
-function parseVidRiftMessage(raw: Record<string, any>): UnifiedPlayerEventData | null {
+function parseVidRiftMessage(
+  raw: Record<string, any>,
+): UnifiedPlayerEventData | null {
   const root = parseMaybeJson(raw);
 
   if (
     !isRecord(root) ||
-    !["vidrift:progress", "vidrift:paused", "vidrift:unpaused", "vidrift:ended"].includes(String(root.type))
+    ![
+      "vidrift:progress",
+      "vidrift:paused",
+      "vidrift:unpaused",
+      "vidrift:ended",
+    ].includes(String(root.type))
   ) {
     return null;
   }
@@ -264,7 +434,11 @@ function parseVidRiftMessage(raw: Record<string, any>): UnifiedPlayerEventData |
   return {
     event: eventType,
     ...timing,
-    mediaId: firstDefined(root.tmdbId, root.tmdb_id, root.mediaId) ?? 0,
+    mediaId: firstDefined(
+      root.tmdbId,
+      root.tmdb_id,
+      root.mediaId,
+    ) ?? 0,
     mediaType: root.mediaType === "tv" ? "tv" : "movie",
     season: toNumber(root.season),
     episode: toNumber(root.episode),
@@ -277,8 +451,6 @@ const PLAYER_ORIGINS = [
   "https://embed.vidrift.net",
   "https://embed.vidrift.in",
 
-  // VidSrc family. These hosts use the PLAYER_EVENT payload supported by
-  // parseGenericPlayerMessage. Keep every actual iframe origin registered.
   "https://vidsrc.sh",
   "https://vidsrc2.ru",
   "https://vidsrc.in",
@@ -297,40 +469,60 @@ const PLAYER_ORIGINS = [
   "https://filmku.stream",
   "https://www.2embed.cc",
   "https://2embed.cc",
+
   "https://vidstuck.xyz",
+  "https://vidstuck.cc",
+
   "https://player.videasy.to",
   "https://player.videasy.ws",
 ] as const;
 
 export type PlayerOrigin = (typeof PLAYER_ORIGINS)[number];
+
 const PLAYER_ORIGIN_SET = new Set<string>(PLAYER_ORIGINS);
 
 export const playerAdapters = Object.fromEntries([
-  ["https://vidlink.pro", {
-    origin: "https://vidlink.pro",
-    parse: parseVidLinkMessage,
-  }],
-  ["https://embed.filmu.in", {
-    origin: "https://embed.filmu.in",
-    parse: parseFilmUMessage,
-  }],
-  ["https://embed.vidrift.net", {
-    origin: "https://embed.vidrift.net",
-    parse: parseVidRiftMessage,
-  }],
-  ["https://embed.vidrift.in", {
-    origin: "https://embed.vidrift.in",
-    parse: parseVidRiftMessage,
-  }],
+  [
+    "https://vidlink.pro",
+    {
+      origin: "https://vidlink.pro",
+      parse: parseVidLinkMessage,
+    },
+  ],
 
-  // These were missing from the allowlist even though players.ts uses them.
-  // Their PLAYER_EVENT payload is handled by parseGenericPlayerMessage.
+  [
+    "https://embed.filmu.in",
+    {
+      origin: "https://embed.filmu.in",
+      parse: parseFilmUMessage,
+    },
+  ],
+
+  [
+    "https://embed.vidrift.net",
+    {
+      origin: "https://embed.vidrift.net",
+      parse: parseVidRiftMessage,
+    },
+  ],
+
+  [
+    "https://embed.vidrift.in",
+    {
+      origin: "https://embed.vidrift.in",
+      parse: parseVidRiftMessage,
+    },
+  ],
+
   ...[
     "https://vidsrc.sh",
     "https://vidsrc2.ru",
   ].map((origin) => [
     origin,
-    { origin, parse: parseGenericPlayerMessage },
+    {
+      origin,
+      parse: parseGenericPlayerMessage,
+    },
   ]),
 
   ...[
@@ -350,11 +542,15 @@ export const playerAdapters = Object.fromEntries([
     "https://www.2embed.cc",
     "https://2embed.cc",
     "https://vidstuck.xyz",
+    "https://vidstuck.cc",
     "https://player.videasy.to",
     "https://player.videasy.ws",
   ].map((origin) => [
     origin,
-    { origin, parse: parseGenericPlayerMessage },
+    {
+      origin,
+      parse: parseGenericPlayerMessage,
+    },
   ]),
 ]) as AdapterMap;
 
@@ -371,8 +567,10 @@ export interface UsePlayerEventsOptions {
     episode?: number;
     expectedDuration?: number;
   };
+
   saveHistory?: boolean;
   playerFrameRef?: RefObject<HTMLIFrameElement | null>;
+
   onPlay?: (data: UnifiedPlayerEventData) => void;
   onPause?: (data: UnifiedPlayerEventData) => void;
   onSeeked?: (data: UnifiedPlayerEventData) => void;
@@ -380,7 +578,9 @@ export interface UsePlayerEventsOptions {
   onTimeUpdate?: (data: UnifiedPlayerEventData) => void;
 }
 
-export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
+export function usePlayerEvents(
+  options: UsePlayerEventsOptions = {},
+) {
   const {
     metadata,
     saveHistory = false,
@@ -395,7 +595,15 @@ export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
   const eventDataRef = useRef<UnifiedPlayerEventData | null>(null);
   const metadataRef = useRef(metadata);
   const saveHistoryRef = useRef(saveHistory);
-  const callbacksRef = useRef({ onPlay, onPause, onSeeked, onEnded, onTimeUpdate });
+
+  const callbacksRef = useRef({
+    onPlay,
+    onPause,
+    onSeeked,
+    onEnded,
+    onTimeUpdate,
+  });
+
   const lastSavedPositionRef = useRef(0);
   const lastDurationRef = useRef(0);
   const identityRef = useRef<string | null>(null);
@@ -403,7 +611,14 @@ export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
   useEffect(() => {
     metadataRef.current = metadata;
     saveHistoryRef.current = saveHistory;
-    callbacksRef.current = { onPlay, onPause, onSeeked, onEnded, onTimeUpdate };
+
+    callbacksRef.current = {
+      onPlay,
+      onPause,
+      onSeeked,
+      onEnded,
+      onTimeUpdate,
+    };
 
     const identity = [
       metadata?.mediaType ?? "",
@@ -418,150 +633,226 @@ export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
       lastDurationRef.current = 0;
       eventDataRef.current = null;
     }
-  }, [metadata, saveHistory, onPlay, onPause, onSeeked, onEnded, onTimeUpdate]);
+  }, [
+    metadata,
+    saveHistory,
+    onPlay,
+    onPause,
+    onSeeked,
+    onEnded,
+    onTimeUpdate,
+  ]);
 
-  const prepareTiming = useCallback((data: UnifiedPlayerEventData) => {
-    const meta = metadataRef.current;
-    const expected = meta?.expectedDuration && meta.expectedDuration > 0
-      ? meta.expectedDuration
-      : 0;
+  const prepareTiming = useCallback(
+    (data: UnifiedPlayerEventData) => {
+      const meta = metadataRef.current;
 
-    let duration = data.duration > 0 ? data.duration : lastDurationRef.current;
+      const expected =
+        meta?.expectedDuration && meta.expectedDuration > 0
+          ? meta.expectedDuration
+          : 0;
 
-    if (
-      expected > 0 &&
-      (!duration || duration < expected * 0.55 || duration > expected * 1.8)
-    ) {
-      duration = expected;
-    }
+      let duration =
+        data.duration > 0
+          ? data.duration
+          : lastDurationRef.current;
 
-    let currentTime = Number.isFinite(data.currentTime)
-      ? Math.max(0, data.currentTime)
-      : 0;
-
-    if (duration > 0 && currentTime > duration + 2) {
-      if (currentTime / 1000 <= duration + 2) {
-        currentTime /= 1000;
-      } else {
-        return null;
+      if (
+        expected > 0 &&
+        (
+          !duration ||
+          duration < expected * 0.55 ||
+          duration > expected * 1.8
+        )
+      ) {
+        duration = expected;
       }
-    }
 
-    if (duration > 0 && currentTime > duration) {
-      if (currentTime - duration <= 2) {
-        currentTime = duration;
-      } else {
-        return null;
+      let currentTime = Number.isFinite(data.currentTime)
+        ? Math.max(0, data.currentTime)
+        : 0;
+
+      if (duration > 0 && currentTime > duration + 2) {
+        if (currentTime / 1000 <= duration + 2) {
+          currentTime /= 1000;
+        } else {
+          return null;
+        }
       }
-    }
 
-    return { ...data, currentTime, duration };
-  }, []);
+      if (duration > 0 && currentTime > duration) {
+        if (currentTime - duration <= 2) {
+          currentTime = duration;
+        } else {
+          return null;
+        }
+      }
 
-  const saveLocalProgress = useCallback((
-    raw: UnifiedPlayerEventData,
-    completed = false,
-    allowZero = false,
-  ) => {
-    if (!saveHistoryRef.current) return;
+      return {
+        ...data,
+        currentTime,
+        duration,
+      };
+    },
+    [],
+  );
 
-    const meta = metadataRef.current;
-    const mediaId = Number(meta?.mediaId ?? raw.mediaId);
+  const saveLocalProgress = useCallback(
+    (
+      raw: UnifiedPlayerEventData,
+      completed = false,
+      allowZero = false,
+    ) => {
+      if (!saveHistoryRef.current) return;
 
-    if (!Number.isFinite(mediaId) || mediaId <= 0) return;
+      const meta = metadataRef.current;
+      const mediaId = Number(meta?.mediaId ?? raw.mediaId);
 
-    if (
-      !meta?.title ||
-      meta.backdrop_path === undefined ||
-      meta.release_date === undefined ||
-      meta.vote_average === undefined
-    ) {
-      return;
-    }
+      if (!Number.isFinite(mediaId) || mediaId <= 0) return;
 
-    const data = prepareTiming(raw);
+      if (
+        !meta?.title ||
+        meta.backdrop_path === undefined ||
+        meta.release_date === undefined ||
+        meta.vote_average === undefined
+      ) {
+        return;
+      }
 
-    if (!data) {
-      console.warn("RyuFlixx: ignored implausible playback timing", {
-        mediaId,
-        currentTime: raw.currentTime,
-        duration: raw.duration,
-      });
-      return;
-    }
+      const data = prepareTiming(raw);
 
-    if (data.currentTime <= 0 && !completed && !allowZero) return;
+      if (!data) {
+        console.warn(
+          "RyuFlixx: ignored implausible playback timing",
+          {
+            mediaId,
+            currentTime: raw.currentTime,
+            duration: raw.duration,
+          },
+        );
 
-    saveWatchProgress({
-      mediaId,
-      mediaType: meta.mediaType ?? data.mediaType,
-      title: meta.title,
-      backdrop_path: meta.backdrop_path,
-      poster_path: meta.poster_path,
-      release_date: meta.release_date,
-      vote_average: meta.vote_average,
-      season: meta.season ?? data.season,
-      episode: meta.episode ?? data.episode,
-    }, data.currentTime, data.duration, completed);
+        return;
+      }
 
-    if (data.currentTime > 0) {
-      lastSavedPositionRef.current = data.currentTime;
-    }
+      if (
+        data.currentTime <= 0 &&
+        !completed &&
+        !allowZero
+      ) {
+        return;
+      }
 
-    if (data.duration > 0) {
-      lastDurationRef.current = data.duration;
-    }
-  }, [prepareTiming]);
+      saveWatchProgress(
+        {
+          mediaId,
+          mediaType: meta.mediaType ?? data.mediaType,
+          title: meta.title,
+          backdrop_path: meta.backdrop_path,
+          poster_path: meta.poster_path,
+          release_date: meta.release_date,
+          vote_average: meta.vote_average,
+          season: meta.season ?? data.season,
+          episode: meta.episode ?? data.episode,
+        },
+        data.currentTime,
+        data.duration,
+        completed,
+      );
+
+      if (data.currentTime > 0) {
+        lastSavedPositionRef.current = data.currentTime;
+      }
+
+      if (data.duration > 0) {
+        lastDurationRef.current = data.duration;
+      }
+    },
+    [prepareTiming],
+  );
 
   const flushProgress = useCallback(() => {
     const latest = eventDataRef.current;
 
     if (latest) {
-      saveLocalProgress(latest, latest.event === "ended", latest.event === "seeked");
+      saveLocalProgress(
+        latest,
+        latest.event === "ended",
+        latest.event === "seeked",
+      );
     }
   }, [saveLocalProgress]);
 
   const getCurrentTime = useCallback(
-    () => Math.max(0, eventDataRef.current?.currentTime ?? 0),
+    () => Math.max(
+      0,
+      eventDataRef.current?.currentTime ?? 0,
+    ),
     [],
   );
 
-  const maybeSaveProgress = useCallback((
-    data: UnifiedPlayerEventData,
-    force = false,
-  ) => {
-    if (!saveHistoryRef.current) return;
+  const maybeSaveProgress = useCallback(
+    (
+      data: UnifiedPlayerEventData,
+      force = false,
+    ) => {
+      if (!saveHistoryRef.current) return;
 
-    if (
-      !force &&
-      Math.abs(data.currentTime - lastSavedPositionRef.current) < SAVE_DISTANCE_SECONDS
-    ) {
-      return;
-    }
+      if (
+        !force &&
+        Math.abs(
+          data.currentTime - lastSavedPositionRef.current,
+        ) < SAVE_DISTANCE_SECONDS
+      ) {
+        return;
+      }
 
-    saveLocalProgress(data, data.event === "ended", data.event === "seeked");
-  }, [saveLocalProgress]);
+      saveLocalProgress(
+        data,
+        data.event === "ended",
+        data.event === "seeked",
+      );
+    },
+    [saveLocalProgress],
+  );
 
   useEffect(() => {
     const saveLatest = () => {
       const latest = eventDataRef.current;
 
       if (latest) {
-        saveLocalProgress(latest, latest.event === "ended", latest.event === "seeked");
+        saveLocalProgress(
+          latest,
+          latest.event === "ended",
+          latest.event === "seeked",
+        );
       }
     };
 
     const visibility = () => {
-      if (document.visibilityState === "hidden") saveLatest();
+      if (document.visibilityState === "hidden") {
+        saveLatest();
+      }
     };
 
-    document.addEventListener("visibilitychange", visibility);
+    document.addEventListener(
+      "visibilitychange",
+      visibility,
+    );
+
     window.addEventListener("pagehide", saveLatest);
 
     return () => {
       saveLatest();
-      document.removeEventListener("visibilitychange", visibility);
-      window.removeEventListener("pagehide", saveLatest);
+
+      document.removeEventListener(
+        "visibilitychange",
+        visibility,
+      );
+
+      window.removeEventListener(
+        "pagehide",
+        saveLatest,
+      );
     };
   }, [saveLocalProgress]);
 
@@ -571,13 +862,20 @@ export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
 
       const frame = playerFrameRef?.current;
 
-      if (frame && event.source !== frame.contentWindow) return;
+      if (
+        frame &&
+        event.source !== frame.contentWindow
+      ) {
+        return;
+      }
 
       const raw = parseMaybeJson(event.data);
+
       if (!isRecord(raw)) return;
 
-      const parsed = playerAdapters[event.origin]?.parse(raw)
-        ?? parseGenericPlayerMessage(raw);
+      const parsed =
+        playerAdapters[event.origin]?.parse(raw) ??
+        parseGenericPlayerMessage(raw);
 
       if (!parsed) return;
 
@@ -630,13 +928,13 @@ export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
           cb.onEnded?.(normalized);
           break;
       }
-
-      // Completion is recorded only when the provider explicitly reports an end event.
     };
 
     window.addEventListener("message", handleMessage);
 
-    return () => window.removeEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
   }, [
     maybeSaveProgress,
     playerFrameRef,
@@ -644,5 +942,8 @@ export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
     saveLocalProgress,
   ]);
 
-  return { getCurrentTime, flushProgress };
+  return {
+    getCurrentTime,
+    flushProgress,
+  };
 }
