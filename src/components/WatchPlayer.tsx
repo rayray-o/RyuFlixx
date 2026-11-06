@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { PlayersProps } from "@/types";
@@ -118,7 +119,6 @@ function buildResumableSource(
 
     switch (provider) {
       case "vidy":
-        // Vidy's documented resume parameter.
         url.searchParams.set(
           "progress",
           String(timestamp),
@@ -126,7 +126,6 @@ function buildResumableSource(
         break;
 
       case "vidly":
-        // Vidly's documented start-position parameter.
         url.searchParams.set(
           "t",
           String(timestamp),
@@ -136,7 +135,6 @@ function buildResumableSource(
       case "vidsrc":
       case "videasy":
       case "vidcore":
-        // These providers document startAt in seconds.
         url.searchParams.set(
           "startAt",
           String(timestamp),
@@ -227,6 +225,8 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     (element: HTMLIFrameElement | null) => {
       internalIframeRef.current = element;
 
+      // React calls this with null on unmount and with the
+      // new iframe on mount. Keep the shared ref in sync.
       if (iframeRef) {
         iframeRef.current = element;
       }
@@ -370,8 +370,8 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     serverFallbackMemoryKey,
   ]);
 
-  // Catch source changes from both the player buttons
-  // and the separate source-selection drawer.
+  // Checkpoint progress whenever the selected server changes.
+  // This also catches changes made through the source drawer.
   useEffect(() => {
     if (
       previousServerIndexRef.current === safeIndex
@@ -411,14 +411,22 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     setLoading(true);
     clearResumeTimers();
 
-    if (iframeRef) {
-      iframeRef.current = null;
-    }
+    /*
+     * IMPORTANT:
+     * Do not set iframeRef.current = null here.
+     *
+     * React has already attached the new iframe through
+     * setIframeRef by the time this effect runs. Clearing
+     * it here disables usePlayerEvents' active-frame check,
+     * allowing delayed messages from old servers to overwrite
+     * the new server's playback position.
+     *
+     * The callback ref above handles iframe changes safely.
+     */
 
     return clearResumeTimers;
   }, [
     iframeSource,
-    iframeRef,
     clearResumeTimers,
   ]);
 
@@ -559,6 +567,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
               onClick={() => {
                 if (active) return;
 
+                // Save the outgoing server before changing iframe.
                 flushProgress?.();
 
                 const latestPosition =
