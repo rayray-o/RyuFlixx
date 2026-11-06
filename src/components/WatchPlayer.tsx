@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { PlayersProps } from "@/types";
@@ -20,20 +21,35 @@ interface WatchPlayerProps {
 
 function normalizeResumePosition(value: number | null | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
-  // Avoid sending milliseconds, NaN, Infinity, or fractional frames to a provider.
   return Math.floor(Math.min(value, 8 * 60 * 60));
 }
 
 /**
- * Add a best-effort cross-provider startAt parameter. Providers which document
- * support for startAt consume it; providers which don't generally ignore unknown
- * query parameters. VidRift additionally receives its documented resume message.
+ * Apply the resume parameter supported by each provider.
+ * Vidy uses "progress"; the other providers retain the existing startAt behavior.
  */
 function buildResumableSource(source: string, position: number): string {
   try {
     const url = new URL(source);
-    if (position > 0) url.searchParams.set("startAt", String(position));
-    else url.searchParams.delete("startAt");
+    const host = url.hostname.toLowerCase();
+    const isVidy = host === "www.vidy.st" || host === "vidy.st";
+
+    if (isVidy) {
+      url.searchParams.delete("startAt");
+
+      if (position > 0) {
+        url.searchParams.set("progress", String(position));
+      } else {
+        url.searchParams.delete("progress");
+      }
+    } else {
+      if (position > 0) {
+        url.searchParams.set("startAt", String(position));
+      } else {
+        url.searchParams.delete("startAt");
+      }
+    }
+
     return url.toString();
   } catch {
     return source;
@@ -99,16 +115,13 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     }
   }, [serverMemoryKey]);
 
-  // Reapply server memory once per media identity. The resume timestamp is
-  // independent of this selection, so switching to a remembered server can't
-  // silently discard the saved position.
   useEffect(() => {
     if (restoredMemoryRef.current || !servers.length || !serverMemoryKey) return;
     restoredMemoryRef.current = true;
     if (typeof window === "undefined") return;
 
     const search = new URLSearchParams(window.location.search);
-    if (search.has("src")) return; // Explicit server choice always wins.
+    if (search.has("src")) return;
 
     let preference = getLastServer(serverMemoryKey);
     if (!preference && serverFallbackMemoryKey) preference = getLastServer(serverFallbackMemoryKey);
@@ -170,8 +183,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
       }
     };
 
-    // VidRift documents this command as safe before video readiness. Retry after
-    // load as an additional guard against provider initialization races.
     send();
     for (const delay of [350, 1000, 2200]) {
       const timer = window.setTimeout(send, delay);
@@ -203,7 +214,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
           src={iframeSource}
           title={`${title} — ${currentServer.title}`}
           className="absolute inset-0 block h-full w-full border-0"
-          allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
+          allow="autoplay *; fullscreen *; picture-in-picture; encrypted-media; accelerometer; gyroscope"
           allowFullScreen
           loading="eager"
           referrerPolicy="strict-origin-when-cross-origin"
@@ -242,7 +253,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
                   ? livePosition
                   : normalizeResumePosition(handoffPosition ?? initialPosition);
 
-                // Flush the old iframe's most recent event before replacing it.
                 flushProgress?.();
                 saveLastServer(serverMemoryKey, server);
                 if (serverFallbackMemoryKey) saveLastServer(serverFallbackMemoryKey, server);
