@@ -173,6 +173,7 @@ function parseGenericPlayerMessage(
     ? data.progress
     : undefined;
 
+  // Supports both standard timing fields and VidStuck-style player_progress.
   const current = toNumber(firstDefined(
     data.currentTime,
     data.current_time,
@@ -182,6 +183,8 @@ function parseGenericPlayerMessage(
     data.seconds,
     data.watched,
     data.player_progress,
+    data.playerProgress,
+    data.played,
     value?.currentTime,
     value?.current_time,
     value?.position,
@@ -249,6 +252,7 @@ function parseGenericPlayerMessage(
     data.content_type,
     playerInfo?.mediaType,
     playerInfo?.media_type,
+    playerInfo?.type,
   );
 
   return {
@@ -269,6 +273,10 @@ function parseGenericPlayerMessage(
       playerInfo?.tmdbId,
       playerInfo?.tmdb_id,
       playerInfo?.id,
+      data.player_info?.tmdb,
+      data.player_info?.tmdbId,
+      data.player_info?.tmdb_id,
+      data.player_info?.id,
     ) ?? 0,
 
     mediaType: mediaTypeRaw === "tv" ? "tv" : "movie",
@@ -281,6 +289,9 @@ function parseGenericPlayerMessage(
       playerInfo?.season,
       playerInfo?.seasonNumber,
       playerInfo?.season_number,
+      data.player_info?.season,
+      data.player_info?.seasonNumber,
+      data.player_info?.season_number,
     )),
 
     episode: toNumber(firstDefined(
@@ -291,6 +302,9 @@ function parseGenericPlayerMessage(
       playerInfo?.episode,
       playerInfo?.episodeNumber,
       playerInfo?.episode_number,
+      data.player_info?.episode,
+      data.player_info?.episodeNumber,
+      data.player_info?.episode_number,
     )),
 
     progress,
@@ -305,8 +319,6 @@ function parseGenericPlayerMessage(
  *
  * MEDIA_DATA:
  *   { type: "MEDIA_DATA", data: "<serialized local history>" }
- *
- * Vidy's official embed documentation describes both message types.
  */
 function parseVidyMessage(
   raw: Record<string, any>,
@@ -317,13 +329,10 @@ function parseVidyMessage(
 
   const messageType = String(root.type ?? "").toUpperCase();
 
-  // Vidy's PLAYER_EVENT message carries event and timing fields directly.
-  // Its documented listener example also checks the event field directly.
   if (messageType === "PLAYER_EVENT" || normalizeEvent(root.event)) {
     return parseGenericPlayerMessage(root);
   }
 
-  // Vidy publishes serialized local history roughly once per second.
   if (messageType === "MEDIA_DATA") {
     const history = parseMaybeJson(root.data);
 
@@ -332,7 +341,6 @@ function parseVidyMessage(
     const direct = parseGenericPlayerMessage(history);
     if (direct) return direct;
 
-    // Accept known wrappers around the current history entry.
     for (const candidate of [
       history.history,
       history.current,
