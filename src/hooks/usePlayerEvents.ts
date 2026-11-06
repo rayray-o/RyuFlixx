@@ -32,7 +32,7 @@ export interface PlayerAdapter<
 
 export type AdapterMap = Record<string, PlayerAdapter<any>>;
 
-const SAVE_DISTANCE_SECONDS = 2;
+const SAVE_DISTANCE_SECONDS = 1;
 const MAX_DURATION_SECONDS = 8 * 60 * 60;
 
 const SUPPORTED_EVENTS: PlayerEventType[] = [
@@ -173,7 +173,6 @@ function parseGenericPlayerMessage(
     ? data.progress
     : undefined;
 
-  // Supports both standard timing fields and VidStuck-style player_progress.
   const current = toNumber(firstDefined(
     data.currentTime,
     data.current_time,
@@ -313,12 +312,6 @@ function parseGenericPlayerMessage(
 
 /**
  * Vidy-specific adapter.
- *
- * PLAYER_EVENT:
- *   { type: "PLAYER_EVENT", event, currentTime, duration, ... }
- *
- * MEDIA_DATA:
- *   { type: "MEDIA_DATA", data: "<serialized local history>" }
  */
 function parseVidyMessage(
   raw: Record<string, any>,
