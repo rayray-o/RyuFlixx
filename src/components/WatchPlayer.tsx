@@ -3,7 +3,11 @@
 
 import type { PlayersProps } from "@/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { findLastServerIndex, getLastServer, saveLastServer } from "@/utils/server-memory";
+import {
+  findLastServerIndex,
+  getLastServer,
+  saveLastServer,
+} from "@/utils/server-memory";
 
 interface WatchPlayerProps {
   servers: PlayersProps[];
@@ -15,36 +19,57 @@ interface WatchPlayerProps {
   title?: string;
   serverMemoryKey: string;
   serverFallbackMemoryKey?: string;
-  /** Resume position loaded from RyuFlixx's local watch history, in seconds. */
+  /** Shared resume position from RyuFlixx watch history, in seconds. */
   resumeAt?: number;
 }
 
-function normalizeResumePosition(value: number | null | undefined): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
+function normalizeResumePosition(
+  value: number | null | undefined,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value <= 0
+  ) {
+    return 0;
+  }
+
   return Math.floor(Math.min(value, 8 * 60 * 60));
 }
 
 /**
  * Apply the resume parameter supported by each provider.
- * Vidy uses "progress"; the other providers retain the existing startAt behavior.
+ * Vidy uses "progress"; other providers retain "startAt".
  */
-function buildResumableSource(source: string, position: number): string {
+function buildResumableSource(
+  source: string,
+  position: number,
+): string {
   try {
     const url = new URL(source);
     const host = url.hostname.toLowerCase();
-    const isVidy = host === "www.vidy.st" || host === "vidy.st";
+
+    const isVidy =
+      host === "www.vidy.st" ||
+      host === "vidy.st";
 
     if (isVidy) {
       url.searchParams.delete("startAt");
 
       if (position > 0) {
-        url.searchParams.set("progress", String(position));
+        url.searchParams.set(
+          "progress",
+          String(position),
+        );
       } else {
         url.searchParams.delete("progress");
       }
     } else {
       if (position > 0) {
-        url.searchParams.set("startAt", String(position));
+        url.searchParams.set(
+          "startAt",
+          String(position),
+        );
       } else {
         url.searchParams.delete("startAt");
       }
@@ -59,7 +84,11 @@ function buildResumableSource(source: string, position: number): string {
 function isVidRiftSource(source: string): boolean {
   try {
     const host = new URL(source).hostname;
-    return host === "embed.vidrift.net" || host === "embed.vidrift.in";
+
+    return (
+      host === "embed.vidrift.net" ||
+      host === "embed.vidrift.in"
+    );
   } catch {
     return false;
   }
@@ -78,122 +107,334 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
   resumeAt = 0,
 }) => {
   const safeIndex = servers.length > 0
-    ? Math.min(Math.max(Number.isFinite(selectedServer) ? selectedServer : 0, 0), servers.length - 1)
+    ? Math.min(
+        Math.max(
+          Number.isFinite(selectedServer)
+            ? selectedServer
+            : 0,
+          0,
+        ),
+        servers.length - 1,
+      )
     : 0;
 
-  const currentServer = useMemo(() => servers[safeIndex], [servers, safeIndex]);
+  const currentServer = useMemo(
+    () => servers[safeIndex],
+    [servers, safeIndex],
+  );
+
   const [loading, setLoading] = useState(true);
-  const [handoffPosition, setHandoffPosition] = useState<number | null>(null);
-  const internalIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [handoffPosition, setHandoffPosition] =
+    useState<number | null>(null);
+
+  const internalIframeRef =
+    useRef<HTMLIFrameElement | null>(null);
+
   const restoredMemoryRef = useRef(false);
   const resumeTimersRef = useRef<number[]>([]);
   const fallbackKeyRef = useRef(serverMemoryKey);
+  const previousServerIndexRef = useRef(safeIndex);
 
-  const initialPosition = normalizeResumePosition(resumeAt);
-  const activeResumePosition = normalizeResumePosition(handoffPosition ?? initialPosition);
+  const initialPosition =
+    normalizeResumePosition(resumeAt);
+
+  // Always prefer the latest position reported by the active
+  // server. The handoff and initial values are fallbacks only.
+  const livePosition =
+    normalizeResumePosition(getCurrentTime?.());
+
+  const activeResumePosition =
+    livePosition > 0
+      ? livePosition
+      : normalizeResumePosition(
+          handoffPosition ?? initialPosition,
+        );
 
   const serverSignature = useMemo(
-    () => servers.map((server) => `${server.title}|${server.source}`).join("||"),
+    () =>
+      servers
+        .map(
+          (server) =>
+            `${server.title}|${server.source}`,
+        )
+        .join("||"),
     [servers],
   );
 
-  const setIframeRef = useCallback((element: HTMLIFrameElement | null) => {
-    internalIframeRef.current = element;
-    if (iframeRef) iframeRef.current = element;
-  }, [iframeRef]);
+  const setIframeRef = useCallback(
+    (element: HTMLIFrameElement | null) => {
+      internalIframeRef.current = element;
+
+      if (iframeRef) {
+        iframeRef.current = element;
+      }
+    },
+    [iframeRef],
+  );
 
   const clearResumeTimers = useCallback(() => {
-    for (const timer of resumeTimersRef.current) window.clearTimeout(timer);
+    for (const timer of resumeTimersRef.current) {
+      window.clearTimeout(timer);
+    }
+
     resumeTimersRef.current = [];
   }, []);
 
+  // Reset handoff state when the media identity changes.
   useEffect(() => {
     if (fallbackKeyRef.current !== serverMemoryKey) {
       fallbackKeyRef.current = serverMemoryKey;
       restoredMemoryRef.current = false;
+      previousServerIndexRef.current = safeIndex;
       setHandoffPosition(null);
     }
-  }, [serverMemoryKey]);
+  }, [serverMemoryKey, safeIndex]);
 
+  // Restore the remembered server.
   useEffect(() => {
-    if (restoredMemoryRef.current || !servers.length || !serverMemoryKey) return;
+    if (
+      restoredMemoryRef.current ||
+      !servers.length ||
+      !serverMemoryKey
+    ) {
+      return;
+    }
+
     restoredMemoryRef.current = true;
+
     if (typeof window === "undefined") return;
 
-    const search = new URLSearchParams(window.location.search);
+    const search = new URLSearchParams(
+      window.location.search,
+    );
+
     if (search.has("src")) return;
 
     let preference = getLastServer(serverMemoryKey);
-    if (!preference && serverFallbackMemoryKey) preference = getLastServer(serverFallbackMemoryKey);
-    const rememberedIndex = findLastServerIndex(servers, preference);
-    if (rememberedIndex === null || rememberedIndex === safeIndex) return;
-    onServerChange(rememberedIndex);
-  }, [serverMemoryKey, serverFallbackMemoryKey, serverSignature, servers, safeIndex, onServerChange]);
 
+    if (!preference && serverFallbackMemoryKey) {
+      preference = getLastServer(
+        serverFallbackMemoryKey,
+      );
+    }
+
+    const rememberedIndex = findLastServerIndex(
+      servers,
+      preference,
+    );
+
+    if (
+      rememberedIndex === null ||
+      rememberedIndex === safeIndex
+    ) {
+      return;
+    }
+
+    onServerChange(rememberedIndex);
+  }, [
+    serverMemoryKey,
+    serverFallbackMemoryKey,
+    serverSignature,
+    servers,
+    safeIndex,
+    onServerChange,
+  ]);
+
+  // Remember the selected server.
   useEffect(() => {
     if (!currentServer || !serverMemoryKey) return;
-    saveLastServer(serverMemoryKey, currentServer);
-    if (serverFallbackMemoryKey) saveLastServer(serverFallbackMemoryKey, currentServer);
-  }, [currentServer, serverMemoryKey, serverFallbackMemoryKey]);
 
+    saveLastServer(serverMemoryKey, currentServer);
+
+    if (serverFallbackMemoryKey) {
+      saveLastServer(
+        serverFallbackMemoryKey,
+        currentServer,
+      );
+    }
+  }, [
+    currentServer,
+    serverMemoryKey,
+    serverFallbackMemoryKey,
+  ]);
+
+  // Persist server preference when leaving the page.
   useEffect(() => {
     const saveCurrentServer = () => {
       if (!currentServer || !serverMemoryKey) return;
+
       saveLastServer(serverMemoryKey, currentServer);
-      if (serverFallbackMemoryKey) saveLastServer(serverFallbackMemoryKey, currentServer);
+
+      if (serverFallbackMemoryKey) {
+        saveLastServer(
+          serverFallbackMemoryKey,
+          currentServer,
+        );
+      }
     };
+
     const handleVisibility = () => {
-      if (document.visibilityState === "hidden") saveCurrentServer();
+      if (document.visibilityState === "hidden") {
+        saveCurrentServer();
+      }
     };
-    window.addEventListener("pagehide", saveCurrentServer);
-    document.addEventListener("visibilitychange", handleVisibility);
+
+    window.addEventListener(
+      "pagehide",
+      saveCurrentServer,
+    );
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibility,
+    );
+
     return () => {
       saveCurrentServer();
-      window.removeEventListener("pagehide", saveCurrentServer);
-      document.removeEventListener("visibilitychange", handleVisibility);
+
+      window.removeEventListener(
+        "pagehide",
+        saveCurrentServer,
+      );
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibility,
+      );
     };
-  }, [currentServer, serverMemoryKey, serverFallbackMemoryKey]);
+  }, [
+    currentServer,
+    serverMemoryKey,
+    serverFallbackMemoryKey,
+  ]);
+
+  // IMPORTANT:
+  // This catches server changes from BOTH the buttons under
+  // the video and the separate source-selection drawer.
+  //
+  // The drawer changes selectedServer directly, so we must
+  // capture and flush the previous server's latest position
+  // whenever safeIndex changes.
+  useEffect(() => {
+    if (
+      previousServerIndexRef.current === safeIndex
+    ) {
+      return;
+    }
+
+    previousServerIndexRef.current = safeIndex;
+
+    flushProgress?.();
+
+    const latestPosition =
+      normalizeResumePosition(getCurrentTime?.());
+
+    if (latestPosition > 0) {
+      setHandoffPosition(latestPosition);
+    }
+  }, [
+    safeIndex,
+    flushProgress,
+    getCurrentTime,
+  ]);
 
   const iframeSource = useMemo(() => {
     if (!currentServer) return "";
-    return buildResumableSource(currentServer.source, activeResumePosition);
-  }, [currentServer?.source, activeResumePosition]);
+
+    return buildResumableSource(
+      currentServer.source,
+      activeResumePosition,
+    );
+  }, [
+    currentServer?.source,
+    activeResumePosition,
+  ]);
 
   useEffect(() => {
     setLoading(true);
     clearResumeTimers();
-    if (iframeRef) iframeRef.current = null;
-    return clearResumeTimers;
-  }, [iframeSource, iframeRef, clearResumeTimers]);
 
-  const sendVidRiftResume = useCallback((frame: HTMLIFrameElement) => {
-    if (!currentServer || activeResumePosition <= 0 || !isVidRiftSource(currentServer.source)) return;
-    let targetOrigin: string;
-    try { targetOrigin = new URL(currentServer.source).origin; } catch { return; }
-
-    const send = () => {
-      if (!frame.isConnected || internalIframeRef.current !== frame) return;
-      try {
-        frame.contentWindow?.postMessage(
-          { type: "vidrift:resume", currentTime: activeResumePosition },
-          targetOrigin,
-        );
-      } catch (error) {
-        console.warn("RyuFlixx: VidRift resume message failed", error);
-      }
-    };
-
-    send();
-    for (const delay of [350, 1000, 2200]) {
-      const timer = window.setTimeout(send, delay);
-      resumeTimersRef.current.push(timer);
+    if (iframeRef) {
+      iframeRef.current = null;
     }
-  }, [currentServer?.source, activeResumePosition]);
 
-  const handleIframeLoad = useCallback((event: React.SyntheticEvent<HTMLIFrameElement>) => {
-    setLoading(false);
-    sendVidRiftResume(event.currentTarget);
-  }, [sendVidRiftResume]);
+    return clearResumeTimers;
+  }, [
+    iframeSource,
+    iframeRef,
+    clearResumeTimers,
+  ]);
+
+  const sendVidRiftResume = useCallback(
+    (frame: HTMLIFrameElement) => {
+      if (
+        !currentServer ||
+        activeResumePosition <= 0 ||
+        !isVidRiftSource(currentServer.source)
+      ) {
+        return;
+      }
+
+      let targetOrigin: string;
+
+      try {
+        targetOrigin = new URL(
+          currentServer.source,
+        ).origin;
+      } catch {
+        return;
+      }
+
+      const send = () => {
+        if (
+          !frame.isConnected ||
+          internalIframeRef.current !== frame
+        ) {
+          return;
+        }
+
+        try {
+          frame.contentWindow?.postMessage(
+            {
+              type: "vidrift:resume",
+              currentTime: activeResumePosition,
+            },
+            targetOrigin,
+          );
+        } catch (error) {
+          console.warn(
+            "RyuFlixx: VidRift resume message failed",
+            error,
+          );
+        }
+      };
+
+      send();
+
+      for (const delay of [350, 1000, 2200]) {
+        const timer = window.setTimeout(
+          send,
+          delay,
+        );
+
+        resumeTimersRef.current.push(timer);
+      }
+    },
+    [
+      currentServer?.source,
+      activeResumePosition,
+    ],
+  );
+
+  const handleIframeLoad = useCallback(
+    (
+      event: React.SyntheticEvent<HTMLIFrameElement>,
+    ) => {
+      setLoading(false);
+      sendVidRiftResume(event.currentTarget);
+    },
+    [sendVidRiftResume],
+  );
 
   if (!currentServer) {
     return (
@@ -225,11 +466,25 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-md">
             <div className="flex flex-col items-center gap-3">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
-              <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/70">Connecting</span>
-              <span className="text-xs text-white/40">{currentServer.title}</span>
+
+              <span className="text-xs font-medium uppercase tracking-[0.2em] text-white/70">
+                Connecting
+              </span>
+
+              <span className="text-xs text-white/40">
+                {currentServer.title}
+              </span>
+
               {activeResumePosition > 0 && (
                 <span className="text-[10px] text-white/50">
-                  Resume requested at {Math.floor(activeResumePosition / 60)}:{String(activeResumePosition % 60).padStart(2, "0")}
+                  Resume requested at{" "}
+                  {Math.floor(
+                    activeResumePosition / 60,
+                  )}
+                  :
+                  {String(
+                    activeResumePosition % 60,
+                  ).padStart(2, "0")}
                 </span>
               )}
             </div>
@@ -238,9 +493,13 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-xs font-medium uppercase tracking-widest text-white/40">Server</span>
+        <span className="mr-1 text-xs font-medium uppercase tracking-widest text-white/40">
+          Server
+        </span>
+
         {servers.map((server, index) => {
           const active = index === safeIndex;
+
           return (
             <button
               key={`${server.title}-${index}`}
@@ -248,15 +507,42 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
               aria-pressed={active}
               onClick={() => {
                 if (active) return;
-                const livePosition = normalizeResumePosition(getCurrentTime?.());
-                const bestPosition = livePosition > 0
-                  ? livePosition
-                  : normalizeResumePosition(handoffPosition ?? initialPosition);
 
+                // Capture the current server's position before
+                // changing the selected server.
                 flushProgress?.();
-                saveLastServer(serverMemoryKey, server);
-                if (serverFallbackMemoryKey) saveLastServer(serverFallbackMemoryKey, server);
-                setHandoffPosition(bestPosition);
+
+                const latestPosition =
+                  normalizeResumePosition(
+                    getCurrentTime?.(),
+                  );
+
+                const bestPosition =
+                  latestPosition > 0
+                    ? latestPosition
+                    : normalizeResumePosition(
+                        handoffPosition ??
+                          initialPosition,
+                      );
+
+                if (bestPosition > 0) {
+                  setHandoffPosition(bestPosition);
+                }
+
+                if (serverMemoryKey) {
+                  saveLastServer(
+                    serverMemoryKey,
+                    server,
+                  );
+                }
+
+                if (serverFallbackMemoryKey) {
+                  saveLastServer(
+                    serverFallbackMemoryKey,
+                    server,
+                  );
+                }
+
                 setLoading(true);
                 clearResumeTimers();
                 onServerChange(index);
@@ -272,8 +558,11 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
             >
               <span className="flex items-center gap-2">
                 {server.title}
+
                 {server.recommended && (
-                  <span className="text-[9px] uppercase tracking-wider text-white/40">Recommended</span>
+                  <span className="text-[9px] uppercase tracking-wider text-white/40">
+                    Recommended
+                  </span>
                 )}
               </span>
             </button>
@@ -285,4 +574,5 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
 };
 
 WatchPlayer.displayName = "WatchPlayer";
+
 export default WatchPlayer;
