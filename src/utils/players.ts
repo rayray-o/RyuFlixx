@@ -8,7 +8,7 @@ export const getMoviePlayers = (id: string | number, startAt?: number): PlayersP
   const start = Number.isFinite(startAt) && (startAt ?? 0) > 0 ? `&startAt=${Math.floor(startAt!)}` : "";
   return [
     { title: "Ryuflix 1", source: `https://vidsrc.sh/embed/movie/${id}`, recommended: true, fast: true, ads: true, resumable: true },
-    { title: "Ryuflix 2", source: `https://vidlink.pro/movie/${id}?player=jw&primaryColor=006fee&secondaryColor=a2a2a2&iconColor=eefdec&autoplay=false${start}`, recommended: true, fast: true, ads: true, resumable: true },
+    { title: "Ryuflix 2", source: `https://vidstuck.cc/embed/movie/${id}?branding=Ryuflix&loading=2&back=true`, recommended: true, fast: true, ads: true, resumable: true },
     { title: "Ryuflix 3", source: `https://embed.filmu.in/movie/${id}${start ? `?${start.slice(1)}` : ""}`, recommended: true, fast: true, resumable: true },
     { title: "RyuFlix 4", source: `https://embed.vidrift.net/embed/movie/${id}?brand=Ryuflix&brandColor=00d1b2`, ads: true },
     { title: "Ryuflix 5", source: `https://multiembed.mov/?video_id=${id}&tmdb=1`, fast: true, ads: true },
@@ -33,8 +33,8 @@ export const getTvShowPlayers = (
 ): PlayersProps[] => {
   const start = Number.isFinite(startAt) && (startAt ?? 0) > 0 ? `&startAt=${Math.floor(startAt!)}` : "";
   return [
-    { title: "Ryuflix 1", source: `https://vidsrc.sh/embed/tv/${id}/${season}/${episode}?player=jw&primaryColor=f5a524&secondaryColor=a2a2a2&iconColor=eefdec&autoplay=false${start}`, recommended: true, fast: true, ads: true, resumable: true },
-    { title: "Ryuflix 2", source: `https://vidlink.pro/tv/${id}/${season}/${episode}?primaryColor=f5a524&autoplay=false${start}`, recommended: true, fast: true, ads: true, resumable: true },
+    { title: "Ryuflix 1", source: `https://vidsrc.sh/embed/tv/${id}/${season}/${episode}`, recommended: true, fast: true, ads: true, resumable: true },
+    { title: "Ryuflix 2", source: `https://vidstuck.cc/embed/tv/${id}/${season}/${episode}?branding=Ryuflix&loading=2&back=true`, recommended: true, fast: true, ads: true, resumable: true },
     { title: "Ryuflix 3", source: `https://embed.filmu.in/tv/${id}/${season}/${episode}${start ? `?${start.slice(1)}` : ""}`, recommended: true, fast: true, resumable: true },
     { title: "Ryuflix 4", source: `https://embed.vidrift.net/embed/tv/${id}/${season}/${episode}`, ads: true },
     { title: "Ryuflix 5", source: `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&s=${season}&e=${episode}`, fast: true, ads: true },
