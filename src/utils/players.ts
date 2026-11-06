@@ -7,7 +7,7 @@ import type { PlayersProps } from "@/types";
 export const getMoviePlayers = (id: string | number, startAt?: number): PlayersProps[] => {
   const start = Number.isFinite(startAt) && (startAt ?? 0) > 0 ? `&startAt=${Math.floor(startAt!)}` : "";
   return [
-    { title: "Ryuflix 1", source: `https://vidsrc.sh/embed/movie/${id}`, recommended: true, fast: true, ads: true, resumable: true },
+    { title: "Ryuflix 1", source: `https://www.vidy.st/movie/${id}?color=00FFFF&autoplay=true`, recommended: true, fast: true, ads: true, resumable: true },
     { title: "Ryuflix 2", source: `https://vidstuck.cc/embed/movie/${id}?branding=Ryuflix&loading=2&back=true`, recommended: true, fast: true, ads: true, resumable: true },
     { title: "Ryuflix 3", source: `https://embed.filmu.in/movie/${id}${start ? `?${start.slice(1)}` : ""}`, recommended: true, fast: true, resumable: true },
     { title: "RyuFlix 4", source: `https://embed.vidrift.net/embed/movie/${id}?brand=Ryuflix&brandColor=00d1b2`, ads: true },
@@ -33,7 +33,7 @@ export const getTvShowPlayers = (
 ): PlayersProps[] => {
   const start = Number.isFinite(startAt) && (startAt ?? 0) > 0 ? `&startAt=${Math.floor(startAt!)}` : "";
   return [
-    { title: "Ryuflix 1", source: `https://vidsrc.sh/embed/tv/${id}/${season}/${episode}`, recommended: true, fast: true, ads: true, resumable: true },
+    { title: "Ryuflix 1", source: `https://www.vidy.st/tv/${id}/${season}/${episode}?color=00FFFF&nextEpisode=true&episodeSelector=true&autoplay=true`, recommended: true, fast: true, ads: true, resumable: true },
     { title: "Ryuflix 2", source: `https://vidstuck.cc/embed/tv/${id}/${season}/${episode}?branding=Ryuflix&loading=2&back=true`, recommended: true, fast: true, ads: true, resumable: true },
     { title: "Ryuflix 3", source: `https://embed.filmu.in/tv/${id}/${season}/${episode}${start ? `?${start.slice(1)}` : ""}`, recommended: true, fast: true, resumable: true },
     { title: "Ryuflix 4", source: `https://embed.vidrift.net/embed/tv/${id}/${season}/${episode}`, ads: true },
