@@ -297,6 +297,61 @@ function parseGenericPlayerMessage(
   };
 }
 
+/**
+ * Vidy-specific adapter.
+ *
+ * PLAYER_EVENT:
+ *   { type: "PLAYER_EVENT", event, currentTime, duration, ... }
+ *
+ * MEDIA_DATA:
+ *   { type: "MEDIA_DATA", data: "<serialized local history>" }
+ *
+ * Vidy's official embed documentation describes both message types.
+ */
+function parseVidyMessage(
+  raw: Record<string, any>,
+): UnifiedPlayerEventData | null {
+  const root = parseMaybeJson(raw);
+
+  if (!isRecord(root)) return null;
+
+  const messageType = String(root.type ?? "").toUpperCase();
+
+  // Vidy's PLAYER_EVENT message carries event and timing fields directly.
+  // Its documented listener example also checks the event field directly.
+  if (messageType === "PLAYER_EVENT" || normalizeEvent(root.event)) {
+    return parseGenericPlayerMessage(root);
+  }
+
+  // Vidy publishes serialized local history roughly once per second.
+  if (messageType === "MEDIA_DATA") {
+    const history = parseMaybeJson(root.data);
+
+    if (!isRecord(history)) return null;
+
+    const direct = parseGenericPlayerMessage(history);
+    if (direct) return direct;
+
+    // Accept known wrappers around the current history entry.
+    for (const candidate of [
+      history.history,
+      history.current,
+      history.currentMedia,
+      history.current_media,
+      history.media,
+      history.progress,
+      history.player,
+    ]) {
+      if (!isRecord(candidate)) continue;
+
+      const parsed = parseGenericPlayerMessage(candidate);
+      if (parsed) return parsed;
+    }
+  }
+
+  return null;
+}
+
 function parseVidLinkMessage(
   raw: Record<string, any>,
 ): UnifiedPlayerEventData | null {
@@ -447,6 +502,8 @@ function parseVidRiftMessage(
 
 const PLAYER_ORIGINS = [
   "https://vidlink.pro",
+  "https://www.vidy.st",
+  "https://vidy.st",
   "https://embed.filmu.in",
   "https://embed.vidrift.net",
   "https://embed.vidrift.in",
@@ -482,6 +539,22 @@ export type PlayerOrigin = (typeof PLAYER_ORIGINS)[number];
 const PLAYER_ORIGIN_SET = new Set<string>(PLAYER_ORIGINS);
 
 export const playerAdapters = Object.fromEntries([
+  [
+    "https://www.vidy.st",
+    {
+      origin: "https://www.vidy.st",
+      parse: parseVidyMessage,
+    },
+  ],
+
+  [
+    "https://vidy.st",
+    {
+      origin: "https://vidy.st",
+      parse: parseVidyMessage,
+    },
+  ],
+
   [
     "https://vidlink.pro",
     {
