@@ -1,8 +1,13 @@
-
 "use client";
 
 import type { PlayersProps } from "@/types";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   findLastServerIndex,
   getLastServer,
@@ -19,9 +24,17 @@ interface WatchPlayerProps {
   title?: string;
   serverMemoryKey: string;
   serverFallbackMemoryKey?: string;
-  /** Shared resume position from RyuFlixx watch history, in seconds. */
   resumeAt?: number;
 }
+
+type ResumeProvider =
+  | "vidy"
+  | "vidly"
+  | "vidrift"
+  | "vidsrc"
+  | "videasy"
+  | "vidcore"
+  | null;
 
 function normalizeResumePosition(
   value: number | null | undefined,
@@ -38,59 +51,110 @@ function normalizeResumePosition(
 }
 
 /**
- * Apply the resume parameter supported by each provider.
- * Vidy uses "progress"; other providers retain "startAt".
+ * Each provider has its own documented resume mechanism.
+ * Unknown providers deliberately receive no guessed parameter.
  */
+function getResumeProvider(source: string): ResumeProvider {
+  try {
+    const host = new URL(source).hostname.toLowerCase();
+
+    if (host === "vidy.st" || host === "www.vidy.st") {
+      return "vidy";
+    }
+
+    if (
+      host === "vidly.pro" ||
+      host === "embed.filmu.in"
+    ) {
+      return "vidly";
+    }
+
+    if (
+      host === "embed.vidrift.net" ||
+      host === "embed.vidrift.in"
+    ) {
+      return "vidrift";
+    }
+
+    if (
+      host === "vidsrc.sh" ||
+      host === "vidsrc2.ru" ||
+      host === "vidsrc.ir"
+    ) {
+      return "vidsrc";
+    }
+
+    if (host === "player.videasy.ws") {
+      return "videasy";
+    }
+
+    if (host === "vidcore.org") {
+      return "vidcore";
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function buildResumableSource(
   source: string,
   position: number,
 ): string {
   try {
     const url = new URL(source);
-    const host = url.hostname.toLowerCase();
+    const provider = getResumeProvider(source);
+    const timestamp = normalizeResumePosition(position);
 
-    const isVidy =
-      host === "www.vidy.st" ||
-      host === "vidy.st";
+    // Never leave a stale parameter from another provider.
+    url.searchParams.delete("progress");
+    url.searchParams.delete("startAt");
+    url.searchParams.delete("t");
 
-    if (isVidy) {
-      url.searchParams.delete("startAt");
+    if (timestamp <= 0) {
+      return url.toString();
+    }
 
-      if (position > 0) {
+    switch (provider) {
+      case "vidy":
+        // Vidy's documented resume parameter.
         url.searchParams.set(
           "progress",
-          String(position),
+          String(timestamp),
         );
-      } else {
-        url.searchParams.delete("progress");
-      }
-    } else {
-      if (position > 0) {
+        break;
+
+      case "vidly":
+        // Vidly's documented start-position parameter.
+        url.searchParams.set(
+          "t",
+          String(timestamp),
+        );
+        break;
+
+      case "vidsrc":
+      case "videasy":
+      case "vidcore":
+        // These providers document startAt in seconds.
         url.searchParams.set(
           "startAt",
-          String(position),
+          String(timestamp),
         );
-      } else {
-        url.searchParams.delete("startAt");
-      }
+        break;
+
+      case "vidrift":
+        // VidRift uses postMessage, not a URL parameter.
+        break;
+
+      default:
+        // No undocumented generic fallback.
+        break;
     }
 
     return url.toString();
   } catch {
     return source;
-  }
-}
-
-function isVidRiftSource(source: string): boolean {
-  try {
-    const host = new URL(source).hostname;
-
-    return (
-      host === "embed.vidrift.net" ||
-      host === "embed.vidrift.in"
-    );
-  } catch {
-    return false;
   }
 }
 
@@ -138,8 +202,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
   const initialPosition =
     normalizeResumePosition(resumeAt);
 
-  // Always prefer the latest position reported by the active
-  // server. The handoff and initial values are fallbacks only.
   const livePosition =
     normalizeResumePosition(getCurrentTime?.());
 
@@ -180,7 +242,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     resumeTimersRef.current = [];
   }, []);
 
-  // Reset handoff state when the media identity changes.
+  // Reset media-specific handoff state when the media changes.
   useEffect(() => {
     if (fallbackKeyRef.current !== serverMemoryKey) {
       fallbackKeyRef.current = serverMemoryKey;
@@ -308,13 +370,8 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     serverFallbackMemoryKey,
   ]);
 
-  // IMPORTANT:
-  // This catches server changes from BOTH the buttons under
-  // the video and the separate source-selection drawer.
-  //
-  // The drawer changes selectedServer directly, so we must
-  // capture and flush the previous server's latest position
-  // whenever safeIndex changes.
+  // Catch source changes from both the player buttons
+  // and the separate source-selection drawer.
   useEffect(() => {
     if (
       previousServerIndexRef.current === safeIndex
@@ -365,12 +422,13 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     clearResumeTimers,
   ]);
 
+  // VidRift's documented resume API is postMessage.
   const sendVidRiftResume = useCallback(
     (frame: HTMLIFrameElement) => {
       if (
         !currentServer ||
         activeResumePosition <= 0 ||
-        !isVidRiftSource(currentServer.source)
+        getResumeProvider(currentServer.source) !== "vidrift"
       ) {
         return;
       }
@@ -393,20 +451,13 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
           return;
         }
 
-        try {
-          frame.contentWindow?.postMessage(
-            {
-              type: "vidrift:resume",
-              currentTime: activeResumePosition,
-            },
-            targetOrigin,
-          );
-        } catch (error) {
-          console.warn(
-            "RyuFlixx: VidRift resume message failed",
-            error,
-          );
-        }
+        frame.contentWindow?.postMessage(
+          {
+            type: "vidrift:resume",
+            currentTime: activeResumePosition,
+          },
+          targetOrigin,
+        );
       };
 
       send();
@@ -508,8 +559,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
               onClick={() => {
                 if (active) return;
 
-                // Capture the current server's position before
-                // changing the selected server.
                 flushProgress?.();
 
                 const latestPosition =
