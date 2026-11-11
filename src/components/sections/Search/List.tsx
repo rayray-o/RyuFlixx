@@ -1,4 +1,3 @@
-
 "use client";
 
 import { getSearchResults } from "@/actions/search";
@@ -9,11 +8,10 @@ import useDiscoverFilters from "@/hooks/useDiscoverFilters";
 import { ContentType } from "@/types";
 import { isEmpty } from "@/utils/helpers";
 import { getLoadingLabel } from "@/utils/movies";
-import { rankSearchResults } from "@/utils/search";
 import { Spinner } from "@heroui/react";
 import { useInViewport } from "@mantine/hooks";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Movie, Search, TV } from "tmdb-ts/dist/types";
 import MoviePosterCard from "../Movie/Cards/Poster";
 import SearchFilter from "./Filter";
@@ -42,7 +40,8 @@ const SearchList = () => {
   const { content } = useDiscoverFilters();
   const { ref, inViewport } = useInViewport();
 
-  const [submittedSearchQuery, setSubmittedSearchQuery] = useState("");
+  const [submittedSearchQuery, setSubmittedSearchQuery] =
+    useState("");
 
   const triggered = !isEmpty(submittedSearchQuery.trim());
 
@@ -56,7 +55,11 @@ const SearchList = () => {
     hasNextPage,
   } = useInfiniteQuery({
     enabled: triggered,
-    queryKey: ["search-list", content, submittedSearchQuery],
+    queryKey: [
+      "search-list",
+      content,
+      submittedSearchQuery,
+    ],
     queryFn: ({ pageParam: page }) =>
       fetchData({
         page,
@@ -93,24 +96,13 @@ const SearchList = () => {
     });
   }, [content]);
 
-  const rankedPages = useMemo(() => {
-    if (!data?.pages) return [];
+  const resultPages = data?.pages ?? [];
 
-    return data.pages.map((page) => {
-      const ranked = rankSearchResults(
-        page.results as (Movie | TV)[],
-        submittedSearchQuery,
-      );
+  const totalResults =
+    resultPages[0]?.total_results ?? 0;
 
-      return {
-        ...page,
-        results: ranked.map((result) => result.item),
-      };
-    });
-  }, [data?.pages, submittedSearchQuery]);
-
-  const totalResults = data?.pages[0]?.total_results ?? 0;
-  const firstPageResults = rankedPages[0]?.results ?? [];
+  const firstPageResults =
+    resultPages[0]?.results ?? [];
 
   const renderSearchResults = () => {
     if (isError) {
@@ -119,6 +111,7 @@ const SearchList = () => {
           <h5 className="text-xl font-semibold">
             Search couldn't be completed
           </h5>
+
           <p className="mt-2 text-sm text-default-500">
             Please try again in a moment.
           </p>
@@ -155,7 +148,7 @@ const SearchList = () => {
 
         <div className="movie-grid">
           {content === "movie"
-            ? rankedPages.map((page) =>
+            ? resultPages.map((page) =>
                 (page.results as Movie[]).map((movie) => (
                   <MoviePosterCard
                     key={movie.id}
@@ -164,7 +157,7 @@ const SearchList = () => {
                   />
                 )),
               )
-            : rankedPages.map((page) =>
+            : resultPages.map((page) =>
                 (page.results as TV[]).map((tv) => (
                   <TvShowHomeCard
                     key={tv.id}
@@ -194,7 +187,9 @@ const SearchList = () => {
               <Spinner
                 size="lg"
                 className="absolute-center mt-56"
-                color={content === "movie" ? "primary" : "warning"}
+                color={
+                  content === "movie" ? "primary" : "warning"
+                }
                 variant="simple"
               />
             ) : (
@@ -208,7 +203,9 @@ const SearchList = () => {
           >
             {isFetchingNextPage && (
               <Spinner
-                color={content === "movie" ? "primary" : "warning"}
+                color={
+                  content === "movie" ? "primary" : "warning"
+                }
                 size="lg"
                 variant="wave"
                 label={getLoadingLabel()}
