@@ -1,3 +1,4 @@
+
 "use client";
 
 import { tmdb } from "@/api/tmdb";
@@ -8,6 +9,7 @@ import useDiscoverFilters from "@/hooks/useDiscoverFilters";
 import { ContentType } from "@/types";
 import { isEmpty } from "@/utils/helpers";
 import { getLoadingLabel } from "@/utils/movies";
+import { rankSearchResults } from "@/utils/search";
 import { Spinner } from "@heroui/react";
 import { useInViewport } from "@mantine/hooks";
 import { useInfiniteQuery } from "@tanstack/react-query";
@@ -27,84 +29,151 @@ const fetchData = async ({
   type = "movie",
   query,
 }: FetchType): Promise<Search<Movie> | Search<TV>> => {
-  if (type === "movie") return tmdb.search.movies({ query, page });
+  if (type === "movie") {
+    return tmdb.search.movies({ query, page });
+  }
+
   return tmdb.search.tvShows({ query, page });
 };
 
 const SearchList = () => {
   const { content } = useDiscoverFilters();
   const { ref, inViewport } = useInViewport();
+
   const [submittedSearchQuery, setSubmittedSearchQuery] = useState("");
-  const triggered = !isEmpty(submittedSearchQuery);
-  const { data, isFetching, isPending, fetchNextPage, isFetchingNextPage, hasNextPage } =
-    useInfiniteQuery({
-      enabled: triggered,
-      queryKey: ["search-list", content, submittedSearchQuery],
-      queryFn: ({ pageParam: page }) =>
-        fetchData({ page, type: content, query: submittedSearchQuery }),
-      initialPageParam: 1,
-      getNextPageParam: (lastPage) =>
-        lastPage.page < lastPage.total_pages ? lastPage.page + 1 : undefined,
-    });
+
+  const triggered = !isEmpty(submittedSearchQuery.trim());
+
+  const {
+    data,
+    isFetching,
+    isPending,
+    fetchNextPage,
+    isFetchingNextPage,
+    hasNextPage,
+  } = useInfiniteQuery({
+    enabled: triggered,
+    queryKey: ["search-list", content, submittedSearchQuery],
+    queryFn: ({ pageParam: page }) =>
+      fetchData({
+        page,
+        type: content,
+        query: submittedSearchQuery,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.page < lastPage.total_pages
+        ? lastPage.page + 1
+        : undefined,
+  });
 
   useEffect(() => {
-    if (inViewport) {
-      fetchNextPage();
+    if (
+      inViewport &&
+      hasNextPage &&
+      !isFetching &&
+      !isFetchingNextPage
+    ) {
+      void fetchNextPage();
     }
-  }, [inViewport]);
+  }, [
+    inViewport,
+    hasNextPage,
+    isFetching,
+    isFetchingNextPage,
+    fetchNextPage,
+  ]);
 
   useEffect(() => {
-    queryClient.removeQueries({ queryKey: ["search-list"] });
+    queryClient.removeQueries({
+      queryKey: ["search-list"],
+    });
   }, [content]);
 
-  const renderSearchResults = useMemo(() => {
-    return () => {
-      if (isEmpty(data?.pages[0].results)) {
-        return (
-          <h5 className="mt-56 text-center text-xl">
-            No {content === "movie" ? "movies" : "TV series"} found with query{" "}
-            <span className="text-warning font-semibold">"{submittedSearchQuery}"</span>
-          </h5>
-        );
-      }
+  const rankedPages = useMemo(() => {
+    if (!data?.pages) return [];
 
-      return (
-        <>
-          <h5 className="text-center text-xl">
-            <span className="motion-preset-focus">
-              Found{" "}
-              <span className="text-success font-semibold">{data?.pages[0].total_results}</span>{" "}
-              {content === "movie" ? "movies" : "TV series"} with query{" "}
-              <span className="text-warning font-semibold">"{submittedSearchQuery}"</span>
-            </span>
-          </h5>
-          <div className="movie-grid">
-            {content === "movie"
-              ? data?.pages.map((page) =>
-                  page.results.map((movie) => (
-                    <MoviePosterCard key={movie.id} movie={movie as Movie} variant="bordered" />
-                  )),
-                )
-              : data?.pages.map((page) =>
-                  page.results.map((tv) => (
-                    <TvShowHomeCard key={tv.id} tv={tv as TV} variant="bordered" />
-                  )),
-                )}
-          </div>
-        </>
+    return data.pages.map((page) => {
+      const ranked = rankSearchResults(
+        page.results as (Movie | TV)[],
+        submittedSearchQuery,
       );
-    };
-  }, [content, data?.pages, submittedSearchQuery]);
+
+      return {
+        ...page,
+        results: ranked.map((result) => result.item),
+      };
+    });
+  }, [data?.pages, submittedSearchQuery]);
+
+  const totalResults = data?.pages[0]?.total_results ?? 0;
+  const firstPageResults = rankedPages[0]?.results ?? [];
+
+  const renderSearchResults = () => {
+    if (isEmpty(firstPageResults)) {
+      return (
+        <div className="mt-40 flex flex-col items-center gap-3 px-4 text-center">
+          <h5 className="text-xl font-semibold">
+            No {content === "movie" ? "movies" : "TV series"} found
+          </h5>
+
+          <p className="max-w-md text-sm text-default-500">
+            Try another spelling, a shorter title, or a different search.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <h5 className="text-center text-sm text-default-500 sm:text-base">
+          Found{" "}
+          <span className="font-semibold text-success">
+            {totalResults.toLocaleString()}
+          </span>{" "}
+          {content === "movie" ? "movies" : "TV series"} for{" "}
+          <span className="font-semibold text-warning">
+            "{submittedSearchQuery}"
+          </span>
+        </h5>
+
+        <div className="movie-grid">
+          {content === "movie"
+            ? rankedPages.map((page) =>
+                (page.results as Movie[]).map((movie) => (
+                  <MoviePosterCard
+                    key={movie.id}
+                    movie={movie}
+                    variant="bordered"
+                  />
+                )),
+              )
+            : rankedPages.map((page) =>
+                (page.results as TV[]).map((tv) => (
+                  <TvShowHomeCard
+                    key={tv.id}
+                    tv={tv}
+                    variant="bordered"
+                  />
+                )),
+              )}
+        </div>
+      </>
+    );
+  };
 
   return (
     <div className="flex flex-col items-center gap-8">
       <SearchFilter
         isLoading={isFetching}
-        onSearchSubmit={(value) => setSubmittedSearchQuery(value.trim())}
+        onSearchSubmit={(value) =>
+          setSubmittedSearchQuery(value.trim())
+        }
       />
+
       {triggered && (
         <>
-          <div className="relative flex flex-col items-center gap-8">
+          <div className="relative flex w-full flex-col items-center gap-8">
             {isPending ? (
               <Spinner
                 size="lg"
@@ -116,7 +185,11 @@ const SearchList = () => {
               renderSearchResults()
             )}
           </div>
-          <div ref={ref} className="flex h-24 items-center justify-center">
+
+          <div
+            ref={ref}
+            className="flex h-24 w-full items-center justify-center"
+          >
             {isFetchingNextPage && (
               <Spinner
                 color={content === "movie" ? "primary" : "warning"}
@@ -125,11 +198,14 @@ const SearchList = () => {
                 label={getLoadingLabel()}
               />
             )}
-            {!isEmpty(data?.pages[0].results) && !hasNextPage && !isPending && (
-              <p className="text-muted-foreground text-center text-base">
-                You have reached the end of the list.
-              </p>
-            )}
+
+            {!isEmpty(firstPageResults) &&
+              !hasNextPage &&
+              !isPending && (
+                <p className="text-center text-base text-muted-foreground">
+                  You have reached the end of the list.
+                </p>
+              )}
           </div>
         </>
       )}
