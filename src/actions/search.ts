@@ -1,83 +1,80 @@
+
 "use server";
 
 import { tmdb } from "@/api/tmdb";
 import { ActionResponse } from "@/types";
 import { isEmpty } from "@/utils/helpers";
+import { normalizeSearchText, rankSearchResults } from "@/utils/search";
 
 export type SearchSuggestion = {
   id: number;
   title: string;
   type: "movie" | "tv";
+  score: number;
 };
 
 export const getSearchSuggestions = async (
   query: string,
   limit: number = 10,
-): Promise<ActionResponse<SearchSuggestion[] | null>> => {
+): ActionResponse<SearchSuggestion[] | null> => {
   try {
-    if (isEmpty(query)) {
+    const normalizedQuery = normalizeSearchText(query);
+
+    if (normalizedQuery.length < 2) {
       return {
         success: true,
-        message: "No search suggestions",
+        message: "Enter at least two characters",
         data: null,
       };
     }
 
     const [movies, tvShows] = await Promise.all([
-      tmdb.search.movies({ query, page: 1 }),
-      tmdb.search.tvShows({ query, page: 1 }),
+      tmdb.search.movies({ query: query.trim(), page: 1 }),
+      tmdb.search.tvShows({ query: query.trim(), page: 1 }),
     ]);
 
-    const movieSuggestions: SearchSuggestion[] = movies.results.map((movie) => ({
-      id: movie.id,
-      title: movie.title,
-      type: "movie",
-    }));
-    const tvSuggestions: SearchSuggestion[] = tvShows.results.map((tv) => ({
-      id: tv.id,
-      title: tv.name,
-      type: "tv",
-    }));
+    const movieSuggestions: SearchSuggestion[] = rankSearchResults(
+      movies.results,
+      normalizedQuery,
+    )
+      .filter((result) => result.score >= 0.35)
+      .map(({ item, score }) => ({
+        id: item.id,
+        title: item.title,
+        type: "movie",
+        score,
+      }));
 
-    const suggestions = [...movieSuggestions, ...tvSuggestions];
+    const tvSuggestions: SearchSuggestion[] = rankSearchResults(
+      tvShows.results,
+      normalizedQuery,
+    )
+      .filter((result) => result.score >= 0.35)
+      .map(({ item, score }) => ({
+        id: item.id,
+        title: item.name,
+        type: "tv",
+        score,
+      }));
 
-    if (isEmpty(suggestions)) {
-      return {
-        success: true,
-        message: "No search suggestions",
-        data: null,
-      };
-    }
+    const combined = [...movieSuggestions, ...tvSuggestions];
 
-    const filteredSuggestions = suggestions
-      .filter((data) => data.title.toLowerCase().includes(query.toLowerCase()))
-      .filter(
-        (data, index, self) =>
-          index === self.findIndex((t) => t.title.toLowerCase() === data.title.toLowerCase()),
-      );
+    const unique = combined.filter(
+      (item, index, all) =>
+        index ===
+        all.findIndex(
+          (candidate) =>
+            candidate.id === item.id &&
+            candidate.type === item.type,
+        ),
+    );
 
-    const sortedSuggestions = filteredSuggestions.sort((a, b) => {
-      const aTitle = a.title.toLowerCase();
-      const bTitle = b.title.toLowerCase();
-      const queryLower = query.toLowerCase();
-
-      const aStartsWith = aTitle.startsWith(queryLower);
-      const bStartsWith = bTitle.startsWith(queryLower);
-
-      if (aStartsWith && !bStartsWith) return -1;
-      if (!aStartsWith && bStartsWith) return 1;
-
-      const aIndex = aTitle.indexOf(queryLower);
-      const bIndex = bTitle.indexOf(queryLower);
-
-      if (aIndex !== bIndex) return aIndex - bIndex;
-      return aTitle.localeCompare(bTitle);
-    });
+    unique.sort((a, b) => b.score - a.score);
 
     return {
       success: true,
-      message: "Search suggestions fetched",
-      data: sortedSuggestions.slice(0, limit),
+      message: "Intelligent search suggestions fetched",
+      data: unique.slice(0, Math.max(1, Math.min(limit, 20))),
     };
   } catch (error) {
     console.error("Search suggestions error:", error);
