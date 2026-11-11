@@ -1,4 +1,3 @@
-
 "use client";
 
 import { getSearchSuggestions } from "@/actions/search";
@@ -7,6 +6,7 @@ import ContentTypeSelection from "@/components/ui/other/ContentTypeSelection";
 import Highlight from "@/components/ui/other/Highlight";
 import useBreakpoints from "@/hooks/useBreakpoints";
 import useDiscoverFilters from "@/hooks/useDiscoverFilters";
+import { ContentType } from "@/types";
 import { SEARCH_HISTORY_STORAGE_KEY } from "@/utils/constants";
 import { cn, isEmpty } from "@/utils/helpers";
 import { normalizeSearchText } from "@/utils/search";
@@ -19,7 +19,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { parseAsString, useQueryState } from "nuqs";
 import { useCallback, useState } from "react";
 
-interface SearchFilterProps extends React.HTMLAttributes<HTMLFormElement> {
+interface SearchFilterProps
+  extends React.HTMLAttributes<HTMLFormElement> {
   isLoading?: boolean;
   onSearchSubmit?: (value: string) => void;
 }
@@ -64,10 +65,14 @@ const SearchFilter: React.FC<SearchFilterProps> = ({
     enabled: enableFetch,
     queryKey: [
       "search-suggestions",
+      content,
       normalizedQuery,
     ],
     queryFn: async () =>
-      getSearchSuggestions(debouncedSearchQuery),
+      getSearchSuggestions(
+        debouncedSearchQuery,
+        content as ContentType,
+      ),
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 15,
     refetchOnWindowFocus: false,
@@ -152,10 +157,10 @@ const SearchFilter: React.FC<SearchFilterProps> = ({
             onValueChange={(value) => {
               setSearchQuery(value);
 
-              if (isEmpty(value.trim())) {
-                setTriggered(false);
-                onSearchSubmit?.("");
-              }
+              // Editing a submitted query must reopen
+              // autocomplete and hide the previous results.
+              setTriggered(false);
+              onSearchSubmit?.("");
             }}
             onClear={
               !isEmpty(searchQuery)
