@@ -25,13 +25,14 @@ const MOVIE_GENRES: Record<string, number> = {
   mystery: 9648,
   romance: 10749,
   "science fiction": 878,
-  sci-fi: 878,
+  "sci-fi": 878,
   thriller: 53,
   war: 10752,
   western: 37,
 };
 
 const TV_GENRES: Record<string, number> = {
+  "action adventure": 10759,
   action: 10759,
   adventure: 10759,
   animation: 16,
@@ -54,72 +55,38 @@ const TV_GENRES: Record<string, number> = {
 };
 
 const STOP_WORDS = new Set([
-  "a",
-  "an",
-  "the",
-  "and",
-  "or",
-  "of",
-  "to",
-  "in",
-  "on",
-  "for",
-  "with",
-  "from",
-  "about",
-  "that",
-  "is",
-  "are",
-  "was",
-  "were",
-  "movie",
-  "movies",
-  "film",
-  "films",
-  "show",
-  "shows",
-  "series",
-  "tv",
-  "anime",
-  "something",
-  "like",
-  "similar",
-  "before",
-  "after",
-  "during",
-  "released",
-  "made",
-  "starring",
-  "featuring",
-  "directed",
-  "by",
+  "a", "an", "the", "and", "or", "of", "to", "for", "in",
+  "on", "at", "by", "with", "from", "after", "before",
+  "earlier", "later", "than", "since", "movies", "movie",
+  "films", "film", "shows", "show", "series", "tv",
+  "that", "is", "are", "about", "something", "like",
 ]);
 
-function escapeRegExp(value: string): string {
+function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function parseSearchIntent(
   query: string,
-  type: "movie" | "tv",
+  type: "movie" | "tv"
 ): SearchIntent {
-  let working = query.toLowerCase();
+  let working = query.toLowerCase().trim();
 
-  const genres = type === "movie" ? MOVIE_GENRES : TV_GENRES;
-  const matchedGenres = new Set<number>();
+  const genres: number[] = [];
+  const genreMap = type === "movie" ? MOVIE_GENRES : TV_GENRES;
 
-  const genreNames = Object.keys(genres).sort(
-    (a, b) => b.length - a.length,
+  const genreEntries = Object.entries(genreMap).sort(
+    ([a], [b]) => b.length - a.length
   );
 
-  for (const genreName of genreNames) {
+  for (const [genre, id] of genreEntries) {
     const expression = new RegExp(
-      `\\b${escapeRegExp(genreName)}\\b`,
-      "i",
+      `\\b${escapeRegExp(genre)}\\b`,
+      "i"
     );
 
     if (expression.test(working)) {
-      matchedGenres.add(genres[genreName]);
+      if (!genres.includes(id)) genres.push(id);
       working = working.replace(expression, " ");
     }
   }
@@ -127,74 +94,78 @@ export function parseSearchIntent(
   let year: number | undefined;
   let yearMode: SearchIntent["yearMode"];
 
-  const yearMatch = working.match(
-    /\b(before|earlier than|prior to|after|later than|since|in|from)\s+(19\d{2}|20\d{2})\b/i,
-  );
+  const yearPatterns: {
+    regex: RegExp;
+    mode: SearchIntent["yearMode"];
+  }[] = [
+    {
+      regex: /\b(?:before|earlier than|prior to)\s+(19\d{2}|20\d{2})\b/i,
+      mode: "before",
+    },
+    {
+      regex: /\b(?:after|later than|since)\s+(19\d{2}|20\d{2})\b/i,
+      mode: "after",
+    },
+    {
+      regex: /\b(?:in|from)\s+(19\d{2}|20\d{2})\b/i,
+      mode: "exact",
+    },
+    {
+      regex: /\b(19\d{2}|20\d{2})\b/,
+      mode: "exact",
+    },
+  ];
 
-  if (yearMatch) {
-    year = Number(yearMatch[2]);
+  for (const pattern of yearPatterns) {
+    const match = working.match(pattern.regex);
 
-    const relation = yearMatch[1].toLowerCase();
-
-    if (["before", "earlier than", "prior to"].includes(relation)) {
-      yearMode = "before";
-    } else if (["after", "later than", "since"].includes(relation)) {
-      yearMode = "after";
-    } else {
-      yearMode = "exact";
-    }
-
-    working = working.replace(yearMatch[0], " ");
-  } else {
-    const standaloneYear = working.match(/\b(19\d{2}|20\d{2})\b/);
-
-    if (standaloneYear) {
-      year = Number(standaloneYear[1]);
-      yearMode = "exact";
-      working = working.replace(standaloneYear[0], " ");
+    if (match) {
+      year = Number(match[1]);
+      yearMode = pattern.mode;
+      working = working.replace(match[0], " ");
+      break;
     }
   }
 
   let personQuery: string | undefined;
   let personRole: SearchIntent["personRole"];
 
-  const personMatch = working.match(
-    /\b(directed by|director|starring|featuring|with)\s+([a-z][a-z .'-]{1,60})$/i,
-  );
+  const personPatterns = [
+    {
+      regex: /\b(?:directed by|director)\s+(.+)$/i,
+      role: "crew" as const,
+    },
+    {
+      regex: /\b(?:starring|featuring|with)\s+(.+)$/i,
+      role: "cast" as const,
+    },
+  ];
 
-  if (personMatch) {
-    const candidate = personMatch[2]
-      .trim()
-      .replace(/\b(in|from|released|made|during|before|after)\b.*$/i, "")
-      .trim();
+  for (const pattern of personPatterns) {
+    const match = working.match(pattern.regex);
 
-    if (candidate.length >= 3) {
-      personQuery = candidate;
-      personRole =
-        personMatch[1].toLowerCase().includes("direct")
-          ? "crew"
-          : "cast";
-
-      working = working.slice(0, personMatch.index).trim();
+    if (match?.[1]) {
+      personQuery = match[1].trim();
+      personRole = pattern.role;
+      working = working.replace(match[0], " ");
+      break;
     }
   }
 
   const cleanedQuery = working
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/[^\w\s'-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
   const keywordQuery = cleanedQuery
     .split(/\s+/)
-    .filter((word) => {
-      return word.length > 2 && !STOP_WORDS.has(word);
-    })
+    .filter((word) => word && !STOP_WORDS.has(word))
     .join(" ");
 
   return {
     year,
     yearMode,
-    genres: [...matchedGenres],
+    genres,
     personQuery,
     personRole,
     keywordQuery: keywordQuery || undefined,
