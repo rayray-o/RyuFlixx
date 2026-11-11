@@ -3,7 +3,11 @@
 
 import { tmdb } from "@/api/tmdb";
 import { ActionResponse, ContentType } from "@/types";
-import { generateSearchVariants, normalizeSearchText, rankSearchResults } from "@/utils/search";
+import {
+  generateSearchVariants,
+  normalizeSearchText,
+  rankSearchResults,
+} from "@/utils/search";
 import { Movie, Search, TV } from "tmdb-ts/dist/types";
 
 export type SearchSuggestion = {
@@ -34,8 +38,6 @@ async function searchWithRecovery<T extends SearchItem>(
 ): Promise<Search<T>> {
   const original = await searchFunction(query, page);
 
-  // Only perform recovery on the first page when the original
-  // query produces too few candidates.
   if (page !== 1 || original.results.length >= 5) {
     return original;
   }
@@ -92,7 +94,7 @@ export const getSearchResults = async (
   query: string,
   type: ContentType,
   page: number = 1,
-): ActionResponse<Search<Movie> | Search<TV>> => {
+): ActionResponse<(Search<Movie> | Search<TV>) | null> => {
   try {
     const normalizedQuery = normalizeSearchText(query);
 
