@@ -1,7 +1,7 @@
 
 "use client";
 
-import { tmdb } from "@/api/tmdb";
+import { getSearchResults } from "@/actions/search";
 import { queryClient } from "@/app/providers";
 import TvShowHomeCard from "@/components/sections/TV/Cards/Poster";
 import BackToTopButton from "@/components/ui/button/BackToTopButton";
@@ -26,14 +26,16 @@ type FetchType = {
 
 const fetchData = async ({
   page,
-  type = "movie",
+  type,
   query,
 }: FetchType): Promise<Search<Movie> | Search<TV>> => {
-  if (type === "movie") {
-    return tmdb.search.movies({ query, page });
+  const response = await getSearchResults(query, type, page);
+
+  if (!response.success || !response.data) {
+    throw new Error(response.message || "Search request failed");
   }
 
-  return tmdb.search.tvShows({ query, page });
+  return response.data;
 };
 
 const SearchList = () => {
@@ -48,6 +50,7 @@ const SearchList = () => {
     data,
     isFetching,
     isPending,
+    isError,
     fetchNextPage,
     isFetchingNextPage,
     hasNextPage,
@@ -110,6 +113,19 @@ const SearchList = () => {
   const firstPageResults = rankedPages[0]?.results ?? [];
 
   const renderSearchResults = () => {
+    if (isError) {
+      return (
+        <div className="mt-40 text-center">
+          <h5 className="text-xl font-semibold">
+            Search couldn't be completed
+          </h5>
+          <p className="mt-2 text-sm text-default-500">
+            Please try again in a moment.
+          </p>
+        </div>
+      );
+    }
+
     if (isEmpty(firstPageResults)) {
       return (
         <div className="mt-40 flex flex-col items-center gap-3 px-4 text-center">
