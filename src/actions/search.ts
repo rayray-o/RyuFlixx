@@ -80,9 +80,7 @@ async function tmdbRequest<T>(
   });
 
   if (!response.ok) {
-    throw new Error(
-      `TMDB request failed: ${response.status}`,
-    );
+    throw new Error(`TMDB request failed: ${response.status}`);
   }
 
   return response.json() as Promise<T>;
@@ -345,9 +343,10 @@ function contextualScore(
   }
 
   const overview = normalizeSearchText(item.overview ?? "");
-  const descriptionTerms = intent.keywordQuery
-    ?.split(/\s+/)
-    .filter((term) => term.length > 2) ?? [];
+  const descriptionTerms =
+    intent.keywordQuery
+      ?.split(/\s+/)
+      .filter((term) => term.length > 2) ?? [];
 
   if (descriptionTerms.length && overview) {
     const matched = descriptionTerms.filter((term) =>
@@ -367,14 +366,24 @@ async function runSearch(
   type: ContentType,
   page: number,
 ): Promise<SearchPage<SearchItem>> {
-  const searchFunction =
-    type === "movie" ? searchMovies : searchTv;
+  // Keep the two search function types separate.
+  // This prevents TypeScript from incorrectly inferring
+  // one function as the other.
+  let original: SearchPage<SearchItem>;
 
-  const original = await searchWithRecovery(
-    query.trim(),
-    page,
-    searchFunction,
-  );
+  if (type === "movie") {
+    original = await searchWithRecovery(
+      query.trim(),
+      page,
+      searchMovies,
+    );
+  } else {
+    original = await searchWithRecovery(
+      query.trim(),
+      page,
+      searchTv,
+    );
+  }
 
   if (page !== 1) {
     return original;
