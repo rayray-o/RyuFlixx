@@ -26,7 +26,7 @@ export function normalizeSearchText(value: string): string {
 
 export function generateSearchVariants(
   query: string,
-  limit = 12,
+  limit = 24,
 ): string[] {
   const normalized = normalizeSearchText(query);
   if (!normalized) return [];
@@ -34,68 +34,91 @@ export function generateSearchVariants(
   const words = normalized.split(" ");
   const variants = new Map<string, number>();
 
-  const add = (index: number, replacement: string, priority: number) => {
+  const add = (
+    wordIndex: number,
+    replacement: string,
+    priority: number,
+  ) => {
     const changed = [...words];
-    changed[index] = replacement;
+    changed[wordIndex] = replacement;
     const value = changed.join(" ");
 
-    if (value !== normalized && !variants.has(value)) {
+    if (value === normalized) return;
+
+    const previous = variants.get(value);
+    if (previous === undefined || priority > previous) {
       variants.set(value, priority);
     }
   };
 
-  words.forEach((word, index) => {
+  words.forEach((word, wordIndex) => {
     if (word.length < 3) return;
 
-    // Highest priority: adjacent-letter transpositions.
+    // Adjacent transpositions: "jailre" -> "jailer".
     for (let i = 0; i < word.length - 1; i++) {
       if (word[i] === word[i + 1]) continue;
 
       add(
-        index,
+        wordIndex,
         word.slice(0, i) +
           word[i + 1] +
           word[i] +
           word.slice(i + 2),
-        100,
+        130,
       );
     }
 
-    // Missing character.
+    // Vowel substitutions: "avingers" -> "avengers".
+    // These are deliberately generated before broad substitutions.
+    const vowels = "aeiou";
+
+    for (let i = 0; i < word.length; i++) {
+      if (!vowels.includes(word[i])) continue;
+
+      for (const vowel of vowels) {
+        if (vowel === word[i]) continue;
+
+        add(
+          wordIndex,
+          word.slice(0, i) + vowel + word.slice(i + 1),
+          120,
+        );
+      }
+    }
+
+    // Missing letters.
     if (word.length >= 4) {
       for (let i = 0; i <= word.length; i++) {
         for (const letter of "etaoinshrdlucm") {
           add(
-            index,
+            wordIndex,
             word.slice(0, i) + letter + word.slice(i),
-            75,
+            95,
           );
         }
       }
     }
 
-    // Extra character.
+    // Accidental extra letters.
     if (word.length >= 4) {
       for (let i = 0; i < word.length; i++) {
         add(
-          index,
+          wordIndex,
           word.slice(0, i) + word.slice(i + 1),
-          65,
+          90,
         );
       }
     }
 
-    // Substituted character.
+    // Other substitutions.
     for (let i = 0; i < word.length; i++) {
-      const current = word[i];
-
       for (const letter of "etaoinshrdlucm") {
-        if (letter === current) continue;
+        if (letter === word[i]) continue;
 
         add(
-          index,
+          wordIndex,
           word.slice(0, i) + letter + word.slice(i + 1),
-          45,
+          70,
         );
       }
     }
@@ -130,13 +153,17 @@ function levenshtein(a: string, b: string): number {
         previous[j - 1] + cost,
       );
 
+      // Damerau transposition: two neighboring letters swapped.
       if (
         i > 1 &&
         j > 1 &&
         a[i - 1] === b[j - 2] &&
         a[i - 2] === b[j - 1]
       ) {
-        current[j] = Math.min(current[j], previous[j - 2] + 1);
+        current[j] = Math.min(
+          current[j],
+          previous[j - 2] + 1,
+        );
       }
     }
 
@@ -166,7 +193,10 @@ function tokenSimilarity(query: string, candidate: string): number {
     let best = 0;
 
     for (const candidateToken of candidateTokens) {
-      best = Math.max(best, similarity(queryToken, candidateToken));
+      best = Math.max(
+        best,
+        similarity(queryToken, candidateToken),
+      );
     }
 
     return best;
@@ -174,7 +204,8 @@ function tokenSimilarity(query: string, candidate: string): number {
 
   const matched = scores.filter((score) => score >= 0.65).length;
   const average =
-    scores.reduce((total, score) => total + score, 0) / scores.length;
+    scores.reduce((total, score) => total + score, 0) /
+    scores.length;
 
   return average * (matched / queryTokens.length);
 }
@@ -192,55 +223,70 @@ function getTitles(item: SearchableItem): string[] {
     .filter((value, index, values) => values.indexOf(value) === index);
 }
 
+function getTitleScore(
+  item: SearchableItem,
+  query: string,
+): number {
+  const titles = getTitles(item);
+  let best = 0;
+
+  for (const title of titles) {
+    let score = 0;
+
+    if (title === query) {
+      score = 1;
+    } else if (title.startsWith(query)) {
+      score = 0.97;
+    } else if (title.includes(query)) {
+      score = 0.93;
+    } else {
+      score = Math.max(
+        similarity(query, title),
+        tokenSimilarity(query, title) * 0.96,
+      );
+    }
+
+    best = Math.max(best, score);
+  }
+
+  return best;
+}
+
 function scoreItem<T extends SearchableItem>(
   item: T,
   normalizedQuery: string,
 ): RankedItem<T> {
-  const titles = getTitles(item);
+  const titleScore = getTitleScore(item, normalizedQuery);
   const overview = normalizeSearchText(item.overview || "");
 
-  let bestScore = 0;
+  const descriptionScore =
+    overview && normalizedQuery.length >= 4
+      ? Math.max(
+          overview.includes(normalizedQuery) ? 0.48 : 0,
+          tokenSimilarity(normalizedQuery, overview) * 0.42,
+        )
+      : 0;
+
+  const score = Math.max(titleScore, descriptionScore);
+
   let match: RankedItem<T>["match"] = "description";
 
-  for (const title of titles) {
-    let score = 0;
-    let type: RankedItem<T>["match"] = "fuzzy";
-
-    if (title === normalizedQuery) {
-      score = 1;
-      type = "exact";
-    } else if (title.startsWith(normalizedQuery)) {
-      score = 0.96;
-      type = "title";
-    } else if (title.includes(normalizedQuery)) {
-      score = 0.91;
-      type = "title";
-    } else {
-      score = Math.max(
-        similarity(normalizedQuery, title) * 0.88,
-        tokenSimilarity(normalizedQuery, title) * 0.9,
-      );
-    }
-
-    if (score > bestScore) {
-      bestScore = score;
-      match = type;
-    }
+  if (titleScore === 1) {
+    match = "exact";
+  } else if (titleScore >= 0.9) {
+    match = "title";
+  } else if (titleScore >= descriptionScore) {
+    match = "fuzzy";
   }
 
-  if (overview && normalizedQuery.length >= 4) {
-    const descriptionScore = Math.max(
-      overview.includes(normalizedQuery) ? 0.66 : 0,
-      tokenSimilarity(normalizedQuery, overview) * 0.62,
-    );
+  return { item, score, match };
+}
 
-    if (descriptionScore > bestScore) {
-      bestScore = descriptionScore;
-      match = "description";
-    }
-  }
-
-  return { item, score: bestScore, match };
+export function getSearchTitleMatchScore(
+  item: SearchableItem,
+  query: string,
+): number {
+  return getTitleScore(item, normalizeSearchText(query));
 }
 
 export function rankSearchResults<T extends SearchableItem>(
@@ -258,5 +304,9 @@ export function rankSearchResults<T extends SearchableItem>(
       if (b.score !== a.score) return b.score - a.score;
       return a.originalIndex - b.originalIndex;
     })
-    .map(({ item, score, match }) => ({ item, score, match }));
+    .map(({ item, score, match }) => ({
+      item,
+      score,
+      match,
+    }));
 }
