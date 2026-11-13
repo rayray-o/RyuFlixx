@@ -24,77 +24,87 @@ export function normalizeSearchText(value: string): string {
     .trim();
 }
 
-/**
- * Generates a limited number of plausible spelling corrections.
- * These are retrieval queries, not just ranking comparisons.
- */
-export function generateSearchVariants(query: string, limit = 8): string[] {
+export function generateSearchVariants(
+  query: string,
+  limit = 12,
+): string[] {
   const normalized = normalizeSearchText(query);
   if (!normalized) return [];
 
   const words = normalized.split(" ");
-  const variants = new Set<string>();
+  const variants = new Map<string, number>();
 
-  const addVariant = (wordIndex: number, replacement: string) => {
+  const add = (index: number, replacement: string, priority: number) => {
     const changed = [...words];
-    changed[wordIndex] = replacement;
-    const candidate = changed.join(" ");
+    changed[index] = replacement;
+    const value = changed.join(" ");
 
-    if (candidate !== normalized) variants.add(candidate);
+    if (value !== normalized && !variants.has(value)) {
+      variants.set(value, priority);
+    }
   };
 
-  // Common vowel substitutions. "Avingers" -> "Avengers".
-  const vowelOrder = ["e", "a", "o", "u", "i"];
-
-  words.forEach((word, wordIndex) => {
+  words.forEach((word, index) => {
     if (word.length < 3) return;
 
-    for (let i = 0; i < word.length; i++) {
-      const character = word[i];
-
-      if ("aeiou".includes(character)) {
-        for (const vowel of vowelOrder) {
-          if (vowel === character) continue;
-
-          addVariant(
-            wordIndex,
-            word.slice(0, i) + vowel + word.slice(i + 1),
-          );
-        }
-      }
-    }
-  });
-
-  // Adjacent letters accidentally typed in the wrong order.
-  words.forEach((word, wordIndex) => {
+    // Highest priority: adjacent-letter transpositions.
     for (let i = 0; i < word.length - 1; i++) {
       if (word[i] === word[i + 1]) continue;
 
-      addVariant(
-        wordIndex,
+      add(
+        index,
         word.slice(0, i) +
           word[i + 1] +
           word[i] +
           word.slice(i + 2),
+        100,
       );
     }
-  });
 
-  // A missing letter, often caused by fast typing.
-  words.forEach((word, wordIndex) => {
-    if (word.length < 4) return;
+    // Missing character.
+    if (word.length >= 4) {
+      for (let i = 0; i <= word.length; i++) {
+        for (const letter of "etaoinshrdlucm") {
+          add(
+            index,
+            word.slice(0, i) + letter + word.slice(i),
+            75,
+          );
+        }
+      }
+    }
 
-    for (let i = 1; i < word.length; i++) {
-      for (const vowel of ["e", "a", "i", "o", "u"]) {
-        addVariant(
-          wordIndex,
-          word.slice(0, i) + vowel + word.slice(i),
+    // Extra character.
+    if (word.length >= 4) {
+      for (let i = 0; i < word.length; i++) {
+        add(
+          index,
+          word.slice(0, i) + word.slice(i + 1),
+          65,
+        );
+      }
+    }
+
+    // Substituted character.
+    for (let i = 0; i < word.length; i++) {
+      const current = word[i];
+
+      for (const letter of "etaoinshrdlucm") {
+        if (letter === current) continue;
+
+        add(
+          index,
+          word.slice(0, i) + letter + word.slice(i + 1),
+          45,
         );
       }
     }
   });
 
-  return [...variants].slice(0, Math.max(0, limit));
+  return [...variants.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, Math.max(0, limit))
+    .map(([value]) => value);
 }
 
 function levenshtein(a: string, b: string): number {
