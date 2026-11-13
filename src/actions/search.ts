@@ -719,6 +719,19 @@ async function runUnifiedSearch(
     intentMovie.personQuery &&
     intentMovie.personRole
   ) {
+    const movieOnly = /^\s*(?:movies?|films?)\s+by\b/i.test(query);
+    const tvOnly = /^\s*(?:tv\s+)?(?:shows?|series)\s+by\b/i.test(query);
+
+    // Respect an explicitly requested content type.
+    if (movieOnly) {
+      return searchOneType(query, "movie", page);
+    }
+
+    if (tvOnly) {
+      return searchOneType(query, "tv", page);
+    }
+
+    // If no content type was specified, include both.
     const [movies, shows] = await Promise.all([
       searchOneType(query, "movie", page),
       searchOneType(query, "tv", page),
