@@ -1,43 +1,24 @@
+
 "use client";
 
-import { getSearchResults } from "@/actions/search";
-import { queryClient } from "@/app/providers";
+import {
+  getSearchResults,
+  UnifiedSearchItem,
+  UnifiedSearchPage,
+} from "@/actions/search";
 import TvShowHomeCard from "@/components/sections/TV/Cards/Poster";
 import BackToTopButton from "@/components/ui/button/BackToTopButton";
-import useDiscoverFilters from "@/hooks/useDiscoverFilters";
-import { ContentType } from "@/types";
 import { isEmpty } from "@/utils/helpers";
 import { getLoadingLabel } from "@/utils/movies";
 import { Spinner } from "@heroui/react";
 import { useInViewport } from "@mantine/hooks";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Movie, Search, TV } from "tmdb-ts/dist/types";
+import { Movie, TV } from "tmdb-ts/dist/types";
 import MoviePosterCard from "../Movie/Cards/Poster";
 import SearchFilter from "./Filter";
 
-type FetchType = {
-  page: number;
-  type: ContentType;
-  query: string;
-};
-
-const fetchData = async ({
-  page,
-  type,
-  query,
-}: FetchType): Promise<Search<Movie> | Search<TV>> => {
-  const response = await getSearchResults(query, type, page);
-
-  if (!response.success || !response.data) {
-    throw new Error(response.message || "Search request failed");
-  }
-
-  return response.data;
-};
-
 const SearchList = () => {
-  const { content } = useDiscoverFilters();
   const { ref, inViewport } = useInViewport();
 
   const [submittedSearchQuery, setSubmittedSearchQuery] =
@@ -55,17 +36,21 @@ const SearchList = () => {
     hasNextPage,
   } = useInfiniteQuery({
     enabled: triggered,
-    queryKey: [
-      "search-list",
-      content,
-      submittedSearchQuery,
-    ],
-    queryFn: ({ pageParam: page }) =>
-      fetchData({
-        page,
-        type: content,
-        query: submittedSearchQuery,
-      }),
+    queryKey: ["unified-search-list", submittedSearchQuery],
+    queryFn: async ({ pageParam }): Promise<UnifiedSearchPage> => {
+      const response = await getSearchResults(
+        submittedSearchQuery,
+        pageParam,
+      );
+
+      if (!response.success || !response.data) {
+        throw new Error(
+          response.message || "Search request failed",
+        );
+      }
+
+      return response.data;
+    },
     initialPageParam: 1,
     getNextPageParam: (lastPage) =>
       lastPage.page < lastPage.total_pages
@@ -90,19 +75,33 @@ const SearchList = () => {
     fetchNextPage,
   ]);
 
-  useEffect(() => {
-    queryClient.removeQueries({
-      queryKey: ["search-list"],
-    });
-  }, [content]);
-
   const resultPages = data?.pages ?? [];
+
+  const firstPageResults =
+    resultPages[0]?.results ?? [];
 
   const totalResults =
     resultPages[0]?.total_results ?? 0;
 
-  const firstPageResults =
-    resultPages[0]?.results ?? [];
+  const renderResult = (item: UnifiedSearchItem) => {
+    if (item.media_type === "movie") {
+      return (
+        <MoviePosterCard
+          key={`movie-${item.id}`}
+          movie={item as unknown as Movie}
+          variant="bordered"
+        />
+      );
+    }
+
+    return (
+      <TvShowHomeCard
+        key={`tv-${item.id}`}
+        tv={item as unknown as TV}
+        variant="bordered"
+      />
+    );
+  };
 
   const renderSearchResults = () => {
     if (isError) {
@@ -111,7 +110,6 @@ const SearchList = () => {
           <h5 className="text-xl font-semibold">
             Search couldn't be completed
           </h5>
-
           <p className="mt-2 text-sm text-default-500">
             Please try again in a moment.
           </p>
@@ -123,15 +121,19 @@ const SearchList = () => {
       return (
         <div className="mt-40 flex flex-col items-center gap-3 px-4 text-center">
           <h5 className="text-xl font-semibold">
-            No {content === "movie" ? "movies" : "TV series"} found
+            No results found
           </h5>
-
           <p className="max-w-md text-sm text-default-500">
-            Try another spelling, a shorter title, or a different search.
+            Try another spelling, a shorter title, or describe
+            what you're looking for differently.
           </p>
         </div>
       );
     }
+
+    const allResults = resultPages.flatMap(
+      (page) => page.results,
+    );
 
     return (
       <>
@@ -140,32 +142,14 @@ const SearchList = () => {
           <span className="font-semibold text-success">
             {totalResults.toLocaleString()}
           </span>{" "}
-          {content === "movie" ? "movies" : "TV series"} for{" "}
+          results for{" "}
           <span className="font-semibold text-warning">
             "{submittedSearchQuery}"
           </span>
         </h5>
 
         <div className="movie-grid">
-          {content === "movie"
-            ? resultPages.map((page) =>
-                (page.results as Movie[]).map((movie) => (
-                  <MoviePosterCard
-                    key={movie.id}
-                    movie={movie}
-                    variant="bordered"
-                  />
-                )),
-              )
-            : resultPages.map((page) =>
-                (page.results as TV[]).map((tv) => (
-                  <TvShowHomeCard
-                    key={tv.id}
-                    tv={tv}
-                    variant="bordered"
-                  />
-                )),
-              )}
+          {allResults.map(renderResult)}
         </div>
       </>
     );
@@ -187,9 +171,7 @@ const SearchList = () => {
               <Spinner
                 size="lg"
                 className="absolute-center mt-56"
-                color={
-                  content === "movie" ? "primary" : "warning"
-                }
+                color="primary"
                 variant="simple"
               />
             ) : (
@@ -203,9 +185,7 @@ const SearchList = () => {
           >
             {isFetchingNextPage && (
               <Spinner
-                color={
-                  content === "movie" ? "primary" : "warning"
-                }
+                color="primary"
                 size="lg"
                 variant="wave"
                 label={getLoadingLabel()}
