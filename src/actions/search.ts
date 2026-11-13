@@ -1,43 +1,78 @@
+
 "use server";
 
-import { tmdb } from "@/api/tmdb";
 import { env } from "@/utils/env";
-import { ActionResponse, ContentType } from "@/types";
+import { ActionResponse } from "@/types";
 import {
   generateSearchVariants,
   normalizeSearchText,
   rankSearchResults,
 } from "@/utils/search";
 import { parseSearchIntent } from "@/utils/search-intent";
-import { Movie, Search, TV } from "tmdb-ts/dist/types";
+
+const TMDB_BASE = "https://api.themoviedb.org/3";
+const PAGE_SIZE = 20;
+
+export type UnifiedSearchItem = {
+  id: number;
+  media_type: "movie" | "tv";
+  title: string;
+  original_title?: string;
+  overview?: string;
+  poster_path: string | null;
+  backdrop_path?: string | null;
+  release_date?: string;
+  first_air_date?: string;
+  vote_average?: number;
+  vote_count?: number;
+  popularity?: number;
+  genre_ids?: number[];
+  adult?: boolean;
+  runtime?: number | null;
+  episode_run_time?: number[];
+};
+
+export type UnifiedSearchPage = {
+  page: number;
+  results: UnifiedSearchItem[];
+  total_pages: number;
+  total_results: number;
+};
 
 export type SearchSuggestion = {
   id: number;
   title: string;
   type: "movie" | "tv";
-  score: number;
+  poster_path: string | null;
+  year: string;
+  rating: number;
+  runtime: number | null;
 };
 
-type SearchItem = {
+type TmdbResult = {
   id: number;
+  media_type?: string;
   title?: string;
   name?: string;
   original_title?: string;
   original_name?: string;
   overview?: string;
-  genre_ids?: number[];
-  release_date?: string;
-  first_air_date?: string;
-  popularity?: number;
-  vote_average?: number;
-  vote_count?: number;
   poster_path?: string | null;
   backdrop_path?: string | null;
+  release_date?: string;
+  first_air_date?: string;
+  vote_average?: number;
+  vote_count?: number;
+  popularity?: number;
+  genre_ids?: number[];
+  adult?: boolean;
+  runtime?: number | null;
+  episode_run_time?: number[];
 };
 
-type SearchPage<T> = {
+type TmdbPage = {
   page: number;
-  results: T[];
+  results: TmdbResult[];
   total_pages: number;
   total_results: number;
 };
@@ -48,44 +83,32 @@ type TmdbPerson = {
   known_for_department?: string;
 };
 
-type TmdbKeyword = {
-  id: number;
-  name: string;
+type TmdbCredits = {
+  cast?: TmdbResult[];
+  crew?: (TmdbResult & {
+    job?: string;
+    department?: string;
+  })[];
 };
 
-type PersonCredit = SearchItem & {
-  job?: string;
-  department?: string;
-};
-
-type PersonCreditsResponse = {
-  cast?: SearchItem[];
-  crew?: PersonCredit[];
-};
-
-const TMDB_BASE = "https://api.themoviedb.org/3";
-const PAGE_SIZE = 20;
+type SearchMode = "movie" | "tv";
 
 async function tmdbRequest<T>(
   endpoint: string,
-  params?: URLSearchParams,
+  params?: Record<string, string>,
 ): Promise<T> {
   const url = new URL(`${TMDB_BASE}${endpoint}`);
 
-  if (params) {
-    params.forEach((value, key) => {
-      url.searchParams.set(key, value);
-    });
-  }
+  Object.entries(params ?? {}).forEach(([key, value]) => {
+    url.searchParams.set(key, value);
+  });
 
   const response = await fetch(url.toString(), {
     headers: {
       Authorization: `Bearer ${env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN}`,
       Accept: "application/json",
     },
-    next: {
-      revalidate: 300,
-    },
+    next: { revalidate: 300 },
   });
 
   if (!response.ok) {
@@ -95,7 +118,7 @@ async function tmdbRequest<T>(
   return response.json() as Promise<T>;
 }
 
-function getItemTitle(item: SearchItem): string {
+function titleOf(item: TmdbResult): string {
   return (
     item.title ??
     item.name ??
@@ -105,354 +128,60 @@ function getItemTitle(item: SearchItem): string {
   );
 }
 
-function getItemDate(
-  item: SearchItem,
-  type: ContentType,
+function toUnified(
+  item: TmdbResult,
+  type?: SearchMode,
+): UnifiedSearchItem | null {
+  const mediaType =
+    type ??
+    (item.media_type === "movie" || item.media_type === "tv"
+      ? item.media_type
+      : undefined);
+
+  if (!mediaType || !item.id || !titleOf(item)) return null;
+
+  return {
+    id: item.id,
+    media_type: mediaType,
+    title: titleOf(item),
+    original_title: item.original_title ?? item.original_name,
+    overview: item.overview ?? "",
+    poster_path: item.poster_path ?? null,
+    backdrop_path: item.backdrop_path ?? null,
+    release_date: item.release_date,
+    first_air_date: item.first_air_date,
+    vote_average: item.vote_average ?? 0,
+    vote_count: item.vote_count ?? 0,
+    popularity: item.popularity ?? 0,
+    genre_ids: item.genre_ids ?? [],
+    adult: item.adult ?? false,
+    runtime: item.runtime ?? null,
+    episode_run_time: item.episode_run_time ?? [],
+  };
+}
+
+function getDate(
+  item: UnifiedSearchItem,
 ): string {
-  return type === "movie"
+  return item.media_type === "movie"
     ? item.release_date ?? ""
     : item.first_air_date ?? "";
 }
 
-async function searchTitles(
-  query: string,
-  type: ContentType,
-  page: number,
-): Promise<SearchPage<SearchItem>> {
-  const result =
-    type === "movie"
-      ? await tmdb.search.movies({ query, page })
-      : await tmdb.search.tvShows({ query, page });
-
-  return result as unknown as SearchPage<SearchItem>;
-}
-
-async function searchWithRecovery(
-  query: string,
-  type: ContentType,
-  page: number,
-): Promise<SearchPage<SearchItem>> {
-  const original = await searchTitles(query, type, page);
-
-  if (page !== 1 || original.results.length >= 5) {
-    return original;
-  }
-
-  const variants = generateSearchVariants(query, 12).slice(0, 8);
-
-  if (!variants.length) return original;
-
-  const recoveredPages = await Promise.all(
-    variants.map(async (variant) => {
-      try {
-        return await searchTitles(variant, type, 1);
-      } catch {
-        return null;
-      }
-    }),
-  );
-
-  const unique = new Map<number, SearchItem>();
-
-  for (const item of original.results) {
-    unique.set(item.id, item);
-  }
-
-  for (const recovered of recoveredPages) {
-    for (const item of recovered?.results ?? []) {
-      if (!unique.has(item.id)) {
-        unique.set(item.id, item);
-      }
-    }
-  }
-
-  const ranked = rankSearchResults(
-    [...unique.values()],
-    query,
-  ).map((result) => result.item);
-
-  return {
-    ...original,
-    results: ranked,
-    total_results: Math.max(
-      original.total_results,
-      ranked.length,
-    ),
-    total_pages: Math.max(
-      original.total_pages,
-      ranked.length ? 1 : 0,
-    ),
-  };
-}
-
-function personMatchScore(
-  personName: string,
-  query: string,
-): number {
-  const candidate = normalizeSearchText(personName);
-  const wanted = normalizeSearchText(query);
-
-  if (!candidate || !wanted) return 0;
-  if (candidate === wanted) return 1;
-
-  if (candidate.includes(wanted)) return 0.9;
-  if (wanted.includes(candidate)) return 0.78;
-
-  const wantedWords = wanted.split(" ").filter(Boolean);
-  const candidateWords = candidate.split(" ").filter(Boolean);
-
-  if (!wantedWords.length || !candidateWords.length) return 0;
-
-  const matched = wantedWords.filter((word) =>
-    candidateWords.some(
-      (candidateWord) =>
-        candidateWord === word ||
-        candidateWord.startsWith(word) ||
-        word.startsWith(candidateWord),
-    ),
-  ).length;
-
-  return matched / wantedWords.length;
-}
-
-async function resolvePerson(
-  query: string,
-  role: "cast" | "director",
-): Promise<TmdbPerson | null> {
-  if (!query) return null;
-
-  try {
-    const params = new URLSearchParams({
-      query,
-      page: "1",
-      include_adult: "false",
-    });
-
-    const result = await tmdbRequest<{
-      results: TmdbPerson[];
-    }>("/search/person", params);
-
-    const ranked = (result.results ?? [])
-      .map((person) => {
-        let score = personMatchScore(person.name, query);
-
-        const department =
-          person.known_for_department?.toLowerCase() ?? "";
-
-        if (
-          role === "director" &&
-          department.includes("direct")
-        ) {
-          score += 0.08;
-        }
-
-        if (
-          role === "cast" &&
-          department.includes("acting")
-        ) {
-          score += 0.08;
-        }
-
-        return { person, score };
-      })
-      .sort((a, b) => b.score - a.score);
-
-    const best = ranked[0];
-
-    if (!best || best.score < 0.55) {
-      return null;
-    }
-
-    return best.person;
-  } catch (error) {
-    console.error("Person lookup failed:", error);
-    return null;
-  }
-}
-
-const KEYWORD_EXPANSIONS: Record<string, string[]> = {
-  "artificial intelligence": ["artificial intelligence", "robot"],
-  "time travel": ["time travel", "time loop"],
-  "parallel universe": ["parallel universe", "alternate reality"],
-  "coming of age": ["coming of age", "adolescence"],
-  "post apocalyptic": ["post apocalyptic", "dystopia"],
-  psychological: ["psychological", "mind games"],
-  loneliness: ["loneliness", "isolation"],
-  lonely: ["loneliness"],
-  alienation: ["alienation", "isolation"],
-  fighting: ["struggle"],
-  struggle: ["struggle", "resistance"],
-  society: ["social issues"],
-  survival: ["survival", "human nature"],
-  dystopian: ["dystopia"],
-  revenge: ["revenge"],
-  heist: ["heist"],
-  superhero: ["superhero"],
-  zombie: ["zombie apocalypse"],
-  vampire: ["vampire"],
-  samurai: ["samurai"],
-  "martial arts": ["martial arts"],
-  "serial killer": ["serial killer"],
-  detective: ["detective"],
-  mafia: ["mafia"],
-  gangster: ["gangster"],
-  alien: ["extraterrestrial"],
-  robot: ["robot"],
-  underdog: ["underdog"],
-};
-
-function buildKeywordQueries(query: string): string[] {
-  const normalized = normalizeSearchText(query);
-
-  if (!normalized) return [];
-
-  const queries = new Set<string>();
-  queries.add(normalized);
-
-  for (const [phrase, expansions] of Object.entries(
-    KEYWORD_EXPANSIONS,
-  )) {
-    if (normalized.includes(phrase)) {
-      for (const expansion of expansions) {
-        queries.add(expansion);
-      }
-    }
-  }
-
-  const ignored = new Set([
-    "a", "an", "the", "and", "or", "of", "to",
-    "for", "in", "on", "at", "by", "with",
-    "from", "against", "about", "someone",
-    "something", "movies", "movie", "films",
-    "film", "shows", "show", "series",
-  ]);
-
-  const words = normalized
-    .split(" ")
-    .filter((word) => word.length > 2 && !ignored.has(word));
-
-  for (const word of words) {
-    const expansions = KEYWORD_EXPANSIONS[word];
-
-    if (expansions?.length) {
-      queries.add(expansions[0]);
-    }
-  }
-
-  if (queries.size < 4 && words.length >= 2) {
-    queries.add(words.slice(-2).join(" "));
-  }
-
-  return [...queries].slice(0, 5);
-}
-
-function keywordMatchScore(
-  keywordName: string,
-  searchQuery: string,
-): number {
-  const name = normalizeSearchText(keywordName);
-  const query = normalizeSearchText(searchQuery);
-
-  if (!name || !query) return 0;
-  if (name === query) return 1;
-
-  if (name.includes(query) || query.includes(name)) {
-    return 0.9;
-  }
-
-  const nameWords = name.split(" ").filter(Boolean);
-  const queryWords = query.split(" ").filter(Boolean);
-
-  const matched = nameWords.filter((word) =>
-    queryWords.some(
-      (queryWord) =>
-        word === queryWord ||
-        word.startsWith(queryWord) ||
-        queryWord.startsWith(word),
-    ),
-  ).length;
-
-  if (!nameWords.length) return 0;
-
-  return matched / nameWords.length;
-}
-
-async function resolveKeywords(
-  query: string,
-): Promise<TmdbKeyword[]> {
-  const searchQueries = buildKeywordQueries(query);
-
-  if (!searchQueries.length) return [];
-
-  const responses = await Promise.all(
-    searchQueries.map(async (searchQuery) => {
-      try {
-        const params = new URLSearchParams({
-          query: searchQuery,
-          page: "1",
-        });
-
-        const response = await tmdbRequest<{
-          results: TmdbKeyword[];
-        }>("/search/keyword", params);
-
-        return {
-          searchQuery,
-          results: response.results ?? [],
-        };
-      } catch {
-        return {
-          searchQuery,
-          results: [],
-        };
-      }
-    }),
-  );
-
-  const unique = new Map<
-    number,
-    { keyword: TmdbKeyword; score: number }
-  >();
-
-  for (const response of responses) {
-    for (const keyword of response.results) {
-      const score = keywordMatchScore(
-        keyword.name,
-        response.searchQuery,
-      );
-
-      if (score < 0.25) continue;
-
-      const current = unique.get(keyword.id);
-
-      if (!current || score > current.score) {
-        unique.set(keyword.id, { keyword, score });
-      }
-    }
-  }
-
-  return [...unique.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map((entry) => entry.keyword);
-}
-
-function matchesIntentFilters(
-  item: SearchItem,
+function matchesIntent(
+  item: UnifiedSearchItem,
   intent: ReturnType<typeof parseSearchIntent>,
-  type: ContentType,
 ): boolean {
-  if (intent.genres.length) {
-    const itemGenres = item.genre_ids ?? [];
-
-    const matchesAllGenres = intent.genres.every((genre) =>
-      itemGenres.includes(genre),
-    );
-
-    if (!matchesAllGenres) return false;
+  if (
+    intent.genres.length &&
+    !intent.genres.every((genre) =>
+      (item.genre_ids ?? []).includes(genre),
+    )
+  ) {
+    return false;
   }
 
-  const date = getItemDate(item, type);
+  const date = getDate(item);
   const year = Number(date.slice(0, 4));
 
   if (intent.yearFrom && (!year || year < intent.yearFrom)) {
@@ -466,313 +195,455 @@ function matchesIntentFilters(
   return true;
 }
 
-function semanticTextScore(
-  item: SearchItem,
-  query: string,
-): number {
-  const normalizedQuery = normalizeSearchText(query);
-
-  const searchableText = normalizeSearchText(
-    [
-      getItemTitle(item),
-      item.original_title ?? "",
-      item.original_name ?? "",
-      item.overview ?? "",
-    ].join(" "),
-  );
-
-  const words = normalizedQuery
-    .split(" ")
-    .filter((word) => word.length > 2);
-
-  if (!words.length || !searchableText) return 0;
-
-  const matched = words.filter((word) =>
-    searchableText.includes(word),
-  ).length;
-
-  const phraseMatch = searchableText.includes(normalizedQuery)
-    ? 0.2
-    : 0;
-
-  return Math.min(
-    1,
-    matched / words.length + phraseMatch,
-  );
-}
-
-function popularityScore(item: SearchItem): number {
+function popularityScore(item: UnifiedSearchItem): number {
   const popularity = Math.max(0, item.popularity ?? 0);
   const rating = Math.max(0, item.vote_average ?? 0);
 
-  const popularityPart = Math.min(
-    1,
-    Math.log10(popularity + 1) / 4,
+  return (
+    Math.min(1, Math.log10(popularity + 1) / 4) * 0.75 +
+    Math.min(1, rating / 10) * 0.25
   );
-
-  const ratingPart = Math.min(1, rating / 10);
-
-  return popularityPart * 0.75 + ratingPart * 0.25;
 }
 
-function rankContextualItems(
-  items: SearchItem[],
-  keywordQuery?: string,
-): SearchItem[] {
-  return [...items].sort((a, b) => {
-    const scoreA = keywordQuery
-      ? semanticTextScore(a, keywordQuery) * 0.82 +
-        popularityScore(a) * 0.18
-      : popularityScore(a);
+function rankUnified(
+  items: UnifiedSearchItem[],
+  query: string,
+): UnifiedSearchItem[] {
+  const ranked = rankSearchResults(items, query);
 
-    const scoreB = keywordQuery
-      ? semanticTextScore(b, keywordQuery) * 0.82 +
-        popularityScore(b) * 0.18
-      : popularityScore(b);
+  return ranked
+    .map(({ item, score }) => ({
+      item,
+      score:
+        score * 0.78 +
+        popularityScore(item) * 0.22,
+    }))
+    .sort((a, b) => b.score - a.score)
+    .map(({ item }) => item);
+}
 
-    return scoreB - scoreA;
+async function searchMulti(
+  query: string,
+  page: number,
+): Promise<TmdbPage> {
+  return tmdbRequest<TmdbPage>("/search/multi", {
+    query,
+    page: String(page),
+    include_adult: "false",
+    language: "en-US",
   });
 }
 
-async function getPersonResults(
-  intent: ReturnType<typeof parseSearchIntent>,
-  type: ContentType,
+async function searchMultiWithRecovery(
+  query: string,
   page: number,
-): Promise<SearchPage<SearchItem> | null> {
-  if (!intent.personQuery || !intent.personRole) {
-    return null;
+): Promise<TmdbPage> {
+  const original = await searchMulti(query, page);
+
+  if (page !== 1 || original.results.length >= 5) {
+    return original;
   }
 
-  const person = await resolvePerson(
-    intent.personQuery,
-    intent.personRole,
+  const variants = generateSearchVariants(query, 12);
+
+  if (!variants.length) return original;
+
+  const recovered = await Promise.all(
+    variants.map(async (variant) => {
+      try {
+        return await searchMulti(variant, 1);
+      } catch {
+        return null;
+      }
+    }),
   );
 
-  if (!person) return null;
+  const unique = new Map<string, TmdbResult>();
+
+  for (const item of original.results) {
+    if (item.media_type === "movie" || item.media_type === "tv") {
+      unique.set(`${item.media_type}-${item.id}`, item);
+    }
+  }
+
+  for (const result of recovered) {
+    for (const item of result?.results ?? []) {
+      if (item.media_type === "movie" || item.media_type === "tv") {
+        const key = `${item.media_type}-${item.id}`;
+        if (!unique.has(key)) unique.set(key, item);
+      }
+    }
+  }
+
+  const results = rankSearchResults(
+    [...unique.values()],
+    query,
+  ).map(({ item }) => item);
+
+  return {
+    ...original,
+    results,
+    total_results: Math.max(original.total_results, results.length),
+    total_pages: Math.max(original.total_pages, results.length ? 1 : 0),
+  };
+}
+
+async function resolvePerson(
+  name: string,
+  role: "cast" | "director",
+): Promise<TmdbPerson | null> {
+  const response = await tmdbRequest<{
+    results: TmdbPerson[];
+  }>("/search/person", {
+    query: name,
+    page: "1",
+    include_adult: "false",
+  });
+
+  const wanted = normalizeSearchText(name);
+
+  const ranked = (response.results ?? [])
+    .map((person) => {
+      const candidate = normalizeSearchText(person.name);
+      let score =
+        candidate === wanted
+          ? 1
+          : candidate.includes(wanted) || wanted.includes(candidate)
+            ? 0.85
+            : 0;
+
+      const department =
+        person.known_for_department?.toLowerCase() ?? "";
+
+      if (role === "director" && department.includes("direct")) {
+        score += 0.08;
+      }
+
+      if (role === "cast" && department.includes("acting")) {
+        score += 0.08;
+      }
+
+      return { person, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  return ranked[0]?.score >= 0.55
+    ? ranked[0].person
+    : null;
+}
+
+async function getPersonItems(
+  query: string,
+  role: "cast" | "director",
+  type: SearchMode,
+): Promise<UnifiedSearchItem[]> {
+  const person = await resolvePerson(query, role);
+  if (!person) return [];
 
   const endpoint =
     type === "movie"
       ? `/person/${person.id}/movie_credits`
       : `/person/${person.id}/tv_credits`;
 
-  const credits = await tmdbRequest<PersonCreditsResponse>(
-    endpoint,
-  );
+  const credits = await tmdbRequest<TmdbCredits>(endpoint);
 
-  let selected: SearchItem[];
+  const selected =
+    role === "director"
+      ? (credits.crew ?? []).filter((credit) =>
+          (credit.job ?? "").toLowerCase().includes("director"),
+        )
+      : credits.cast ?? [];
 
-  if (intent.personRole === "director") {
-    selected = (credits.crew ?? []).filter((credit) =>
-      (credit.job ?? "").toLowerCase().includes("director"),
-    );
-  } else {
-    selected = credits.cast ?? [];
-  }
-
-  const unique = new Map<number, SearchItem>();
-
-  for (const item of selected) {
-    if (item.id) unique.set(item.id, item);
-  }
-
-  let filtered = [...unique.values()].filter((item) =>
-    matchesIntentFilters(item, intent, type),
-  );
-
-  if (intent.titleQuery) {
-    filtered = filtered.filter((item) => {
-      const score = rankSearchResults(
-        [item],
-        intent.titleQuery!,
-      )[0]?.score ?? 0;
-
-      return score >= 0.3;
-    });
-  }
-
-  const ranked = rankContextualItems(
-    filtered,
-    intent.keywordQuery,
-  );
-
-  const totalResults = ranked.length;
-  const totalPages = Math.ceil(totalResults / PAGE_SIZE);
-
-  return {
-    page,
-    results: ranked.slice(
-      (page - 1) * PAGE_SIZE,
-      page * PAGE_SIZE,
-    ),
-    total_results: totalResults,
-    total_pages: totalPages,
-  };
+  return selected
+    .map((item) => toUnified(item, type))
+    .filter((item): item is UnifiedSearchItem => Boolean(item));
 }
 
-async function getDiscoverResults(
-  intent: ReturnType<typeof parseSearchIntent>,
-  type: ContentType,
-  page: number,
-): Promise<SearchPage<SearchItem> | null> {
-  const keywords = intent.keywordQuery
-    ? await resolveKeywords(intent.keywordQuery)
-    : [];
+async function getKeywordIds(query: string): Promise<number[]> {
+  const phrases = new Set<string>([query]);
 
-  // If a descriptive query cannot be resolved to TMDB keywords
-  // and has no other filters, let normal text search take over.
-  if (
-    intent.keywordQuery &&
-    keywords.length === 0 &&
-    intent.genres.length === 0 &&
-    !intent.yearFrom &&
-    !intent.yearTo
-  ) {
-    return null;
+  const expansions: Record<string, string[]> = {
+    "artificial intelligence": ["artificial intelligence", "robot"],
+    "time travel": ["time travel", "time loop"],
+    lonely: ["loneliness", "isolation"],
+    loneliness: ["loneliness", "isolation"],
+    society: ["social issues", "society"],
+    dystopian: ["dystopia"],
+    psychological: ["psychological", "mind games"],
+    revenge: ["revenge"],
+    survival: ["survival"],
+    samurai: ["samurai"],
+    "serial killer": ["serial killer"],
+    "martial arts": ["martial arts"],
+  };
+
+  Object.entries(expansions).forEach(([phrase, values]) => {
+    if (query.includes(phrase)) {
+      values.forEach((value) => phrases.add(value));
+    }
+  });
+
+  const results = await Promise.all(
+    [...phrases].slice(0, 5).map(async (phrase) => {
+      try {
+        const response = await tmdbRequest<{
+          results: { id: number; name: string }[];
+        }>("/search/keyword", {
+          query: phrase,
+          page: "1",
+        });
+
+        return (response.results ?? []).slice(0, 3);
+      } catch {
+        return [];
+      }
+    }),
+  );
+
+  const ids = new Set<number>();
+
+  results.flat().forEach((keyword) => {
+    if (keyword.id) ids.add(keyword.id);
+  });
+
+  return [...ids].slice(0, 5);
+}
+
+async function discoverByIntent(
+  query: string,
+  type: SearchMode,
+  page: number,
+): Promise<UnifiedSearchPage | null> {
+  const intent = parseSearchIntent(query, type);
+
+  if (!intent.hasContext) return null;
+
+  if (intent.personQuery && intent.personRole) {
+    const credits = await getPersonItems(
+      intent.personQuery,
+      intent.personRole,
+      type,
+    );
+
+    const filtered = credits.filter((item) =>
+      matchesIntent(item, intent),
+    );
+
+    const ranked = rankUnified(
+      filtered,
+      intent.keywordQuery ?? intent.titleQuery ?? query,
+    );
+
+    return {
+      page,
+      results: ranked.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+      total_results: ranked.length,
+      total_pages: Math.ceil(ranked.length / PAGE_SIZE),
+    };
   }
 
-  const params = new URLSearchParams({
+  if (intent.titleQuery) {
+    const titleResults = await searchMultiWithRecovery(
+      intent.titleQuery,
+      1,
+    );
+
+    const items = titleResults.results
+      .filter((item) => item.media_type === type)
+      .map((item) => toUnified(item, type))
+      .filter((item): item is UnifiedSearchItem => Boolean(item))
+      .filter((item) => matchesIntent(item, intent));
+
+    const ranked = rankUnified(items, intent.titleQuery);
+
+    return {
+      page,
+      results: ranked.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+      total_results: ranked.length,
+      total_pages: Math.ceil(ranked.length / PAGE_SIZE),
+    };
+  }
+
+  const params: Record<string, string> = {
     page: String(page),
     sort_by: intent.sortBy,
     include_adult: "false",
-  });
+    language: "en-US",
+  };
 
   if (type === "tv") {
-    params.set("include_null_first_air_dates", "false");
+    params.include_null_first_air_dates = "false";
   }
 
   if (intent.genres.length) {
-    // Commas mean every selected genre must match.
-    params.set("with_genres", intent.genres.join(","));
+    params.with_genres = intent.genres.join(",");
   }
 
-  const datePrefix =
-    type === "movie"
-      ? "primary_release_date"
-      : "first_air_date";
+  const dateField =
+    type === "movie" ? "primary_release_date" : "first_air_date";
 
   if (intent.yearFrom) {
-    params.set(
-      `${datePrefix}.gte`,
-      `${intent.yearFrom}-01-01`,
-    );
+    params[`${dateField}.gte`] = `${intent.yearFrom}-01-01`;
   }
 
   if (intent.yearTo) {
-    params.set(
-      `${datePrefix}.lte`,
-      `${intent.yearTo}-12-31`,
-    );
+    params[`${dateField}.lte`] = `${intent.yearTo}-12-31`;
   }
 
-  if (keywords.length) {
-    // Pipes mean any of the selected related keywords may match.
-    params.set(
-      "with_keywords",
-      keywords.map((keyword) => keyword.id).join("|"),
-    );
+  if (intent.keywordQuery) {
+    const ids = await getKeywordIds(intent.keywordQuery);
+
+    if (ids.length) {
+      params.with_keywords = ids.join("|");
+    } else if (!intent.genres.length && !intent.yearFrom && !intent.yearTo) {
+      return null;
+    }
   }
 
   if (intent.sortBy === "vote_average.desc") {
-    params.set("vote_count.gte", "20");
+    params["vote_count.gte"] = "20";
   }
 
   const endpoint =
     type === "movie" ? "/discover/movie" : "/discover/tv";
 
-  const response = await tmdbRequest<SearchPage<SearchItem>>(
-    endpoint,
-    params,
-  );
+  const response = await tmdbRequest<TmdbPage>(endpoint, params);
 
-  const results = intent.keywordQuery
-    ? rankContextualItems(
-        response.results ?? [],
-        intent.keywordQuery,
-      )
-    : response.results ?? [];
+  const items = (response.results ?? [])
+    .map((item) => toUnified(item, type))
+    .filter((item): item is UnifiedSearchItem => Boolean(item));
 
   return {
-    ...response,
-    results,
+    page: response.page,
+    results: intent.keywordQuery
+      ? rankUnified(items, intent.keywordQuery)
+      : items,
+    total_pages: response.total_pages,
+    total_results: response.total_results,
   };
 }
 
-async function runSearch(
+async function searchOneType(
   query: string,
-  type: ContentType,
+  type: SearchMode,
   page: number,
-): Promise<SearchPage<SearchItem>> {
-  const intent = parseSearchIntent(query, type);
+): Promise<UnifiedSearchPage> {
+  const contextual = await discoverByIntent(query, type, page);
 
-  // Normal title search. Keep typo recovery for actual titles.
-  if (!intent.hasContext) {
-    return searchWithRecovery(query.trim(), type, page);
-  }
+  if (contextual) return contextual;
 
-  // Person searches use actual cast or director credits.
-  if (intent.personQuery) {
-    const personResults = await getPersonResults(
-      intent,
-      type,
-      page,
-    );
+  const response = await searchMultiWithRecovery(query, page);
 
-    if (personResults) return personResults;
+  const items = response.results
+    .filter((item) => item.media_type === type)
+    .map((item) => toUnified(item, type))
+    .filter((item): item is UnifiedSearchItem => Boolean(item));
 
-    // If TMDB cannot identify the person, do not silently
-    // pretend the person filter worked.
-    return searchWithRecovery(query.trim(), type, page);
-  }
+  return {
+    page: response.page,
+    results: items,
+    total_pages: response.total_pages,
+    total_results: items.length,
+  };
+}
 
-  // A title combined with filters, e.g. "Batman action movies".
-  if (intent.titleQuery) {
-    const titleResults = await searchWithRecovery(
-      intent.titleQuery,
-      type,
-      1,
-    );
+async function runUnifiedSearch(
+  query: string,
+  page: number,
+): Promise<UnifiedSearchPage> {
+  const intentMovie = parseSearchIntent(query, "movie");
+  const intentTv = parseSearchIntent(query, "tv");
 
-    const filtered = titleResults.results.filter((item) =>
-      matchesIntentFilters(item, intent, type),
-    );
+  // Run a person search against both credit collections when
+  // the user has not explicitly narrowed the media type.
+  if (
+    intentMovie.personQuery &&
+    intentMovie.personRole
+  ) {
+    const [movies, shows] = await Promise.all([
+      searchOneType(query, "movie", page),
+      searchOneType(query, "tv", page),
+    ]);
 
-    const ranked = rankSearchResults(
-      filtered,
-      intent.titleQuery,
-    ).map((result) => result.item);
+    const combined = [
+      ...movies.results,
+      ...shows.results,
+    ].sort((a, b) => popularityScore(b) - popularityScore(a));
 
     return {
-      page: 1,
-      results: ranked,
-      total_results: ranked.length,
-      total_pages: ranked.length ? 1 : 0,
+      page,
+      results: combined,
+      total_pages: Math.max(movies.total_pages, shows.total_pages),
+      total_results: movies.total_results + shows.total_results,
     };
   }
 
-  // Genre, year, ranking, and descriptive searches go
-  // through TMDB discovery instead of literal title search.
-  const contextualResults = await getDiscoverResults(
-    intent,
-    type,
+  // For ordinary title searches, use TMDB multi-search once.
+  if (!intentMovie.hasContext && !intentTv.hasContext) {
+    const response = await searchMultiWithRecovery(query, page);
+
+    const results = response.results
+      .map((item) => toUnified(item))
+      .filter((item): item is UnifiedSearchItem => Boolean(item));
+
+    return {
+      page: response.page,
+      results,
+      total_pages: response.total_pages,
+      total_results: results.length
+        ? response.total_results
+        : 0,
+    };
+  }
+
+  const [movies, shows] = await Promise.all([
+    searchOneType(query, "movie", page),
+    searchOneType(query, "tv", page),
+  ]);
+
+  const combined = [
+    ...movies.results,
+    ...shows.results,
+  ].sort((a, b) => popularityScore(b) - popularityScore(a));
+
+  return {
     page,
-  );
+    results: combined,
+    total_pages: Math.max(movies.total_pages, shows.total_pages),
+    total_results: movies.total_results + shows.total_results,
+  };
+}
 
-  if (contextualResults) return contextualResults;
+async function enrichRuntime(
+  item: UnifiedSearchItem,
+): Promise<number | null> {
+  try {
+    const endpoint =
+      item.media_type === "movie"
+        ? `/movie/${item.id}`
+        : `/tv/${item.id}`;
 
-  // Last-resort fallback for descriptions that TMDB's
-  // keyword index cannot resolve.
-  return searchWithRecovery(query.trim(), type, page);
+    const details = await tmdbRequest<{
+      runtime?: number | null;
+      episode_run_time?: number[];
+    }>(endpoint);
+
+    if (item.media_type === "movie") {
+      return details.runtime ?? null;
+    }
+
+    return details.episode_run_time?.[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export const getSearchResults = async (
   query: string,
-  type: ContentType,
-  page: number = 1,
-): ActionResponse<(Search<Movie> | Search<TV>) | null> => {
+  page = 1,
+): ActionResponse<UnifiedSearchPage | null> => {
   try {
-    const normalizedQuery = normalizeSearchText(query);
-
-    if (normalizedQuery.length < 2) {
+    if (normalizeSearchText(query).length < 2) {
       return {
         success: true,
         message: "Enter at least two characters",
@@ -780,15 +651,18 @@ export const getSearchResults = async (
       };
     }
 
-    const result = await runSearch(query, type, page);
+    const result = await runUnifiedSearch(
+      query.trim(),
+      Math.max(1, page),
+    );
 
     return {
       success: true,
-      message: "Search results fetched",
-      data: result as Search<Movie> | Search<TV>,
+      message: "Unified search results fetched",
+      data: result,
     };
   } catch (error) {
-    console.error("Search results error:", error);
+    console.error("Unified search error:", error);
 
     return {
       success: false,
@@ -800,13 +674,10 @@ export const getSearchResults = async (
 
 export const getSearchSuggestions = async (
   query: string,
-  type: ContentType = "movie",
-  limit: number = 10,
+  limit = 8,
 ): ActionResponse<SearchSuggestion[] | null> => {
   try {
-    const normalizedQuery = normalizeSearchText(query);
-
-    if (normalizedQuery.length < 2) {
+    if (normalizeSearchText(query).length < 2) {
       return {
         success: true,
         message: "Enter at least two characters",
@@ -814,29 +685,42 @@ export const getSearchSuggestions = async (
       };
     }
 
-    const result = await runSearch(query, type, 1);
+    const result = await runUnifiedSearch(query.trim(), 1);
+    const items = result.results.slice(
+      0,
+      Math.max(1, Math.min(limit, 12)),
+    );
 
-    const suggestions = result.results
-      .map((item) => ({
-        id: item.id,
-        title: getItemTitle(item),
-        type,
-        score: 1,
-      }))
-      .filter((item) => item.id && item.title)
-      .slice(0, Math.max(1, Math.min(limit, 20)));
+    // Enrich only the first six suggestions to avoid a burst
+    // of detail requests on every autocomplete update.
+    const enriched = await Promise.all(
+      items.map(async (item, index) => ({
+        item,
+        runtime: index < 6 ? await enrichRuntime(item) : null,
+      })),
+    );
+
+    const suggestions = enriched.map(({ item, runtime }) => ({
+      id: item.id,
+      title: item.title,
+      type: item.media_type,
+      poster_path: item.poster_path,
+      year: getDate(item).slice(0, 4),
+      rating: item.vote_average ?? 0,
+      runtime,
+    }));
 
     return {
       success: true,
-      message: "Contextual suggestions fetched",
+      message: "Unified suggestions fetched",
       data: suggestions,
     };
   } catch (error) {
-    console.error("Search suggestions error:", error);
+    console.error("Unified search suggestions error:", error);
 
     return {
       success: false,
-      message: "Error fetching search suggestions",
+      message: "Unable to fetch search suggestions",
       data: null,
     };
   }
