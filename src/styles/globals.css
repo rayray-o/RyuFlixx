@@ -1,3 +1,4 @@
+
 @import "tailwindcss";
 @import "./lightbox.css";
 
@@ -7,6 +8,32 @@
 @source "../../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";
 
 @custom-variant dark (&:is(.dark *));
+
+/*
+  Prevent the browser's default white document background
+  from appearing before the application and theme initialize.
+*/
+html {
+  min-height: 100%;
+  background-color: #0D0C0F;
+  color-scheme: dark;
+}
+
+html.dark {
+  background-color: #0D0C0F;
+  color-scheme: dark;
+}
+
+html.light {
+  background-color: #FFFFFF;
+  color-scheme: light;
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: transparent;
+}
 
 @theme {
   --animate-shine: shine 3s linear infinite;
@@ -25,11 +52,8 @@
 
 /*
   The default border color has changed to `currentcolor` in Tailwind CSS v4,
-  so we've added these compatibility styles to make sure everything still
-  looks the same as it did with Tailwind CSS v3.
-
-  If we ever want to remove these styles, we need to add an explicit border
-  color utility to any element that depends on these defaults.
+  so we've added these compatibility styles to make sure everything
+  still looks the same as it did with Tailwind CSS v3.
 */
 @layer base {
   *,
