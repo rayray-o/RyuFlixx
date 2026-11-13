@@ -5,6 +5,7 @@ import { env } from "@/utils/env";
 import { ActionResponse } from "@/types";
 import {
   generateSearchVariants,
+  getSearchTitleMatchScore,
   normalizeSearchText,
   rankSearchResults,
 } from "@/utils/search";
@@ -160,9 +161,7 @@ function toUnified(
   };
 }
 
-function getDate(
-  item: UnifiedSearchItem,
-): string {
+function getDate(item: UnifiedSearchItem): string {
   return item.media_type === "movie"
     ? item.release_date ?? ""
     : item.first_air_date ?? "";
@@ -209,14 +208,13 @@ function rankUnified(
   items: UnifiedSearchItem[],
   query: string,
 ): UnifiedSearchItem[] {
-  const ranked = rankSearchResults(items, query);
-
-  return ranked
-    .map(({ item, score }) => ({
+  return rankSearchResults(items, query)
+    .map(({ item, score, match }) => ({
       item,
       score:
-        score * 0.78 +
-        popularityScore(item) * 0.22,
+        score * 0.9 +
+        popularityScore(item) * 0.1 +
+        (match === "exact" ? 0.08 : 0),
     }))
     .sort((a, b) => b.score - a.score)
     .map(({ item }) => item);
@@ -240,13 +238,52 @@ async function searchMultiWithRecovery(
 ): Promise<TmdbPage> {
   const original = await searchMulti(query, page);
 
-  if (page !== 1 || original.results.length >= 5) {
-    return original;
+  if (page !== 1) return original;
+
+  const originalMedia = original.results.filter(
+    (item) =>
+      item.media_type === "movie" ||
+      item.media_type === "tv",
+  );
+
+  const bestOriginalMatch = originalMedia.reduce(
+    (best, item) =>
+      Math.max(
+        best,
+        getSearchTitleMatchScore(
+          {
+            title: titleOf(item),
+            original_title: item.original_title,
+            original_name: item.original_name,
+            overview: item.overview,
+          },
+          query,
+        ),
+      ),
+    0,
+  );
+
+  // Don't waste recovery requests on an already strong title match.
+  // A result count alone is not evidence of relevance.
+  if (bestOriginalMatch >= 0.94) {
+    return {
+      ...original,
+      results: rankSearchResults(originalMedia, query).map(
+        ({ item }) => item,
+      ),
+    };
   }
 
-  const variants = generateSearchVariants(query, 12);
+  const variants = generateSearchVariants(query, 24);
 
-  if (!variants.length) return original;
+  if (!variants.length) {
+    return {
+      ...original,
+      results: rankSearchResults(originalMedia, query).map(
+        ({ item }) => item,
+      ),
+    };
+  }
 
   const recovered = await Promise.all(
     variants.map(async (variant) => {
@@ -260,31 +297,45 @@ async function searchMultiWithRecovery(
 
   const unique = new Map<string, TmdbResult>();
 
-  for (const item of original.results) {
-    if (item.media_type === "movie" || item.media_type === "tv") {
-      unique.set(`${item.media_type}-${item.id}`, item);
-    }
+  for (const item of originalMedia) {
+    unique.set(`${item.media_type}-${item.id}`, item);
   }
 
   for (const result of recovered) {
     for (const item of result?.results ?? []) {
-      if (item.media_type === "movie" || item.media_type === "tv") {
-        const key = `${item.media_type}-${item.id}`;
-        if (!unique.has(key)) unique.set(key, item);
+      if (
+        item.media_type !== "movie" &&
+        item.media_type !== "tv"
+      ) {
+        continue;
+      }
+
+      const key = `${item.media_type}-${item.id}`;
+
+      if (!unique.has(key)) {
+        unique.set(key, item);
       }
     }
   }
 
-  const results = rankSearchResults(
-    [...unique.values()],
-    query,
-  ).map(({ item }) => item);
+  const merged = [...unique.values()];
+
+  // Rank by the user's original spelling, not by the generated variant.
+  const ranked = rankSearchResults(merged, query).map(
+    ({ item }) => item,
+  );
 
   return {
     ...original,
-    results,
-    total_results: Math.max(original.total_results, results.length),
-    total_pages: Math.max(original.total_pages, results.length ? 1 : 0),
+    results: ranked,
+    total_results: Math.max(
+      original.total_results,
+      ranked.length,
+    ),
+    total_pages: Math.max(
+      original.total_pages,
+      ranked.length ? 1 : 0,
+    ),
   };
 }
 
@@ -305,21 +356,29 @@ async function resolvePerson(
   const ranked = (response.results ?? [])
     .map((person) => {
       const candidate = normalizeSearchText(person.name);
+
       let score =
         candidate === wanted
           ? 1
-          : candidate.includes(wanted) || wanted.includes(candidate)
+          : candidate.includes(wanted) ||
+              wanted.includes(candidate)
             ? 0.85
             : 0;
 
       const department =
         person.known_for_department?.toLowerCase() ?? "";
 
-      if (role === "director" && department.includes("direct")) {
+      if (
+        role === "director" &&
+        department.includes("direct")
+      ) {
         score += 0.08;
       }
 
-      if (role === "cast" && department.includes("acting")) {
+      if (
+        role === "cast" &&
+        department.includes("acting")
+      ) {
         score += 0.08;
       }
 
@@ -350,20 +409,29 @@ async function getPersonItems(
   const selected =
     role === "director"
       ? (credits.crew ?? []).filter((credit) =>
-          (credit.job ?? "").toLowerCase().includes("director"),
+          (credit.job ?? "")
+            .toLowerCase()
+            .includes("director"),
         )
       : credits.cast ?? [];
 
   return selected
     .map((item) => toUnified(item, type))
-    .filter((item): item is UnifiedSearchItem => Boolean(item));
+    .filter(
+      (item): item is UnifiedSearchItem => Boolean(item),
+    );
 }
 
-async function getKeywordIds(query: string): Promise<number[]> {
+async function getKeywordIds(
+  query: string,
+): Promise<number[]> {
   const phrases = new Set<string>([query]);
 
   const expansions: Record<string, string[]> = {
-    "artificial intelligence": ["artificial intelligence", "robot"],
+    "artificial intelligence": [
+      "artificial intelligence",
+      "robot",
+    ],
     "time travel": ["time travel", "time loop"],
     lonely: ["loneliness", "isolation"],
     loneliness: ["loneliness", "isolation"],
@@ -431,12 +499,17 @@ async function discoverByIntent(
 
     const ranked = rankUnified(
       filtered,
-      intent.keywordQuery ?? intent.titleQuery ?? query,
+      intent.keywordQuery ??
+        intent.titleQuery ??
+        query,
     );
 
     return {
       page,
-      results: ranked.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+      results: ranked.slice(
+        (page - 1) * PAGE_SIZE,
+        page * PAGE_SIZE,
+      ),
       total_results: ranked.length,
       total_pages: Math.ceil(ranked.length / PAGE_SIZE),
     };
@@ -451,14 +524,19 @@ async function discoverByIntent(
     const items = titleResults.results
       .filter((item) => item.media_type === type)
       .map((item) => toUnified(item, type))
-      .filter((item): item is UnifiedSearchItem => Boolean(item))
+      .filter(
+        (item): item is UnifiedSearchItem => Boolean(item),
+      )
       .filter((item) => matchesIntent(item, intent));
 
     const ranked = rankUnified(items, intent.titleQuery);
 
     return {
       page,
-      results: ranked.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+      results: ranked.slice(
+        (page - 1) * PAGE_SIZE,
+        page * PAGE_SIZE,
+      ),
       total_results: ranked.length,
       total_pages: Math.ceil(ranked.length / PAGE_SIZE),
     };
@@ -480,14 +558,18 @@ async function discoverByIntent(
   }
 
   const dateField =
-    type === "movie" ? "primary_release_date" : "first_air_date";
+    type === "movie"
+      ? "primary_release_date"
+      : "first_air_date";
 
   if (intent.yearFrom) {
-    params[`${dateField}.gte`] = `${intent.yearFrom}-01-01`;
+    params[`${dateField}.gte`] =
+      `${intent.yearFrom}-01-01`;
   }
 
   if (intent.yearTo) {
-    params[`${dateField}.lte`] = `${intent.yearTo}-12-31`;
+    params[`${dateField}.lte`] =
+      `${intent.yearTo}-12-31`;
   }
 
   if (intent.keywordQuery) {
@@ -495,7 +577,11 @@ async function discoverByIntent(
 
     if (ids.length) {
       params.with_keywords = ids.join("|");
-    } else if (!intent.genres.length && !intent.yearFrom && !intent.yearTo) {
+    } else if (
+      !intent.genres.length &&
+      !intent.yearFrom &&
+      !intent.yearTo
+    ) {
       return null;
     }
   }
@@ -505,13 +591,20 @@ async function discoverByIntent(
   }
 
   const endpoint =
-    type === "movie" ? "/discover/movie" : "/discover/tv";
+    type === "movie"
+      ? "/discover/movie"
+      : "/discover/tv";
 
-  const response = await tmdbRequest<TmdbPage>(endpoint, params);
+  const response = await tmdbRequest<TmdbPage>(
+    endpoint,
+    params,
+  );
 
   const items = (response.results ?? [])
     .map((item) => toUnified(item, type))
-    .filter((item): item is UnifiedSearchItem => Boolean(item));
+    .filter(
+      (item): item is UnifiedSearchItem => Boolean(item),
+    );
 
   return {
     page: response.page,
@@ -528,16 +621,25 @@ async function searchOneType(
   type: SearchMode,
   page: number,
 ): Promise<UnifiedSearchPage> {
-  const contextual = await discoverByIntent(query, type, page);
+  const contextual = await discoverByIntent(
+    query,
+    type,
+    page,
+  );
 
   if (contextual) return contextual;
 
-  const response = await searchMultiWithRecovery(query, page);
+  const response = await searchMultiWithRecovery(
+    query,
+    page,
+  );
 
   const items = response.results
     .filter((item) => item.media_type === type)
     .map((item) => toUnified(item, type))
-    .filter((item): item is UnifiedSearchItem => Boolean(item));
+    .filter(
+      (item): item is UnifiedSearchItem => Boolean(item),
+    );
 
   return {
     page: response.page,
@@ -547,6 +649,65 @@ async function searchOneType(
   };
 }
 
+async function getStandalonePersonResults(
+  query: string,
+): Promise<UnifiedSearchItem[] | null> {
+  const normalized = normalizeSearchText(query);
+  const words = normalized.split(" ").filter(Boolean);
+
+  // Avoid treating ordinary one-word queries or long descriptions as names.
+  if (words.length < 2 || words.length > 4) {
+    return null;
+  }
+
+  const [castPerson, directorPerson] = await Promise.all([
+    resolvePerson(query, "cast"),
+    resolvePerson(query, "director"),
+  ]);
+
+  const exactCast =
+    castPerson &&
+    normalizeSearchText(castPerson.name) === normalized
+      ? castPerson
+      : null;
+
+  const exactDirector =
+    directorPerson &&
+    normalizeSearchText(directorPerson.name) === normalized
+      ? directorPerson
+      : null;
+
+  const person = exactCast ?? exactDirector;
+  if (!person) return null;
+
+  const role: "cast" | "director" =
+    exactDirector &&
+    person.id === exactDirector.id &&
+    person.known_for_department?.toLowerCase().includes("direct")
+      ? "director"
+      : "cast";
+
+  const [movies, shows] = await Promise.all([
+    getPersonItems(query, role, "movie"),
+    getPersonItems(query, role, "tv"),
+  ]);
+
+  const combined = [...movies, ...shows];
+
+  const unique = new Map<string, UnifiedSearchItem>();
+
+  for (const item of combined) {
+    unique.set(
+      `${item.media_type}-${item.id}`,
+      item,
+    );
+  }
+
+  return [...unique.values()].sort(
+    (a, b) => popularityScore(b) - popularityScore(a),
+  );
+}
+
 async function runUnifiedSearch(
   query: string,
   page: number,
@@ -554,8 +715,6 @@ async function runUnifiedSearch(
   const intentMovie = parseSearchIntent(query, "movie");
   const intentTv = parseSearchIntent(query, "tv");
 
-  // Run a person search against both credit collections when
-  // the user has not explicitly narrowed the media type.
   if (
     intentMovie.personQuery &&
     intentMovie.personRole
@@ -568,31 +727,59 @@ async function runUnifiedSearch(
     const combined = [
       ...movies.results,
       ...shows.results,
-    ].sort((a, b) => popularityScore(b) - popularityScore(a));
+    ].sort(
+      (a, b) => popularityScore(b) - popularityScore(a),
+    );
 
     return {
       page,
       results: combined,
-      total_pages: Math.max(movies.total_pages, shows.total_pages),
-      total_results: movies.total_results + shows.total_results,
+      total_pages: Math.max(
+        movies.total_pages,
+        shows.total_pages,
+      ),
+      total_results:
+        movies.total_results + shows.total_results,
     };
   }
 
-  // For ordinary title searches, use TMDB multi-search once.
-  if (!intentMovie.hasContext && !intentTv.hasContext) {
-    const response = await searchMultiWithRecovery(query, page);
+  if (
+    !intentMovie.hasContext &&
+    !intentTv.hasContext
+  ) {
+    // Standalone exact person-name search.
+    if (page === 1) {
+      const personResults =
+        await getStandalonePersonResults(query);
+
+      if (personResults?.length) {
+        return {
+          page: 1,
+          results: personResults.slice(0, PAGE_SIZE),
+          total_pages: Math.ceil(
+            personResults.length / PAGE_SIZE,
+          ),
+          total_results: personResults.length,
+        };
+      }
+    }
+
+    const response = await searchMultiWithRecovery(
+      query,
+      page,
+    );
 
     const results = response.results
       .map((item) => toUnified(item))
-      .filter((item): item is UnifiedSearchItem => Boolean(item));
+      .filter(
+        (item): item is UnifiedSearchItem => Boolean(item),
+      );
 
     return {
       page: response.page,
       results,
       total_pages: response.total_pages,
-      total_results: results.length
-        ? response.total_results
-        : 0,
+      total_results: response.total_results,
     };
   }
 
@@ -604,13 +791,19 @@ async function runUnifiedSearch(
   const combined = [
     ...movies.results,
     ...shows.results,
-  ].sort((a, b) => popularityScore(b) - popularityScore(a));
+  ].sort(
+    (a, b) => popularityScore(b) - popularityScore(a),
+  );
 
   return {
     page,
     results: combined,
-    total_pages: Math.max(movies.total_pages, shows.total_pages),
-    total_results: movies.total_results + shows.total_results,
+    total_pages: Math.max(
+      movies.total_pages,
+      shows.total_pages,
+    ),
+    total_results:
+      movies.total_results + shows.total_results,
   };
 }
 
@@ -685,30 +878,37 @@ export const getSearchSuggestions = async (
       };
     }
 
-    const result = await runUnifiedSearch(query.trim(), 1);
+    const result = await runUnifiedSearch(
+      query.trim(),
+      1,
+    );
+
     const items = result.results.slice(
       0,
       Math.max(1, Math.min(limit, 12)),
     );
 
-    // Enrich only the first six suggestions to avoid a burst
-    // of detail requests on every autocomplete update.
     const enriched = await Promise.all(
       items.map(async (item, index) => ({
         item,
-        runtime: index < 6 ? await enrichRuntime(item) : null,
+        runtime:
+          index < 6
+            ? await enrichRuntime(item)
+            : null,
       })),
     );
 
-    const suggestions = enriched.map(({ item, runtime }) => ({
-      id: item.id,
-      title: item.title,
-      type: item.media_type,
-      poster_path: item.poster_path,
-      year: getDate(item).slice(0, 4),
-      rating: item.vote_average ?? 0,
-      runtime,
-    }));
+    const suggestions = enriched.map(
+      ({ item, runtime }) => ({
+        id: item.id,
+        title: item.title,
+        type: item.media_type,
+        poster_path: item.poster_path,
+        year: getDate(item).slice(0, 4),
+        rating: item.vote_average ?? 0,
+        runtime,
+      }),
+    );
 
     return {
       success: true,
@@ -716,7 +916,10 @@ export const getSearchSuggestions = async (
       data: suggestions,
     };
   } catch (error) {
-    console.error("Unified search suggestions error:", error);
+    console.error(
+      "Unified search suggestions error:",
+      error,
+    );
 
     return {
       success: false,
