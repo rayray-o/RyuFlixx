@@ -1,3 +1,4 @@
+
 import type { Metadata, Viewport } from "next";
 
 import { siteConfig } from "@/config/site";
@@ -89,7 +90,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html suppressHydrationWarning lang="en">
+    <html
+      suppressHydrationWarning
+      lang="en"
+    >
       <body
         className={cn(
           "antialiased select-none",
@@ -102,7 +106,14 @@ export default function RootLayout({
 
         <PopAds />
 
-        <Suspense>
+        <Suspense
+          fallback={
+            <div
+              aria-hidden="true"
+              className="min-h-screen w-full bg-[#0D0C0F]"
+            />
+          }
+        >
           <NuqsAdapter>
             <Providers>
               <MangaParallaxBackground />
@@ -135,4 +146,4 @@ export default function RootLayout({
       </body>
     </html>
   );
-        }
+}
