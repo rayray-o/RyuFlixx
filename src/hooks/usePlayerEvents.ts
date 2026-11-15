@@ -3,9 +3,19 @@
 
 import { ContentType } from "@/types";
 import { saveWatchProgress } from "@/utils/localStorage";
-import { type RefObject, useCallback, useEffect, useRef } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 
-export type PlayerEventType = "play" | "pause" | "seeked" | "ended" | "timeupdate";
+export type PlayerEventType =
+  | "play"
+  | "pause"
+  | "seeked"
+  | "ended"
+  | "timeupdate";
 
 export interface BasePlayerEventEnvelope<T = any> {
   type: string;
@@ -24,7 +34,8 @@ export interface UnifiedPlayerEventData {
 }
 
 export interface PlayerAdapter<
-  RawMessage extends BasePlayerEventEnvelope<any> = BasePlayerEventEnvelope<any>
+  RawMessage extends BasePlayerEventEnvelope<any> =
+    BasePlayerEventEnvelope<any>
 > {
   origin: `https://${string}`;
   parse: (raw: RawMessage) => UnifiedPlayerEventData | null;
@@ -310,9 +321,6 @@ function parseGenericPlayerMessage(
   };
 }
 
-/**
- * Vidy-specific adapter.
- */
 function parseVidyMessage(
   raw: Record<string, any>,
 ): UnifiedPlayerEventData | null {
@@ -515,6 +523,7 @@ const PLAYER_ORIGINS = [
   "https://vidsrc.ru",
   "https://vidsrc.su",
   "https://vidsrc.ir",
+  "https://vidsrcme.ir",
   "https://vidsrcme.ru",
   "https://vidsrcme.su",
   "https://vidsrc-me.ru",
@@ -604,6 +613,7 @@ export const playerAdapters = Object.fromEntries([
     "https://vidsrc.ru",
     "https://vidsrc.su",
     "https://vidsrc.ir",
+    "https://vidsrcme.ir",
     "https://vidsrcme.ru",
     "https://vidsrcme.su",
     "https://vidsrc-me.ru",
@@ -923,10 +933,7 @@ export function usePlayerEvents(
         visibility,
       );
 
-      window.removeEventListener(
-        "pagehide",
-        saveLatest,
-      );
+      window.removeEventListener("pagehide", saveLatest);
     };
   }, [saveLocalProgress]);
 
