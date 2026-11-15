@@ -35,6 +35,8 @@ type ResumeProvider =
   | "vidsrc"
   | "videasy"
   | "vidcore"
+  | "vidstuck"
+  | "2embed"
   | null;
 
 function normalizeResumePosition(
@@ -51,10 +53,6 @@ function normalizeResumePosition(
   return Math.floor(Math.min(value, 8 * 60 * 60));
 }
 
-/**
- * Each provider has its own documented resume mechanism.
- * Unknown providers deliberately receive no guessed parameter.
- */
 function getResumeProvider(source: string): ResumeProvider {
   try {
     const host = new URL(source).hostname.toLowerCase();
@@ -77,10 +75,21 @@ function getResumeProvider(source: string): ResumeProvider {
       return "vidrift";
     }
 
+    // VidSrc domains used by the current server list.
     if (
-      host === "vidsrc.sh" ||
-      host === "vidsrc2.ru" ||
-      host === "vidsrc.ir"
+      [
+        "vidsrc.sh",
+        "vidsrc2.ru",
+        "vidsrc.ir",
+        "vidsrcme.ir",
+        "vidsrcme.ru",
+        "vidsrcme.su",
+        "vidsrc-me.ru",
+        "vidsrc-me.ir",
+        "vidsrc.in",
+        "vidsrc.ru",
+        "vidsrc.su",
+      ].includes(host)
     ) {
       return "vidsrc";
     }
@@ -91,6 +100,21 @@ function getResumeProvider(source: string): ResumeProvider {
 
     if (host === "vidcore.org") {
       return "vidcore";
+    }
+
+    // Experimental timestamp support for these providers.
+    if (
+      host === "vidstuck.cc" ||
+      host === "vidstuck.xyz"
+    ) {
+      return "vidstuck";
+    }
+
+    if (
+      host === "2embed.cc" ||
+      host === "www.2embed.cc"
+    ) {
+      return "2embed";
     }
 
     return null;
@@ -108,7 +132,7 @@ function buildResumableSource(
     const provider = getResumeProvider(source);
     const timestamp = normalizeResumePosition(position);
 
-    // Never leave a stale parameter from another provider.
+    // Remove stale timestamps before applying the current one.
     url.searchParams.delete("progress");
     url.searchParams.delete("startAt");
     url.searchParams.delete("t");
@@ -135,6 +159,8 @@ function buildResumableSource(
       case "vidsrc":
       case "videasy":
       case "vidcore":
+      case "vidstuck":
+      case "2embed":
         url.searchParams.set(
           "startAt",
           String(timestamp),
@@ -142,11 +168,10 @@ function buildResumableSource(
         break;
 
       case "vidrift":
-        // VidRift uses postMessage, not a URL parameter.
+        // VidRift uses postMessage rather than a URL timestamp.
         break;
 
       default:
-        // No undocumented generic fallback.
         break;
     }
 
@@ -225,8 +250,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     (element: HTMLIFrameElement | null) => {
       internalIframeRef.current = element;
 
-      // React calls this with null on unmount and with the
-      // new iframe on mount. Keep the shared ref in sync.
       if (iframeRef) {
         iframeRef.current = element;
       }
@@ -242,7 +265,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     resumeTimersRef.current = [];
   }, []);
 
-  // Reset media-specific handoff state when the media changes.
+  // Reset handoff state when the media changes.
   useEffect(() => {
     if (fallbackKeyRef.current !== serverMemoryKey) {
       fallbackKeyRef.current = serverMemoryKey;
@@ -252,7 +275,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     }
   }, [serverMemoryKey, safeIndex]);
 
-  // Restore the remembered server.
+  // Restore remembered server.
   useEffect(() => {
     if (
       restoredMemoryRef.current ||
@@ -302,7 +325,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     onServerChange,
   ]);
 
-  // Remember the selected server.
+  // Remember selected server.
   useEffect(() => {
     if (!currentServer || !serverMemoryKey) return;
 
@@ -320,7 +343,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     serverFallbackMemoryKey,
   ]);
 
-  // Persist server preference when leaving the page.
+  // Persist server preference when leaving.
   useEffect(() => {
     const saveCurrentServer = () => {
       if (!currentServer || !serverMemoryKey) return;
@@ -370,8 +393,7 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     serverFallbackMemoryKey,
   ]);
 
-  // Checkpoint progress whenever the selected server changes.
-  // This also catches changes made through the source drawer.
+  // Checkpoint progress when the server changes.
   useEffect(() => {
     if (
       previousServerIndexRef.current === safeIndex
@@ -411,26 +433,13 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     setLoading(true);
     clearResumeTimers();
 
-    /*
-     * IMPORTANT:
-     * Do not set iframeRef.current = null here.
-     *
-     * React has already attached the new iframe through
-     * setIframeRef by the time this effect runs. Clearing
-     * it here disables usePlayerEvents' active-frame check,
-     * allowing delayed messages from old servers to overwrite
-     * the new server's playback position.
-     *
-     * The callback ref above handles iframe changes safely.
-     */
-
     return clearResumeTimers;
   }, [
     iframeSource,
     clearResumeTimers,
   ]);
 
-  // VidRift's documented resume API is postMessage.
+  // VidRift uses postMessage for resume.
   const sendVidRiftResume = useCallback(
     (frame: HTMLIFrameElement) => {
       if (
@@ -567,7 +576,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
               onClick={() => {
                 if (active) return;
 
-                // Save the outgoing server before changing iframe.
                 flushProgress?.();
 
                 const latestPosition =
