@@ -4,7 +4,6 @@
 import Link from "next/link";
 import { cn } from "@/utils/helpers";
 import {
-  ArrowLeft,
   List,
   Next,
   Prev,
@@ -50,23 +49,15 @@ const TvShowPlayerHeader: React.FC<
     : undefined;
 
   const controlClass =
-    "flex h-[54px] min-w-0 items-center justify-center gap-2 rounded-2xl border border-white/[0.10] bg-white/[0.045] px-2 text-white/70 backdrop-blur-xl transition-all duration-200 hover:border-white/20 hover:bg-white/[0.09] hover:text-white active:scale-[0.97]";
+    "flex h-[50px] min-w-0 items-center justify-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.045] px-2 text-white/70 backdrop-blur-xl transition-all duration-200 hover:border-white/20 hover:bg-white/[0.09] hover:text-white active:scale-[0.97]";
 
   const disabledClass =
     "pointer-events-none opacity-25";
 
   return (
-    <section className="mt-7 mb-10 w-full px-0">
-      {/* Minimal episode identification */}
+    <section className="mt-6 mb-8 w-full px-3 sm:px-0">
+      {/* Episode identification */}
       <div className="mb-4 flex min-w-0 items-center gap-3 px-1">
-        <Link
-          href={`/tv/${id}`}
-          aria-label="Back to show"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/[0.10] bg-white/[0.045] text-white/65 backdrop-blur-xl transition-all duration-200 hover:border-white/20 hover:bg-white/[0.09] hover:text-white active:scale-95"
-        >
-          <ArrowLeft size={19} />
-        </Link>
-
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-white/40">
             {seriesName}
@@ -74,7 +65,7 @@ const TvShowPlayerHeader: React.FC<
             {seasonName}
           </p>
 
-          <p className="mt-0.5 truncate text-sm font-semibold tracking-tight text-white/90">
+          <p className="mt-0.5 truncate text-sm font-semibold tracking-tight text-white/90 sm:text-base">
             {episode.name}
           </p>
         </div>
@@ -86,7 +77,7 @@ const TvShowPlayerHeader: React.FC<
         </span>
       </div>
 
-      {/* Compact player navigation */}
+      {/* Neutral navigation controls */}
       <div className="grid grid-cols-3 gap-2">
         {previousHref ? (
           <Link
@@ -94,10 +85,7 @@ const TvShowPlayerHeader: React.FC<
             aria-label="Previous episode"
             className={controlClass}
           >
-            <Prev
-              size={19}
-              className="shrink-0"
-            />
+            <Prev size={18} className="shrink-0" />
             <span className="truncate text-xs font-semibold sm:text-sm">
               Previous
             </span>
@@ -107,7 +95,7 @@ const TvShowPlayerHeader: React.FC<
             aria-disabled="true"
             className={cn(controlClass, disabledClass)}
           >
-            <Prev size={19} />
+            <Prev size={18} />
             <span className="truncate text-xs font-semibold sm:text-sm">
               Previous
             </span>
@@ -117,15 +105,9 @@ const TvShowPlayerHeader: React.FC<
         <button
           type="button"
           onClick={onOpenEpisode}
-          className={cn(
-            controlClass,
-            "border-warning/25 bg-warning/[0.07] text-warning hover:border-warning/40 hover:bg-warning/[0.13] hover:text-warning",
-          )}
+          className={controlClass}
         >
-          <List
-            size={19}
-            className="shrink-0"
-          />
+          <List size={18} className="shrink-0" />
           <span className="truncate text-xs font-semibold sm:text-sm">
             Episodes
           </span>
@@ -140,10 +122,7 @@ const TvShowPlayerHeader: React.FC<
             <span className="truncate text-xs font-semibold sm:text-sm">
               Next
             </span>
-            <Next
-              size={19}
-              className="shrink-0"
-            />
+            <Next size={18} className="shrink-0" />
           </Link>
         ) : (
           <div
@@ -153,7 +132,7 @@ const TvShowPlayerHeader: React.FC<
             <span className="truncate text-xs font-semibold sm:text-sm">
               Next
             </span>
-            <Next size={19} />
+            <Next size={18} />
           </div>
         )}
       </div>
