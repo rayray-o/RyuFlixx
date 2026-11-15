@@ -1,23 +1,28 @@
+
 "use client";
 
 import { siteConfig } from "@/config/site";
 import { cn } from "@/utils/helpers";
 import { getTvShowPlayers } from "@/utils/players";
 import { setTvContinuation } from "@/utils/localStorage";
-import { useDisclosure, useDocumentTitle, useIdle } from "@mantine/hooks";
+import {
+  useDisclosure,
+  useDocumentTitle,
+} from "@mantine/hooks";
 import dynamic from "next/dynamic";
 import { parseAsInteger, useQueryState } from "nuqs";
 import { memo, useCallback, useRef } from "react";
 import type { Episode, TvShowDetails } from "tmdb-ts";
-import useBreakpoints from "@/hooks/useBreakpoints";
 import { SpacingClasses } from "@/utils/constants";
 import { usePlayerEvents } from "@/hooks/usePlayerEvents";
 import WatchPlayer from "@/components/WatchPlayer";
 import { useRouter } from "next/navigation";
 
 const TvShowPlayerHeader = dynamic(() => import("./Header"));
-const TvShowPlayerSourceSelection = dynamic(() => import("./SourceSelection"));
-const TvShowPlayerEpisodeSelection = dynamic(() => import("./EpisodeSelection"));
+
+const TvShowPlayerEpisodeSelection = dynamic(
+  () => import("./EpisodeSelection"),
+);
 
 export interface TvShowPlayerProps {
   tv: TvShowDetails;
@@ -36,19 +41,41 @@ export interface TvShowPlayerProps {
 }
 
 const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
-  tv, id, episode, episodes, startAt = 0, nextEpisode, ...props
+  tv,
+  id,
+  episode,
+  episodes,
+  startAt = 0,
+  nextEpisode,
+  ...props
 }) => {
   const router = useRouter();
-  const { mobile } = useBreakpoints();
-  const players = getTvShowPlayers(id, episode.season_number, episode.episode_number, startAt);
-  const idle = useIdle(3000);
-  const [sourceOpened, sourceHandlers] = useDisclosure(false);
-  const [episodeOpened, episodeHandlers] = useDisclosure(false);
-  const [selectedSource, setSelectedSource] = useQueryState<number>("src", parseAsInteger.withDefault(0));
-  const playerFrameRef = useRef<HTMLIFrameElement | null>(null);
+
+  const [episodeOpened, episodeHandlers] =
+    useDisclosure(false);
+
+  const [selectedSource, setSelectedSource] =
+    useQueryState<number>(
+      "src",
+      parseAsInteger.withDefault(0),
+    );
+
+  const playerFrameRef =
+    useRef<HTMLIFrameElement | null>(null);
+
   const transitioningRef = useRef(false);
 
-  const { getCurrentTime, flushProgress } = usePlayerEvents({
+  const players = getTvShowPlayers(
+    id,
+    episode.season_number,
+    episode.episode_number,
+    startAt,
+  );
+
+  const {
+    getCurrentTime,
+    flushProgress,
+  } = usePlayerEvents({
     saveHistory: true,
     playerFrameRef,
     metadata: {
@@ -61,35 +88,65 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
       vote_average: tv.vote_average ?? 0,
       season: episode.season_number,
       episode: episode.episode_number,
-      expectedDuration: episode.runtime && episode.runtime > 0 ? episode.runtime * 60 : undefined,
+      expectedDuration:
+        episode.runtime && episode.runtime > 0
+          ? episode.runtime * 60
+          : undefined,
     },
+
     onEnded: useCallback(() => {
       if (transitioningRef.current) return;
+
       if (!nextEpisode) {
-        setTvContinuation({ mediaId: id, season: episode.season_number, episode: episode.episode_number });
+        setTvContinuation({
+          mediaId: id,
+          season: episode.season_number,
+          episode: episode.episode_number,
+        });
         return;
       }
+
       transitioningRef.current = true;
-      setTvContinuation({ mediaId: id, season: nextEpisode.season_number, episode: nextEpisode.episode_number });
-      router.push(`/tv/${id}/${nextEpisode.season_number}/${nextEpisode.episode_number}/player?src=${selectedSource}`);
-    }, [id, episode, nextEpisode, router, selectedSource]),
+
+      setTvContinuation({
+        mediaId: id,
+        season: nextEpisode.season_number,
+        episode: nextEpisode.episode_number,
+      });
+
+      router.push(
+        `/tv/${id}/${nextEpisode.season_number}/${nextEpisode.episode_number}/player?src=${selectedSource}`,
+      );
+    }, [
+      id,
+      episode,
+      nextEpisode,
+      router,
+      selectedSource,
+    ]),
   });
 
-  useDocumentTitle(`Play ${props.seriesName} - ${props.seasonName} - ${episode.name} | ${siteConfig.name}`);
-  const safeSelectedSource = players.length > 0 ? Math.min(Math.max(selectedSource, 0), players.length - 1) : 0;
+  useDocumentTitle(
+    `Play ${props.seriesName} - ${props.seasonName} - ${episode.name} | ${siteConfig.name}`,
+  );
+
+  const safeSelectedSource =
+    players.length > 0
+      ? Math.min(
+          Math.max(selectedSource, 0),
+          players.length - 1,
+        )
+      : 0;
 
   return (
     <>
-      <div className={cn("relative", SpacingClasses.reset)}>
-        <TvShowPlayerHeader
-          id={id}
-          episode={episode}
-          hidden={idle && !mobile}
-          selectedSource={safeSelectedSource}
-          onOpenSource={sourceHandlers.open}
-          onOpenEpisode={episodeHandlers.open}
-          {...props}
-        />
+      <div
+        className={cn(
+          "relative flex w-full flex-col",
+          SpacingClasses.reset,
+        )}
+      >
+        {/* Video and existing server selector */}
         <WatchPlayer
           title={`${props.seriesName} — ${props.seasonName} — ${episode.name}`}
           servers={players}
@@ -102,9 +159,26 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
           serverFallbackMemoryKey={`tv:${id}`}
           resumeAt={startAt}
         />
+
+        {/* Player actions: deliberately placed BELOW the server list */}
+        <TvShowPlayerHeader
+          id={id}
+          episode={episode}
+          selectedSource={safeSelectedSource}
+          onOpenEpisode={episodeHandlers.open}
+          {...props}
+        />
       </div>
-      <TvShowPlayerSourceSelection opened={sourceOpened} onClose={sourceHandlers.close} players={players} selectedSource={safeSelectedSource} setSelectedSource={setSelectedSource} />
-      <TvShowPlayerEpisodeSelection id={id} opened={episodeOpened} onClose={episodeHandlers.close} episodes={episodes} currentSeason={episode.season_number} totalSeasons={tv.number_of_seasons ?? 1} />
+
+      {/* Episode drawer */}
+      <TvShowPlayerEpisodeSelection
+        id={id}
+        opened={episodeOpened}
+        onClose={episodeHandlers.close}
+        episodes={episodes}
+        currentSeason={episode.season_number}
+        totalSeasons={tv.number_of_seasons ?? 1}
+      />
     </>
   );
 };
