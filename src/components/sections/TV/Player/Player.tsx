@@ -17,6 +17,8 @@ import { SpacingClasses } from "@/utils/constants";
 import { usePlayerEvents } from "@/hooks/usePlayerEvents";
 import WatchPlayer from "@/components/WatchPlayer";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft } from "@/utils/icons";
 
 const TvShowPlayerHeader = dynamic(() => import("./Header"));
 
@@ -142,25 +144,35 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
     <>
       <div
         className={cn(
-          "relative flex w-full flex-col",
+          "relative flex w-screen max-w-none flex-col sm:w-full",
           SpacingClasses.reset,
         )}
       >
-        {/* Video and existing server selector */}
-        <WatchPlayer
-          title={`${props.seriesName} — ${props.seasonName} — ${episode.name}`}
-          servers={players}
-          selectedServer={safeSelectedSource}
-          onServerChange={setSelectedSource}
-          getCurrentTime={getCurrentTime}
-          flushProgress={flushProgress}
-          iframeRef={playerFrameRef}
-          serverMemoryKey={`tv:${id}:s${episode.season_number}:e${episode.episode_number}`}
-          serverFallbackMemoryKey={`tv:${id}`}
-          resumeAt={startAt}
-        />
+        {/* Video and original-position back overlay */}
+        <div className="relative w-full">
+          <WatchPlayer
+            title={`${props.seriesName} — ${props.seasonName} — ${episode.name}`}
+            servers={players}
+            selectedServer={safeSelectedSource}
+            onServerChange={setSelectedSource}
+            getCurrentTime={getCurrentTime}
+            flushProgress={flushProgress}
+            iframeRef={playerFrameRef}
+            serverMemoryKey={`tv:${id}:s${episode.season_number}:e${episode.episode_number}`}
+            serverFallbackMemoryKey={`tv:${id}`}
+            resumeAt={startAt}
+          />
 
-        {/* Player actions: deliberately placed BELOW the server list */}
+          <Link
+            href={`/tv/${id}`}
+            aria-label="Back to show"
+            className="absolute left-3 top-3 z-30 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/90 shadow-lg backdrop-blur-md transition-all duration-200 hover:bg-black/65 active:scale-95 sm:left-4 sm:top-4"
+          >
+            <ArrowLeft size={21} />
+          </Link>
+        </div>
+
+        {/* Episode information and navigation */}
         <TvShowPlayerHeader
           id={id}
           episode={episode}
@@ -170,7 +182,6 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
         />
       </div>
 
-      {/* Episode drawer */}
       <TvShowPlayerEpisodeSelection
         id={id}
         opened={episodeOpened}
