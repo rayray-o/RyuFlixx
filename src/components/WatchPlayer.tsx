@@ -75,7 +75,6 @@ function getResumeProvider(source: string): ResumeProvider {
       return "vidrift";
     }
 
-    // VidSrc domains used by the current server list.
     if (
       [
         "vidsrc.sh",
@@ -102,7 +101,6 @@ function getResumeProvider(source: string): ResumeProvider {
       return "vidcore";
     }
 
-    // Experimental timestamp support for these providers.
     if (
       host === "vidstuck.cc" ||
       host === "vidstuck.xyz"
@@ -132,7 +130,6 @@ function buildResumableSource(
     const provider = getResumeProvider(source);
     const timestamp = normalizeResumePosition(position);
 
-    // Remove stale timestamps before applying the current one.
     url.searchParams.delete("progress");
     url.searchParams.delete("startAt");
     url.searchParams.delete("t");
@@ -156,10 +153,18 @@ function buildResumableSource(
         );
         break;
 
+      // Vidstuck's official documentation specifies
+      // progress=<position in seconds>.
+      case "vidstuck":
+        url.searchParams.set(
+          "progress",
+          String(timestamp),
+        );
+        break;
+
       case "vidsrc":
       case "videasy":
       case "vidcore":
-      case "vidstuck":
       case "2embed":
         url.searchParams.set(
           "startAt",
@@ -265,7 +270,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     resumeTimersRef.current = [];
   }, []);
 
-  // Reset handoff state when the media changes.
   useEffect(() => {
     if (fallbackKeyRef.current !== serverMemoryKey) {
       fallbackKeyRef.current = serverMemoryKey;
@@ -275,7 +279,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     }
   }, [serverMemoryKey, safeIndex]);
 
-  // Restore remembered server.
   useEffect(() => {
     if (
       restoredMemoryRef.current ||
@@ -325,7 +328,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     onServerChange,
   ]);
 
-  // Remember selected server.
   useEffect(() => {
     if (!currentServer || !serverMemoryKey) return;
 
@@ -343,7 +345,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     serverFallbackMemoryKey,
   ]);
 
-  // Persist server preference when leaving.
   useEffect(() => {
     const saveCurrentServer = () => {
       if (!currentServer || !serverMemoryKey) return;
@@ -393,7 +394,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     serverFallbackMemoryKey,
   ]);
 
-  // Checkpoint progress when the server changes.
   useEffect(() => {
     if (
       previousServerIndexRef.current === safeIndex
@@ -439,7 +439,6 @@ const WatchPlayer: React.FC<WatchPlayerProps> = ({
     clearResumeTimers,
   ]);
 
-  // VidRift uses postMessage for resume.
   const sendVidRiftResume = useCallback(
     (frame: HTMLIFrameElement) => {
       if (
