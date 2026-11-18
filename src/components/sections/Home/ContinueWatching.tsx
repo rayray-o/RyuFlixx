@@ -1,3 +1,4 @@
+
 "use client";
 
 import SectionTitle from "@/components/ui/other/SectionTitle";
@@ -35,59 +36,27 @@ const ContinueWatching: React.FC = () => {
 
     refresh();
 
-    window.addEventListener(
-      "ryuflix-history-updated",
-      refresh,
-    );
-
-    window.addEventListener(
-      "ryuflix-tv-continuation-updated",
-      refresh,
-    );
-
-    window.addEventListener(
-      "storage",
-      refresh,
-    );
+    window.addEventListener("ryuflix-history-updated", refresh);
+    window.addEventListener("ryuflix-tv-continuation-updated", refresh);
+    window.addEventListener("storage", refresh);
 
     return () => {
-      window.removeEventListener(
-        "ryuflix-history-updated",
-        refresh,
-      );
-
-      window.removeEventListener(
-        "ryuflix-tv-continuation-updated",
-        refresh,
-      );
-
-      window.removeEventListener(
-        "storage",
-        refresh,
-      );
+      window.removeEventListener("ryuflix-history-updated", refresh);
+      window.removeEventListener("ryuflix-tv-continuation-updated", refresh);
+      window.removeEventListener("storage", refresh);
     };
   }, []);
 
   const movieHistory = useMemo(() => {
     return history.filter(
-      (item) =>
-        item.type === "movie" &&
-        !item.completed,
+      (item) => item.type === "movie" && !item.completed,
     );
   }, [history]);
 
   const tvHistory = useMemo<TvResumeItem[]>(() => {
-    /*
-     * History is sorted newest first.
-     *
-     * For each show we keep its newest episode record,
-     * including completed records. This is important because
-     * a completed episode may have a saved "next episode"
-     * continuation.
-     */
-    const latestByShow =
-      new Map<number, LocalWatchHistory>();
+    const latestByShow = new Map<number, LocalWatchHistory>();
 
+    // getWatchHistory() is already sorted newest first.
     for (const item of history) {
       if (item.type !== "tv") continue;
 
@@ -99,23 +68,30 @@ const ContinueWatching: React.FC = () => {
     const result: TvResumeItem[] = [];
 
     for (const media of latestByShow.values()) {
-      const continuation =
-        getTvContinuation(media.media_id);
+      const continuation = getTvContinuation(media.media_id);
 
-      /*
-       * If the latest history entry is completed and we have
-       * a continuation, show the next episode instead.
-       *
-       * Otherwise keep the actual unfinished episode.
-       */
-      if (media.completed && continuation) {
+      if (continuation) {
+        const sameEpisode =
+          continuation.season === media.season &&
+          continuation.episode === media.episode;
+
+        // If the last saved episode is complete and the continuation
+        // points to that exact same episode, there is nothing left to resume.
+        if (media.completed && sameEpisode) {
+          continue;
+        }
+
+        // A different continuation episode takes priority over stale
+        // progress from an earlier episode.
         result.push({
           media,
-          continuation,
+          continuation: sameEpisode ? null : continuation,
         });
+
         continue;
       }
 
+      // Without a continuation, only unfinished episodes belong here.
       if (!media.completed) {
         result.push({
           media,
@@ -127,10 +103,7 @@ const ContinueWatching: React.FC = () => {
     return result;
   }, [history, continuationVersion]);
 
-  const items =
-    content === "movie"
-      ? movieHistory
-      : tvHistory;
+  const items = content === "movie" ? movieHistory : tvHistory;
 
   if (items.length === 0) {
     return null;
@@ -143,11 +116,7 @@ const ContinueWatching: React.FC = () => {
     >
       <div className="z-3 flex flex-col gap-2">
         <SectionTitle
-          color={
-            content === "movie"
-              ? "primary"
-              : "warning"
-          }
+          color={content === "movie" ? "primary" : "warning"}
         >
           Continue Watching
         </SectionTitle>
@@ -162,19 +131,17 @@ const ContinueWatching: React.FC = () => {
                   <ResumeCard media={media} />
                 </div>
               ))
-            : tvHistory.map(
-                ({ media, continuation }) => (
-                  <div
-                    key={media.media_id}
-                    className="embla__slide flex min-h-fit max-w-fit items-center px-1 py-2"
-                  >
-                    <ResumeCard
-                      media={media}
-                      continuation={continuation}
-                    />
-                  </div>
-                ),
-              )}
+            : tvHistory.map(({ media, continuation }) => (
+                <div
+                  key={media.media_id}
+                  className="embla__slide flex min-h-fit max-w-fit items-center px-1 py-2"
+                >
+                  <ResumeCard
+                    media={media}
+                    continuation={continuation}
+                  />
+                </div>
+              ))}
         </Carousel>
       </div>
     </section>
