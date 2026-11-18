@@ -1,3 +1,4 @@
+
 "use client";
 
 import { siteConfig } from "@/config/site";
@@ -10,7 +11,7 @@ import {
 } from "@mantine/hooks";
 import dynamic from "next/dynamic";
 import { parseAsInteger, useQueryState } from "nuqs";
-import { memo, useCallback, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import type { Episode, TvShowDetails } from "tmdb-ts";
 import { SpacingClasses } from "@/utils/constants";
 import { usePlayerEvents } from "@/hooks/usePlayerEvents";
@@ -61,6 +62,16 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
 
   const playerFrameRef = useRef<HTMLIFrameElement | null>(null);
   const transitioningRef = useRef(false);
+
+  // Record the episode the user actually opened, even before
+  // the provider sends its first playback-progress event.
+  useEffect(() => {
+    setTvContinuation({
+      mediaId: id,
+      season: episode.season_number,
+      episode: episode.episode_number,
+    });
+  }, [id, episode.season_number, episode.episode_number]);
 
   const players = getTvShowPlayers(
     id,
