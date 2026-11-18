@@ -1,14 +1,8 @@
-
 "use client";
 
 import { ContentType } from "@/types";
 import { saveWatchProgress } from "@/utils/localStorage";
-import {
-  type RefObject,
-  useCallback,
-  useEffect,
-  useRef,
-} from "react";
+import { type RefObject, useCallback, useEffect, useRef } from "react";
 
 export type PlayerEventType =
   | "play"
@@ -16,11 +10,6 @@ export type PlayerEventType =
   | "seeked"
   | "ended"
   | "timeupdate";
-
-export interface BasePlayerEventEnvelope<T = any> {
-  type: string;
-  data?: T;
-}
 
 export interface UnifiedPlayerEventData {
   event: PlayerEventType;
@@ -33,575 +22,18 @@ export interface UnifiedPlayerEventData {
   progress?: number;
 }
 
-export interface PlayerAdapter<
-  RawMessage extends BasePlayerEventEnvelope<any> =
-    BasePlayerEventEnvelope<any>
-> {
-  origin: `https://${string}`;
-  parse: (raw: RawMessage) => UnifiedPlayerEventData | null;
-}
+type PlayerMessage = Record<string, any>;
 
-export type AdapterMap = Record<string, PlayerAdapter<any>>;
-
-const SAVE_DISTANCE_SECONDS = 1;
-const AUTOSAVE_INTERVAL_MS = 5000;
 const MAX_DURATION_SECONDS = 8 * 60 * 60;
+const FRESH_POSITION_WAIT_MS = 650;
 
-const SUPPORTED_EVENTS: PlayerEventType[] = [
-  "play",
-  "pause",
-  "seeked",
-  "ended",
-  "timeupdate",
-];
-
-function isRecord(value: unknown): value is Record<string, any> {
-  return Boolean(value) && typeof value === "object";
-}
-
-function firstDefined<T>(
-  ...values: (T | undefined | null)[]
-): T | undefined {
-  return values.find(
-    (value) => value !== undefined && value !== null,
-  ) as T | undefined;
-}
-
-function toNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value !== "string" || !value.trim()) {
-    return undefined;
-  }
-
-  const parsed = Number(value.trim());
-
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function parseMaybeJson(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function unwrapData(raw: unknown): Record<string, any> | null {
-  let current = parseMaybeJson(raw);
-
-  if (!isRecord(current)) return null;
-
-  for (let depth = 0; depth < 6; depth += 1) {
-    if (!isRecord(current.data)) break;
-
-    current = parseMaybeJson(current.data);
-
-    if (!isRecord(current)) return null;
-  }
-
-  return current;
-}
-
-function normalizeEvent(
-  value: unknown,
-): PlayerEventType | undefined {
-  if (typeof value !== "string") return undefined;
-
-  const v = value.trim().toLowerCase();
-
-  if (
-    ["play", "playing", "started", "start", "resume", "resumed"].includes(v)
-  ) return "play";
-
-  if (["pause", "paused"].includes(v)) return "pause";
-
-  if (["seek", "seeked"].includes(v)) return "seeked";
-
-  if (
-    ["ended", "completed", "complete", "finished"].includes(v)
-  ) return "ended";
-
-  if (
-    ["timeupdate", "time_update", "time-update"].includes(v)
-  ) return "timeupdate";
-
-  return SUPPORTED_EVENTS.includes(v as PlayerEventType)
-    ? v as PlayerEventType
-    : undefined;
-}
-
-function normalizeTiming(current: number, duration: number) {
-  let time = Math.max(0, current);
-  let length = Math.max(0, duration);
-
-  if (
-    length > MAX_DURATION_SECONDS &&
-    length / 1000 <= MAX_DURATION_SECONDS
-  ) {
-    length /= 1000;
-  }
-
-  if (
-    length > 0 &&
-    time > length + 2 &&
-    time / 1000 <= length + 2
-  ) {
-    time /= 1000;
-  }
-
-  return {
-    currentTime: time,
-    duration: length,
-  };
-}
-
-function parseGenericPlayerMessage(
-  raw: Record<string, any>,
-): UnifiedPlayerEventData | null {
-  const root = parseMaybeJson(raw);
-
-  if (!isRecord(root)) return null;
-
-  const data = unwrapData(root);
-
-  if (!data) return null;
-
-  const playerInfo = isRecord(data.player_info)
-    ? data.player_info
-    : isRecord(data.playerInfo)
-      ? data.playerInfo
-      : undefined;
-
-  const value = isRecord(data.value)
-    ? data.value
-    : undefined;
-
-  const progressObject = isRecord(data.progress)
-    ? data.progress
-    : undefined;
-
-  const current = toNumber(firstDefined(
-    data.currentTime,
-    data.current_time,
-    data.position,
-    data.current,
-    data.time,
-    data.seconds,
-    data.watched,
-    data.player_progress,
-    data.playerProgress,
-    data.played,
-    value?.currentTime,
-    value?.current_time,
-    value?.position,
-    value?.seconds,
-    value?.watched,
-    progressObject?.watched,
-    progressObject?.currentTime,
-  )) ?? 0;
-
-  const duration = toNumber(firstDefined(
-    data.duration,
-    data.totalDuration,
-    data.total_duration,
-    data.length,
-    data.videoDuration,
-    data.video_duration,
-    data.player_duration,
-    value?.duration,
-    value?.totalDuration,
-    value?.total_duration,
-    progressObject?.duration,
-  )) ?? 0;
-
-  const progress = toNumber(firstDefined(
-    typeof data.progress === "number"
-      ? data.progress
-      : undefined,
-    data.percent,
-    data.percentage,
-    value?.progress,
-    value?.percent,
-    value?.percentage,
-    progressObject?.percentage,
-  ));
-
-  const eventType = normalizeEvent(firstDefined(
-    data.event,
-    data.eventType,
-    data.event_type,
-    data.action,
-    data.name,
-    data.player_status,
-    data.playerStatus,
-    data.status,
-    data.state,
-    data.playerState,
-    value?.event,
-    value?.eventType,
-    value?.status,
-    value?.state,
-  )) ?? (
-    current > 0 || duration > 0 || progress !== undefined
-      ? "timeupdate"
-      : undefined
-  );
-
-  if (!eventType) return null;
-
-  const timing = normalizeTiming(current, duration);
-
-  const mediaTypeRaw = firstDefined(
-    data.mediaType,
-    data.media_type,
-    data.contentType,
-    data.content_type,
-    playerInfo?.mediaType,
-    playerInfo?.media_type,
-    playerInfo?.type,
-  );
-
-  return {
-    event: eventType,
-    currentTime: timing.currentTime,
-    duration: timing.duration,
-
-    mediaId: firstDefined(
-      data.mtmdbId,
-      data.tmdbId,
-      data.tmdb_id,
-      data.mediaId,
-      data.media_id,
-      data.id,
-      data.videoId,
-      data.video_id,
-      playerInfo?.tmdb,
-      playerInfo?.tmdbId,
-      playerInfo?.tmdb_id,
-      playerInfo?.id,
-      data.player_info?.tmdb,
-      data.player_info?.tmdbId,
-      data.player_info?.tmdb_id,
-      data.player_info?.id,
-    ) ?? 0,
-
-    mediaType: mediaTypeRaw === "tv" ? "tv" : "movie",
-
-    season: toNumber(firstDefined(
-      data.season,
-      data.seasonNumber,
-      data.season_number,
-      data.s,
-      playerInfo?.season,
-      playerInfo?.seasonNumber,
-      playerInfo?.season_number,
-      data.player_info?.season,
-      data.player_info?.seasonNumber,
-      data.player_info?.season_number,
-    )),
-
-    episode: toNumber(firstDefined(
-      data.episode,
-      data.episodeNumber,
-      data.episode_number,
-      data.e,
-      playerInfo?.episode,
-      playerInfo?.episodeNumber,
-      playerInfo?.episode_number,
-      data.player_info?.episode,
-      data.player_info?.episodeNumber,
-      data.player_info?.episode_number,
-    )),
-
-    progress,
-  };
-}
-
-/**
- * Vidstuck's documented message:
- * {
- *   id,
- *   type,
- *   progress,
- *   timestamp,
- *   duration,
- *   season,
- *   episode
- * }
- *
- * timestamp = current playback position in seconds.
- * progress = percentage watched, NOT the playback position.
- */
-function parseVidstuckMessage(
-  raw: Record<string, any>,
-): UnifiedPlayerEventData | null {
-  const root = parseMaybeJson(raw);
-
-  if (!isRecord(root)) return null;
-
-  const data = unwrapData(root);
-
-  if (!data) return null;
-
-  const currentTime = toNumber(firstDefined(
-    data.timestamp,
-    root.timestamp,
-  )) ?? 0;
-
-  const duration = toNumber(firstDefined(
-    data.duration,
-    root.duration,
-  )) ?? 0;
-
-  if (currentTime <= 0 && duration <= 0) return null;
-
-  const timing = normalizeTiming(currentTime, duration);
-
-  const mediaTypeValue = String(firstDefined(
-    data.type,
-    root.type,
-    data.mediaType,
-    data.media_type,
-  ) ?? "").toLowerCase();
-
-  return {
-    event: normalizeEvent(firstDefined(
-      data.event,
-      data.eventType,
-      data.event_type,
-      data.status,
-    )) ?? "timeupdate",
-
-    ...timing,
-
-    mediaId: firstDefined(
-      data.id,
-      root.id,
-      data.tmdbId,
-      data.tmdb_id,
-      data.mediaId,
-      data.media_id,
-    ) ?? 0,
-
-    mediaType: mediaTypeValue === "tv" ? "tv" : "movie",
-
-    season: toNumber(firstDefined(
-      data.season,
-      data.seasonNumber,
-      data.season_number,
-    )),
-
-    episode: toNumber(firstDefined(
-      data.episode,
-      data.episodeNumber,
-      data.episode_number,
-    )),
-
-    progress: toNumber(data.progress),
-  };
-}
-
-function parseVidyMessage(
-  raw: Record<string, any>,
-): UnifiedPlayerEventData | null {
-  const root = parseMaybeJson(raw);
-
-  if (!isRecord(root)) return null;
-
-  const messageType = String(root.type ?? "").toUpperCase();
-
-  if (messageType === "PLAYER_EVENT" || normalizeEvent(root.event)) {
-    return parseGenericPlayerMessage(root);
-  }
-
-  if (messageType === "MEDIA_DATA") {
-    const history = parseMaybeJson(root.data);
-
-    if (!isRecord(history)) return null;
-
-    const direct = parseGenericPlayerMessage(history);
-    if (direct) return direct;
-
-    for (const candidate of [
-      history.history,
-      history.current,
-      history.currentMedia,
-      history.current_media,
-      history.media,
-      history.progress,
-      history.player,
-    ]) {
-      if (!isRecord(candidate)) continue;
-
-      const parsed = parseGenericPlayerMessage(candidate);
-      if (parsed) return parsed;
-    }
-  }
-
-  return null;
-}
-
-function parseVidLinkMessage(
-  raw: Record<string, any>,
-): UnifiedPlayerEventData | null {
-  const root = parseMaybeJson(raw);
-
-  if (!isRecord(root)) return null;
-
-  if (root.type !== "MEDIA_DATA") {
-    return parseGenericPlayerMessage(root);
-  }
-
-  const data = unwrapData(root);
-
-  if (!data) return null;
-
-  const progress = isRecord(data.progress)
-    ? data.progress
-    : undefined;
-
-  const currentTime = toNumber(progress?.watched) ?? 0;
-  const duration = toNumber(progress?.duration) ?? 0;
-
-  if (currentTime <= 0 && duration <= 0) return null;
-
-  const timing = normalizeTiming(currentTime, duration);
-
-  return {
-    event: "timeupdate",
-    ...timing,
-    mediaId: firstDefined(
-      data.id,
-      data.tmdbId,
-      data.tmdb_id,
-    ) ?? 0,
-    mediaType: data.type === "tv" ? "tv" : "movie",
-    season: toNumber(firstDefined(
-      data.last_season_watched,
-      data.season,
-    )),
-    episode: toNumber(firstDefined(
-      data.last_episode_watched,
-      data.episode,
-    )),
-  };
-}
-
-function parseFilmUMessage(
-  raw: Record<string, any>,
-): UnifiedPlayerEventData | null {
-  const root = parseMaybeJson(raw);
-
-  if (!isRecord(root)) return null;
-
-  const data = unwrapData(root);
-
-  if (!data) return null;
-
-  if (root.type === "SYNC_HISTORY") {
-    const timing = normalizeTiming(
-      toNumber(data.watched) ?? 0,
-      toNumber(data.duration) ?? 0,
-    );
-
-    return {
-      event: "timeupdate",
-      ...timing,
-      mediaId: firstDefined(
-        data.media_id,
-        data.tmdbId,
-        data.id,
-      ) ?? 0,
-      mediaType: data.media_type === "tv" ? "tv" : "movie",
-      season: toNumber(data.season),
-      episode: toNumber(data.episode),
-    };
-  }
-
-  if (root.type === "FILMU_PLAYER_EVENT") {
-    const event = normalizeEvent(data.event);
-
-    if (!event) return null;
-
-    const timing = normalizeTiming(
-      toNumber(data.currentTime) ?? 0,
-      toNumber(data.duration) ?? 0,
-    );
-
-    return {
-      event,
-      ...timing,
-      mediaId: firstDefined(
-        data.tmdbId,
-        data.media_id,
-      ) ?? 0,
-      mediaType: data.mediaType === "tv" ? "tv" : "movie",
-      season: toNumber(data.season),
-      episode: toNumber(data.episode),
-    };
-  }
-
-  return parseGenericPlayerMessage(root);
-}
-
-function parseVidRiftMessage(
-  raw: Record<string, any>,
-): UnifiedPlayerEventData | null {
-  const root = parseMaybeJson(raw);
-
-  if (
-    !isRecord(root) ||
-    ![
-      "vidrift:progress",
-      "vidrift:paused",
-      "vidrift:unpaused",
-      "vidrift:ended",
-    ].includes(String(root.type))
-  ) {
-    return null;
-  }
-
-  const timing = normalizeTiming(
-    toNumber(root.currentTime) ?? 0,
-    toNumber(root.duration) ?? 0,
-  );
-
-  const eventType: PlayerEventType =
-    root.type === "vidrift:ended"
-      ? "ended"
-      : root.type === "vidrift:paused"
-        ? "pause"
-        : root.type === "vidrift:unpaused"
-          ? "play"
-          : "timeupdate";
-
-  return {
-    event: eventType,
-    ...timing,
-    mediaId: firstDefined(
-      root.tmdbId,
-      root.tmdb_id,
-      root.mediaId,
-    ) ?? 0,
-    mediaType: root.mediaType === "tv" ? "tv" : "movie",
-    season: toNumber(root.season),
-    episode: toNumber(root.episode),
-  };
-}
-
-const PLAYER_ORIGINS = [
+const PLAYER_ORIGINS = new Set([
   "https://vidlink.pro",
   "https://www.vidy.st",
   "https://vidy.st",
   "https://embed.filmu.in",
   "https://embed.vidrift.net",
   "https://embed.vidrift.in",
-
   "https://vidsrc.sh",
   "https://vidsrc2.ru",
   "https://vidsrc.in",
@@ -613,7 +45,6 @@ const PLAYER_ORIGINS = [
   "https://vidsrcme.su",
   "https://vidsrc-me.ru",
   "https://vidsrc-me.ir",
-
   "https://multiembed.mov",
   "https://www.nontongo.win",
   "https://vidcore.org",
@@ -621,107 +52,372 @@ const PLAYER_ORIGINS = [
   "https://filmku.stream",
   "https://www.2embed.cc",
   "https://2embed.cc",
-
   "https://vidstuck.xyz",
   "https://vidstuck.cc",
-
   "https://player.videasy.to",
   "https://player.videasy.ws",
-] as const;
+]);
 
-export type PlayerOrigin = (typeof PLAYER_ORIGINS)[number];
+function isRecord(value: unknown): value is PlayerMessage {
+  return Boolean(value) && typeof value === "object";
+}
 
-const PLAYER_ORIGIN_SET = new Set<string>(PLAYER_ORIGINS);
+function parseJson(value: unknown): unknown {
+  if (typeof value !== "string") return value;
 
-export const playerAdapters = Object.fromEntries([
-  [
-    "https://www.vidy.st",
-    {
-      origin: "https://www.vidy.st",
-      parse: parseVidyMessage,
-    },
-  ],
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
 
-  [
-    "https://vidy.st",
-    {
-      origin: "https://vidy.st",
-      parse: parseVidyMessage,
-    },
-  ],
+function numberFrom(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
 
-  [
-    "https://vidlink.pro",
-    {
-      origin: "https://vidlink.pro",
-      parse: parseVidLinkMessage,
-    },
-  ],
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
 
-  [
-    "https://embed.filmu.in",
-    {
-      origin: "https://embed.filmu.in",
-      parse: parseFilmUMessage,
-    },
-  ],
+  return undefined;
+}
 
-  [
-    "https://embed.vidrift.net",
-    {
-      origin: "https://embed.vidrift.net",
-      parse: parseVidRiftMessage,
-    },
-  ],
+function unwrapMessage(value: unknown): PlayerMessage | null {
+  let current = parseJson(value);
 
-  [
-    "https://embed.vidrift.in",
-    {
-      origin: "https://embed.vidrift.in",
-      parse: parseVidRiftMessage,
-    },
-  ],
+  if (!isRecord(current)) return null;
 
-  ...[
-    "https://vidsrc.sh",
-    "https://vidsrc2.ru",
-    "https://vidsrc.in",
-    "https://vidsrc.ru",
-    "https://vidsrc.su",
-    "https://vidsrc.ir",
-    "https://vidsrcme.ir",
-    "https://vidsrcme.ru",
-    "https://vidsrcme.su",
-    "https://vidsrc-me.ru",
-    "https://vidsrc-me.ir",
-    "https://multiembed.mov",
-    "https://www.nontongo.win",
-    "https://vidcore.org",
-    "https://vidcore.io",
-    "https://filmku.stream",
-    "https://www.2embed.cc",
-    "https://2embed.cc",
-    "https://player.videasy.to",
-    "https://player.videasy.ws",
-  ].map((origin) => [
-    origin,
-    {
-      origin,
-      parse: parseGenericPlayerMessage,
-    },
-  ]),
+  for (let i = 0; i < 5; i += 1) {
+    if (current.data === undefined) break;
 
-  ...[
-    "https://vidstuck.cc",
-    "https://vidstuck.xyz",
-  ].map((origin) => [
-    origin,
-    {
-      origin,
-      parse: parseVidstuckMessage,
-    },
-  ]),
-]) as AdapterMap;
+    const next = parseJson(current.data);
+    if (!isRecord(next)) break;
+
+    current = next;
+  }
+
+  return current;
+}
+
+function normalizeEvent(value: unknown): PlayerEventType | null {
+  if (typeof value !== "string") return null;
+
+  const event = value.toLowerCase().trim();
+
+  if (["play", "playing", "started", "start", "resume", "resumed"].includes(event)) {
+    return "play";
+  }
+
+  if (["pause", "paused"].includes(event)) return "pause";
+  if (["seek", "seeked"].includes(event)) return "seeked";
+  if (["ended", "completed", "complete", "finished"].includes(event)) {
+    return "ended";
+  }
+
+  if (["timeupdate", "time_update", "time-update"].includes(event)) {
+    return "timeupdate";
+  }
+
+  return null;
+}
+
+function normalizeTiming(current: number, duration: number) {
+  let currentTime = Math.max(0, current);
+  let safeDuration = Math.max(0, duration);
+
+  if (
+    safeDuration > MAX_DURATION_SECONDS &&
+    safeDuration / 1000 <= MAX_DURATION_SECONDS
+  ) {
+    safeDuration /= 1000;
+  }
+
+  if (
+    safeDuration > 0 &&
+    currentTime > safeDuration + 2 &&
+    currentTime / 1000 <= safeDuration + 2
+  ) {
+    currentTime /= 1000;
+  }
+
+  return { currentTime, duration: safeDuration };
+}
+
+function parseProviderMessage(
+  origin: string,
+  raw: unknown,
+): UnifiedPlayerEventData | null {
+  const root = parseJson(raw);
+  if (!isRecord(root)) return null;
+
+  // Vidstuck documents timestamp as seconds and progress as percentage.
+  if (origin === "https://vidstuck.cc" || origin === "https://vidstuck.xyz") {
+    const data = unwrapMessage(root);
+    if (!data) return null;
+
+    const current = numberFrom(data.timestamp, root.timestamp);
+    const duration = numberFrom(data.duration, root.duration);
+
+    if (current === undefined) return null;
+
+    const timing = normalizeTiming(current, duration ?? 0);
+
+    return {
+      event: normalizeEvent(data.event ?? data.status) ?? "timeupdate",
+      ...timing,
+      mediaId: data.id ?? root.id ?? data.tmdbId ?? 0,
+      mediaType: String(data.type ?? data.mediaType ?? "").toLowerCase() === "tv"
+        ? "tv"
+        : "movie",
+      season: numberFrom(data.season, data.seasonNumber),
+      episode: numberFrom(data.episode, data.episodeNumber),
+      progress: numberFrom(data.progress),
+    };
+  }
+
+  // Vidy sends PLAYER_EVENT and MEDIA_DATA messages.
+  if (
+    origin === "https://vidy.st" ||
+    origin === "https://www.vidy.st"
+  ) {
+    const type = String(root.type ?? "").toUpperCase();
+
+    if (type === "MEDIA_DATA") {
+      const history = unwrapMessage(root.data);
+      if (!history) return null;
+
+      const candidates = [
+        history,
+        history.current,
+        history.currentMedia,
+        history.current_media,
+        history.media,
+        history.progress,
+        history.player,
+      ];
+
+      for (const candidate of candidates) {
+        if (!isRecord(candidate)) continue;
+
+        const parsed = parseGenericMessage(candidate);
+        if (parsed) return parsed;
+      }
+
+      return null;
+    }
+  }
+
+  if (
+    origin === "https://embed.vidrift.net" ||
+    origin === "https://embed.vidrift.in"
+  ) {
+    const type = String(root.type ?? "");
+
+    if (![
+      "vidrift:progress",
+      "vidrift:paused",
+      "vidrift:unpaused",
+      "vidrift:ended",
+    ].includes(type)) {
+      return null;
+    }
+
+    const timing = normalizeTiming(
+      numberFrom(root.currentTime) ?? 0,
+      numberFrom(root.duration) ?? 0,
+    );
+
+    return {
+      event: type === "vidrift:ended"
+        ? "ended"
+        : type === "vidrift:paused"
+          ? "pause"
+          : type === "vidrift:unpaused"
+            ? "play"
+            : "timeupdate",
+      ...timing,
+      mediaId: root.tmdbId ?? root.tmdb_id ?? root.mediaId ?? 0,
+      mediaType: root.mediaType === "tv" ? "tv" : "movie",
+      season: numberFrom(root.season),
+      episode: numberFrom(root.episode),
+    };
+  }
+
+  if (origin === "https://embed.filmu.in") {
+    const data = unwrapMessage(root);
+    if (!data) return null;
+
+    if (root.type === "SYNC_HISTORY") {
+      const timing = normalizeTiming(
+        numberFrom(data.watched) ?? 0,
+        numberFrom(data.duration) ?? 0,
+      );
+
+      return {
+        event: "timeupdate",
+        ...timing,
+        mediaId: data.media_id ?? data.tmdbId ?? data.id ?? 0,
+        mediaType: data.media_type === "tv" ? "tv" : "movie",
+        season: numberFrom(data.season),
+        episode: numberFrom(data.episode),
+      };
+    }
+
+    if (root.type === "FILMU_PLAYER_EVENT") {
+      const event = normalizeEvent(data.event);
+      if (!event) return null;
+
+      const timing = normalizeTiming(
+        numberFrom(data.currentTime) ?? 0,
+        numberFrom(data.duration) ?? 0,
+      );
+
+      return {
+        event,
+        ...timing,
+        mediaId: data.tmdbId ?? data.media_id ?? 0,
+        mediaType: data.mediaType === "tv" ? "tv" : "movie",
+        season: numberFrom(data.season),
+        episode: numberFrom(data.episode),
+      };
+    }
+  }
+
+  return parseGenericMessage(root);
+}
+
+function parseGenericMessage(raw: unknown): UnifiedPlayerEventData | null {
+  const data = unwrapMessage(raw);
+  if (!data) return null;
+
+  const player = isRecord(data.player_info)
+    ? data.player_info
+    : isRecord(data.playerInfo)
+      ? data.playerInfo
+      : {};
+
+  const value = isRecord(data.value) ? data.value : {};
+  const progressObject = isRecord(data.progress) ? data.progress : {};
+
+  const current = numberFrom(
+    data.currentTime,
+    data.current_time,
+    data.position,
+    data.current,
+    data.time,
+    data.seconds,
+    data.watched,
+    data.player_progress,
+    data.playerProgress,
+    data.played,
+    value.currentTime,
+    value.current_time,
+    value.position,
+    value.seconds,
+    value.watched,
+    progressObject.watched,
+    progressObject.currentTime,
+  );
+
+  const duration = numberFrom(
+    data.duration,
+    data.totalDuration,
+    data.total_duration,
+    data.length,
+    data.videoDuration,
+    data.video_duration,
+    data.player_duration,
+    value.duration,
+    value.totalDuration,
+    progressObject.duration,
+  );
+
+  const progress = numberFrom(
+    typeof data.progress === "number" ? data.progress : undefined,
+    data.percent,
+    data.percentage,
+    value.progress,
+    value.percent,
+    value.percentage,
+    progressObject.percentage,
+  );
+
+  const event = normalizeEvent(
+    data.event ??
+    data.eventType ??
+    data.event_type ??
+    data.action ??
+    data.name ??
+    data.player_status ??
+    data.playerStatus ??
+    data.status ??
+    data.state ??
+    data.playerState ??
+    value.event ??
+    value.eventType ??
+    value.status ??
+    value.state,
+  ) ?? (
+    current !== undefined || duration !== undefined || progress !== undefined
+      ? "timeupdate"
+      : null
+  );
+
+  if (!event || current === undefined) return null;
+
+  const timing = normalizeTiming(current, duration ?? 0);
+
+  return {
+    event,
+    ...timing,
+    mediaId:
+      data.mtmdbId ??
+      data.tmdbId ??
+      data.tmdb_id ??
+      data.mediaId ??
+      data.media_id ??
+      data.id ??
+      data.videoId ??
+      data.video_id ??
+      player.tmdb ??
+      player.tmdbId ??
+      player.tmdb_id ??
+      player.id ??
+      0,
+    mediaType:
+      (data.mediaType ??
+        data.media_type ??
+        data.contentType ??
+        data.content_type ??
+        player.mediaType ??
+        player.media_type ??
+        player.type) === "tv"
+        ? "tv"
+        : "movie",
+    season: numberFrom(
+      data.season,
+      data.seasonNumber,
+      data.season_number,
+      data.s,
+      player.season,
+      player.seasonNumber,
+    ),
+    episode: numberFrom(
+      data.episode,
+      data.episodeNumber,
+      data.episode_number,
+      data.e,
+      player.episode,
+      player.episodeNumber,
+    ),
+    progress,
+  };
+}
 
 export interface UsePlayerEventsOptions {
   metadata?: {
@@ -736,10 +432,8 @@ export interface UsePlayerEventsOptions {
     episode?: number;
     expectedDuration?: number;
   };
-
   saveHistory?: boolean;
   playerFrameRef?: RefObject<HTMLIFrameElement | null>;
-
   onPlay?: (data: UnifiedPlayerEventData) => void;
   onPause?: (data: UnifiedPlayerEventData) => void;
   onSeeked?: (data: UnifiedPlayerEventData) => void;
@@ -747,9 +441,7 @@ export interface UsePlayerEventsOptions {
   onTimeUpdate?: (data: UnifiedPlayerEventData) => void;
 }
 
-export function usePlayerEvents(
-  options: UsePlayerEventsOptions = {},
-) {
+export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
   const {
     metadata,
     saveHistory = false,
@@ -761,33 +453,19 @@ export function usePlayerEvents(
     onTimeUpdate,
   } = options;
 
-  const eventDataRef = useRef<UnifiedPlayerEventData | null>(null);
   const metadataRef = useRef(metadata);
   const saveHistoryRef = useRef(saveHistory);
-
-  const callbacksRef = useRef({
-    onPlay,
-    onPause,
-    onSeeked,
-    onEnded,
-    onTimeUpdate,
-  });
-
-  const lastSavedPositionRef = useRef(0);
+  const eventDataRef = useRef<UnifiedPlayerEventData | null>(null);
+  const callbacksRef = useRef({ onPlay, onPause, onSeeked, onEnded, onTimeUpdate });
   const lastDurationRef = useRef(0);
-  const identityRef = useRef<string | null>(null);
+  const identityRef = useRef("");
+  const lastMessageAtRef = useRef(0);
+  const freshWaitersRef = useRef<Array<() => void>>([]);
 
   useEffect(() => {
     metadataRef.current = metadata;
     saveHistoryRef.current = saveHistory;
-
-    callbacksRef.current = {
-      onPlay,
-      onPause,
-      onSeeked,
-      onEnded,
-      onTimeUpdate,
-    };
+    callbacksRef.current = { onPlay, onPause, onSeeked, onEnded, onTimeUpdate };
 
     const identity = [
       metadata?.mediaType ?? "",
@@ -796,308 +474,198 @@ export function usePlayerEvents(
       metadata?.episode ?? "",
     ].join(":");
 
-    if (identity && identityRef.current !== identity) {
+    if (identity !== identityRef.current) {
       identityRef.current = identity;
-      lastSavedPositionRef.current = 0;
-      lastDurationRef.current = 0;
       eventDataRef.current = null;
+      lastDurationRef.current = 0;
+      lastMessageAtRef.current = 0;
     }
-  }, [
-    metadata,
-    saveHistory,
-    onPlay,
-    onPause,
-    onSeeked,
-    onEnded,
-    onTimeUpdate,
-  ]);
+  }, [metadata, saveHistory, onPlay, onPause, onSeeked, onEnded, onTimeUpdate]);
 
-  const prepareTiming = useCallback(
-    (data: UnifiedPlayerEventData) => {
-      const meta = metadataRef.current;
+  const prepareTiming = useCallback((raw: UnifiedPlayerEventData) => {
+    const meta = metadataRef.current;
+    const expected = meta?.expectedDuration ?? 0;
 
-      const expected =
-        meta?.expectedDuration && meta.expectedDuration > 0
-          ? meta.expectedDuration
-          : 0;
+    let duration = raw.duration > 0 ? raw.duration : lastDurationRef.current;
 
-      let duration =
-        data.duration > 0
-          ? data.duration
-          : lastDurationRef.current;
+    if (
+      expected > 0 &&
+      (!duration || duration < expected * 0.55 || duration > expected * 1.8)
+    ) {
+      duration = expected;
+    }
 
-      if (
-        expected > 0 &&
-        (
-          !duration ||
-          duration < expected * 0.55 ||
-          duration > expected * 1.8
-        )
-      ) {
-        duration = expected;
+    let currentTime = Number.isFinite(raw.currentTime)
+      ? Math.max(0, raw.currentTime)
+      : -1;
+
+    if (currentTime < 0) return null;
+
+    if (duration > 0 && currentTime > duration + 2) {
+      if (currentTime / 1000 <= duration + 2) {
+        currentTime /= 1000;
+      } else {
+        return null;
       }
+    }
 
-      let currentTime = Number.isFinite(data.currentTime)
-        ? Math.max(0, data.currentTime)
-        : 0;
+    if (duration > 0 && currentTime > duration) {
+      if (currentTime - duration <= 2) currentTime = duration;
+      else return null;
+    }
 
-      if (duration > 0 && currentTime > duration + 2) {
-        if (currentTime / 1000 <= duration + 2) {
-          currentTime /= 1000;
-        } else {
-          return null;
-        }
-      }
+    return { ...raw, currentTime, duration };
+  }, []);
 
-      if (duration > 0 && currentTime > duration) {
-        if (currentTime - duration <= 2) {
-          currentTime = duration;
-        } else {
-          return null;
-        }
-      }
+  const saveLocalProgress = useCallback((
+    raw: UnifiedPlayerEventData,
+    completed = false,
+    allowZero = false,
+  ) => {
+    if (!saveHistoryRef.current) return false;
 
-      return {
-        ...data,
-        currentTime,
-        duration,
+    const meta = metadataRef.current;
+    const mediaId = Number(meta?.mediaId ?? raw.mediaId);
+
+    if (
+      !Number.isFinite(mediaId) ||
+      mediaId <= 0 ||
+      !meta?.title ||
+      meta.backdrop_path === undefined ||
+      meta.release_date === undefined ||
+      meta.vote_average === undefined
+    ) {
+      return false;
+    }
+
+    const data = prepareTiming(raw);
+    if (!data) return false;
+
+    if (data.currentTime === 0 && !completed && !allowZero) {
+      return false;
+    }
+
+    saveWatchProgress(
+      {
+        mediaId,
+        mediaType: meta.mediaType ?? data.mediaType,
+        title: meta.title,
+        backdrop_path: meta.backdrop_path,
+        poster_path: meta.poster_path,
+        release_date: meta.release_date,
+        vote_average: meta.vote_average,
+        season: meta.season ?? data.season,
+        episode: meta.episode ?? data.episode,
+      },
+      data.currentTime,
+      data.duration,
+      completed,
+    );
+
+    if (data.duration > 0) lastDurationRef.current = data.duration;
+    return true;
+  }, [prepareTiming]);
+
+  const flushProgress = useCallback(async () => {
+    const before = lastMessageAtRef.current;
+
+    // Give the active provider a short opportunity to deliver its latest
+    // position (particularly important immediately after a seek).
+    await new Promise<void>((resolve) => {
+      let settled = false;
+
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        freshWaitersRef.current = freshWaitersRef.current.filter(
+          (waiter) => waiter !== finish,
+        );
+        resolve();
       };
-    },
-    [],
-  );
 
-  const saveLocalProgress = useCallback(
-    (
-      raw: UnifiedPlayerEventData,
-      completed = false,
-      allowZero = false,
-    ) => {
-      if (!saveHistoryRef.current) return;
+      const timer = window.setTimeout(finish, FRESH_POSITION_WAIT_MS);
+      freshWaitersRef.current.push(finish);
 
-      const meta = metadataRef.current;
-      const mediaId = Number(meta?.mediaId ?? raw.mediaId);
+      if (lastMessageAtRef.current > before) finish();
+    });
 
-      if (!Number.isFinite(mediaId) || mediaId <= 0) return;
-
-      if (
-        !meta?.title ||
-        meta.backdrop_path === undefined ||
-        meta.release_date === undefined ||
-        meta.vote_average === undefined
-      ) {
-        return;
-      }
-
-      const data = prepareTiming(raw);
-
-      if (!data) {
-        console.warn(
-          "RyuFlixx: ignored implausible playback timing",
-          {
-            mediaId,
-            currentTime: raw.currentTime,
-            duration: raw.duration,
-          },
-        );
-
-        return;
-      }
-
-      if (
-        data.currentTime <= 0 &&
-        !completed &&
-        !allowZero
-      ) {
-        return;
-      }
-
-      saveWatchProgress(
-        {
-          mediaId,
-          mediaType: meta.mediaType ?? data.mediaType,
-          title: meta.title,
-          backdrop_path: meta.backdrop_path,
-          poster_path: meta.poster_path,
-          release_date: meta.release_date,
-          vote_average: meta.vote_average,
-          season: meta.season ?? data.season,
-          episode: meta.episode ?? data.episode,
-        },
-        data.currentTime,
-        data.duration,
-        completed,
-      );
-
-      if (data.currentTime > 0) {
-        lastSavedPositionRef.current = data.currentTime;
-      }
-
-      if (data.duration > 0) {
-        lastDurationRef.current = data.duration;
-      }
-    },
-    [prepareTiming],
-  );
-
-  const flushProgress = useCallback(() => {
     const latest = eventDataRef.current;
+    if (!latest) return false;
 
-    if (latest) {
-      saveLocalProgress(
-        latest,
-        latest.event === "ended",
-        latest.event === "seeked",
-      );
-    }
+    return saveLocalProgress(
+      latest,
+      latest.event === "ended",
+      latest.currentTime === 0,
+    );
   }, [saveLocalProgress]);
 
-  const getCurrentTime = useCallback(
-    () => Math.max(
-      0,
-      eventDataRef.current?.currentTime ?? 0,
-    ),
-    [],
-  );
-
-  const maybeSaveProgress = useCallback(
-    (
-      data: UnifiedPlayerEventData,
-      force = false,
-    ) => {
-      if (!saveHistoryRef.current) return;
-
-      if (
-        !force &&
-        Math.abs(
-          data.currentTime - lastSavedPositionRef.current,
-        ) < SAVE_DISTANCE_SECONDS
-      ) {
-        return;
-      }
-
-      saveLocalProgress(
-        data,
-        data.event === "ended",
-        data.event === "seeked",
-      );
-    },
-    [saveLocalProgress],
-  );
-
-  // Live checkpoints while the player page remains open.
-  useEffect(() => {
-    const saveLatest = () => {
-      const latest = eventDataRef.current;
-
-      if (latest) {
-        saveLocalProgress(
-          latest,
-          latest.event === "ended",
-          latest.event === "seeked",
-        );
-      }
-    };
-
-    const visibility = () => {
-      if (document.visibilityState === "hidden") {
-        saveLatest();
-      }
-    };
-
-    document.addEventListener(
-      "visibilitychange",
-      visibility,
-    );
-
-    window.addEventListener("pagehide", saveLatest);
-
-    const autosaveTimer = window.setInterval(
-      saveLatest,
-      AUTOSAVE_INTERVAL_MS,
-    );
-
-    return () => {
-      saveLatest();
-      window.clearInterval(autosaveTimer);
-
-      document.removeEventListener(
-        "visibilitychange",
-        visibility,
-      );
-
-      window.removeEventListener("pagehide", saveLatest);
-    };
-  }, [saveLocalProgress]);
+  const getCurrentTime = useCallback(() => {
+    return eventDataRef.current?.currentTime ?? -1;
+  }, []);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      // Only accept messages from explicitly supported provider origins.
-      if (!PLAYER_ORIGIN_SET.has(event.origin)) return;
+      if (!PLAYER_ORIGINS.has(event.origin)) return;
+      if (playerFrameRef && !playerFrameRef.current) return;
 
-      // Some providers forward progress from a nested iframe. Its source
-      // differs from the outer iframe, so origin validation is used here.
-      if (playerFrameRef && !playerFrameRef.current) {
-        return;
-      }
-
-      const raw = parseMaybeJson(event.data);
-
-      if (!isRecord(raw)) return;
-
-      const parsed =
-        playerAdapters[event.origin]?.parse(raw) ??
-        parseGenericPlayerMessage(raw);
-
+      const parsed = parseProviderMessage(event.origin, event.data);
       if (!parsed) return;
 
       const meta = metadataRef.current;
-      const type = meta?.mediaType ?? parsed.mediaType;
+      const mediaType = meta?.mediaType ?? parsed.mediaType;
 
-      if (type !== "movie" && type !== "tv") return;
+      if (mediaType !== "movie" && mediaType !== "tv") return;
 
       const normalized = prepareTiming({
         ...parsed,
         mediaId: meta?.mediaId ?? parsed.mediaId,
-        mediaType: type,
+        mediaType,
         season: meta?.season ?? parsed.season,
         episode: meta?.episode ?? parsed.episode,
       });
 
       if (!normalized) return;
 
-      // This ref is the live source used by server switching.
+      // A provider event is the only reliable live position available to
+      // the parent page for a cross-origin iframe.
       eventDataRef.current = normalized;
+      lastMessageAtRef.current = Date.now();
 
       if (normalized.duration > 0) {
         lastDurationRef.current = normalized.duration;
       }
 
-      const cb = callbacksRef.current;
+      freshWaitersRef.current.slice().forEach((finish) => finish());
+
+      const callbacks = callbacksRef.current;
+
+      // Persist every valid provider update. This captures small movements
+      // as well as large seek jumps rather than waiting for a distance limit.
+      if (normalized.event === "ended") {
+        saveLocalProgress(normalized, true, true);
+        callbacks.onEnded?.(normalized);
+        return;
+      }
+
+      saveLocalProgress(
+        normalized,
+        false,
+        normalized.event === "seeked" || normalized.currentTime === 0,
+      );
 
       switch (normalized.event) {
         case "play":
-          cb.onPlay?.(normalized);
-          maybeSaveProgress(normalized);
+          callbacks.onPlay?.(normalized);
           break;
-
         case "pause":
-          cb.onPause?.(normalized);
-          maybeSaveProgress(normalized, true);
+          callbacks.onPause?.(normalized);
           break;
-
         case "seeked":
-          cb.onSeeked?.(normalized);
-          maybeSaveProgress(normalized, true);
+          callbacks.onSeeked?.(normalized);
           break;
-
         case "timeupdate":
-          cb.onTimeUpdate?.(normalized);
-          maybeSaveProgress(normalized);
-          break;
-
-        case "ended":
-          saveLocalProgress(normalized, true);
-          cb.onEnded?.(normalized);
+          callbacks.onTimeUpdate?.(normalized);
           break;
       }
     };
@@ -1106,16 +674,35 @@ export function usePlayerEvents(
 
     return () => {
       window.removeEventListener("message", handleMessage);
+      freshWaitersRef.current.slice().forEach((finish) => finish());
     };
-  }, [
-    maybeSaveProgress,
-    playerFrameRef,
-    prepareTiming,
-    saveLocalProgress,
-  ]);
+  }, [playerFrameRef, prepareTiming, saveLocalProgress]);
 
-  return {
-    getCurrentTime,
-    flushProgress,
-  };
-}
+  useEffect(() => {
+    const saveLatest = () => {
+      const latest = eventDataRef.current;
+      if (!latest) return;
+
+      saveLocalProgress(
+        latest,
+        latest.event === "ended",
+        latest.currentTime === 0,
+      );
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") saveLatest();
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", saveLatest);
+
+    return () => {
+      saveLatest();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", saveLatest);
+    };
+  }, [saveLocalProgress]);
+
+  return { getCurrentTime, flushProgress };
+  }
