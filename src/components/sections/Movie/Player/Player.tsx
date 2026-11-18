@@ -9,7 +9,7 @@ import { getMoviePlayers } from "@/utils/players";
 import { useDisclosure, useDocumentTitle, useIdle } from "@mantine/hooks";
 import dynamic from "next/dynamic";
 import { parseAsInteger, useQueryState } from "nuqs";
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import type { MovieDetails } from "tmdb-ts/dist/types/movies";
 import { usePlayerEvents } from "@/hooks/usePlayerEvents";
 import WatchPlayer from "@/components/WatchPlayer";
@@ -28,7 +28,10 @@ const MoviePlayer: React.FC<MoviePlayerProps> = ({ movie, startAt = 0 }) => {
   const idle = useIdle(3000);
   const { mobile } = useBreakpoints();
   const [opened, handlers] = useDisclosure(false);
-  const [selectedSource, setSelectedSource] = useQueryState<number>("src", parseAsInteger.withDefault(0));
+  const [selectedSource, setSelectedSource] = useQueryState<number>(
+    "src",
+    parseAsInteger.withDefault(0),
+  );
   const playerFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   const { getCurrentTime, flushProgress } = usePlayerEvents({
@@ -42,11 +45,20 @@ const MoviePlayer: React.FC<MoviePlayerProps> = ({ movie, startAt = 0 }) => {
       poster_path: movie.poster_path ?? undefined,
       release_date: movie.release_date ?? "",
       vote_average: movie.vote_average ?? 0,
-      expectedDuration: movie.runtime && movie.runtime > 0 ? movie.runtime * 60 : undefined,
+      expectedDuration:
+        movie.runtime && movie.runtime > 0
+          ? movie.runtime * 60
+          : undefined,
     },
   });
 
+  const handleDrawerSourceChange = useCallback(async (index: number) => {
+    await flushProgress();
+    await setSelectedSource(index);
+  }, [flushProgress, setSelectedSource]);
+
   useDocumentTitle(`Play ${title} | ${siteConfig.name}`);
+
   const safeSelectedSource = players.length > 0
     ? Math.min(Math.max(selectedSource, 0), players.length - 1)
     : 0;
@@ -54,7 +66,13 @@ const MoviePlayer: React.FC<MoviePlayerProps> = ({ movie, startAt = 0 }) => {
   return (
     <>
       <div className={cn("relative", SpacingClasses.reset)}>
-        <MoviePlayerHeader id={movie.id} movieName={title} onOpenSource={handlers.open} hidden={idle && !mobile} />
+        <MoviePlayerHeader
+          id={movie.id}
+          movieName={title}
+          onOpenSource={handlers.open}
+          hidden={idle && !mobile}
+        />
+
         <WatchPlayer
           title={title}
           servers={players}
@@ -67,10 +85,18 @@ const MoviePlayer: React.FC<MoviePlayerProps> = ({ movie, startAt = 0 }) => {
           resumeAt={startAt}
         />
       </div>
-      <MoviePlayerSourceSelection opened={opened} onClose={handlers.close} players={players} selectedSource={safeSelectedSource} setSelectedSource={setSelectedSource} />
+
+      <MoviePlayerSourceSelection
+        opened={opened}
+        onClose={handlers.close}
+        players={players}
+        selectedSource={safeSelectedSource}
+        setSelectedSource={handleDrawerSourceChange}
+      />
     </>
   );
 };
 
 MoviePlayer.displayName = "MoviePlayer";
+
 export default MoviePlayer;
