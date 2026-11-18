@@ -1,4 +1,3 @@
-
 "use client";
 
 import { siteConfig } from "@/config/site";
@@ -53,18 +52,14 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
 }) => {
   const router = useRouter();
 
-  const [episodeOpened, episodeHandlers] =
-    useDisclosure(false);
+  const [episodeOpened, episodeHandlers] = useDisclosure(false);
 
-  const [selectedSource, setSelectedSource] =
-    useQueryState<number>(
-      "src",
-      parseAsInteger.withDefault(0),
-    );
+  const [selectedSource, setSelectedSource] = useQueryState<number>(
+    "src",
+    parseAsInteger.withDefault(0),
+  );
 
-  const playerFrameRef =
-    useRef<HTMLIFrameElement | null>(null);
-
+  const playerFrameRef = useRef<HTMLIFrameElement | null>(null);
   const transitioningRef = useRef(false);
 
   const players = getTvShowPlayers(
@@ -128,17 +123,18 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
     ]),
   });
 
+  const handleDrawerSourceChange = useCallback(async (index: number) => {
+    await flushProgress();
+    await setSelectedSource(index);
+  }, [flushProgress, setSelectedSource]);
+
   useDocumentTitle(
     `Play ${props.seriesName} - ${props.seasonName} - ${episode.name} | ${siteConfig.name}`,
   );
 
-  const safeSelectedSource =
-    players.length > 0
-      ? Math.min(
-          Math.max(selectedSource, 0),
-          players.length - 1,
-        )
-      : 0;
+  const safeSelectedSource = players.length > 0
+    ? Math.min(Math.max(selectedSource, 0), players.length - 1)
+    : 0;
 
   return (
     <>
@@ -148,7 +144,6 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
           SpacingClasses.reset,
         )}
       >
-        {/* Video and original-position back overlay */}
         <div className="relative w-full">
           <WatchPlayer
             title={`${props.seriesName} — ${props.seasonName} — ${episode.name}`}
@@ -172,7 +167,6 @@ const TvShowPlayer: React.FC<TvShowPlayerProps> = ({
           </Link>
         </div>
 
-        {/* Episode information and navigation */}
         <TvShowPlayerHeader
           id={id}
           episode={episode}
