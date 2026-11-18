@@ -44,6 +44,7 @@ export interface PlayerAdapter<
 export type AdapterMap = Record<string, PlayerAdapter<any>>;
 
 const SAVE_DISTANCE_SECONDS = 1;
+const AUTOSAVE_INTERVAL_MS = 5000;
 const MAX_DURATION_SECONDS = 8 * 60 * 60;
 
 const SUPPORTED_EVENTS: PlayerEventType[] = [
@@ -318,6 +319,90 @@ function parseGenericPlayerMessage(
     )),
 
     progress,
+  };
+}
+
+/**
+ * Vidstuck's documented message:
+ * {
+ *   id,
+ *   type,
+ *   progress,
+ *   timestamp,
+ *   duration,
+ *   season,
+ *   episode
+ * }
+ *
+ * timestamp = current playback position in seconds.
+ * progress = percentage watched, NOT the playback position.
+ */
+function parseVidstuckMessage(
+  raw: Record<string, any>,
+): UnifiedPlayerEventData | null {
+  const root = parseMaybeJson(raw);
+
+  if (!isRecord(root)) return null;
+
+  const data = unwrapData(root);
+
+  if (!data) return null;
+
+  const currentTime = toNumber(firstDefined(
+    data.timestamp,
+    root.timestamp,
+  )) ?? 0;
+
+  const duration = toNumber(firstDefined(
+    data.duration,
+    root.duration,
+  )) ?? 0;
+
+  if (currentTime <= 0 && duration <= 0) return null;
+
+  const timing = normalizeTiming(currentTime, duration);
+
+  const mediaTypeValue = String(firstDefined(
+    data.type,
+    root.type,
+    data.mediaType,
+    data.media_type,
+  ) ?? "").toLowerCase();
+
+  return {
+    event: normalizeEvent(firstDefined(
+      data.event,
+      data.eventType,
+      data.event_type,
+      data.status,
+    )) ?? "timeupdate",
+
+    ...timing,
+
+    mediaId: firstDefined(
+      data.id,
+      root.id,
+      data.tmdbId,
+      data.tmdb_id,
+      data.mediaId,
+      data.media_id,
+    ) ?? 0,
+
+    mediaType: mediaTypeValue === "tv" ? "tv" : "movie",
+
+    season: toNumber(firstDefined(
+      data.season,
+      data.seasonNumber,
+      data.season_number,
+    )),
+
+    episode: toNumber(firstDefined(
+      data.episode,
+      data.episodeNumber,
+      data.episode_number,
+    )),
+
+    progress: toNumber(data.progress),
   };
 }
 
@@ -600,15 +685,6 @@ export const playerAdapters = Object.fromEntries([
   ...[
     "https://vidsrc.sh",
     "https://vidsrc2.ru",
-  ].map((origin) => [
-    origin,
-    {
-      origin,
-      parse: parseGenericPlayerMessage,
-    },
-  ]),
-
-  ...[
     "https://vidsrc.in",
     "https://vidsrc.ru",
     "https://vidsrc.su",
@@ -625,8 +701,6 @@ export const playerAdapters = Object.fromEntries([
     "https://filmku.stream",
     "https://www.2embed.cc",
     "https://2embed.cc",
-    "https://vidstuck.xyz",
-    "https://vidstuck.cc",
     "https://player.videasy.to",
     "https://player.videasy.ws",
   ].map((origin) => [
@@ -634,6 +708,17 @@ export const playerAdapters = Object.fromEntries([
     {
       origin,
       parse: parseGenericPlayerMessage,
+    },
+  ]),
+
+  ...[
+    "https://vidstuck.cc",
+    "https://vidstuck.xyz",
+  ].map((origin) => [
+    origin,
+    {
+      origin,
+      parse: parseVidstuckMessage,
     },
   ]),
 ]) as AdapterMap;
@@ -899,6 +984,7 @@ export function usePlayerEvents(
     [saveLocalProgress],
   );
 
+  // Live checkpoints while the player page remains open.
   useEffect(() => {
     const saveLatest = () => {
       const latest = eventDataRef.current;
@@ -925,8 +1011,14 @@ export function usePlayerEvents(
 
     window.addEventListener("pagehide", saveLatest);
 
+    const autosaveTimer = window.setInterval(
+      saveLatest,
+      AUTOSAVE_INTERVAL_MS,
+    );
+
     return () => {
       saveLatest();
+      window.clearInterval(autosaveTimer);
 
       document.removeEventListener(
         "visibilitychange",
@@ -939,14 +1031,12 @@ export function usePlayerEvents(
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      // Only accept messages from explicitly supported provider origins.
       if (!PLAYER_ORIGIN_SET.has(event.origin)) return;
 
-      const frame = playerFrameRef?.current;
-
-      if (
-        frame &&
-        event.source !== frame.contentWindow
-      ) {
+      // Some providers forward progress from a nested iframe. Its source
+      // differs from the outer iframe, so origin validation is used here.
+      if (playerFrameRef && !playerFrameRef.current) {
         return;
       }
 
@@ -975,6 +1065,7 @@ export function usePlayerEvents(
 
       if (!normalized) return;
 
+      // This ref is the live source used by server switching.
       eventDataRef.current = normalized;
 
       if (normalized.duration > 0) {
