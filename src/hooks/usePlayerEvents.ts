@@ -1,3 +1,4 @@
+
 "use client";
 
 import { ContentType } from "@/types";
@@ -88,20 +89,21 @@ function numberFrom(...values: unknown[]): number | undefined {
 }
 
 function unwrapMessage(value: unknown): PlayerMessage | null {
-  let current = parseJson(value);
+  let current: unknown = parseJson(value);
 
   if (!isRecord(current)) return null;
 
   for (let i = 0; i < 5; i += 1) {
-    if (current.data === undefined) break;
+    if (!isRecord(current) || current.data === undefined) break;
 
-    const next = parseJson(current.data);
+    const next: unknown = parseJson(current.data);
+
     if (!isRecord(next)) break;
 
     current = next;
   }
 
-  return current;
+  return isRecord(current) ? current : null;
 }
 
 function normalizeEvent(value: unknown): PlayerEventType | null {
@@ -705,4 +707,4 @@ export function usePlayerEvents(options: UsePlayerEventsOptions = {}) {
   }, [saveLocalProgress]);
 
   return { getCurrentTime, flushProgress };
-  }
+}
