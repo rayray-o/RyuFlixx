@@ -1,3 +1,4 @@
+
 "use client";
 
 import Rating from "@/components/ui/other/Rating";
@@ -16,17 +17,42 @@ interface ResumeCardProps {
   onFocus?: () => void;
 }
 
-const ResumeCard: React.FC<ResumeCardProps> = ({ media, continuation = null, onFocus }) => {
+const ResumeCard: React.FC<ResumeCardProps> = ({
+  media,
+  continuation = null,
+  onFocus,
+}) => {
   const releaseYear = new Date(media.release_date).getFullYear();
-  const isUpNext = media.type === "tv" && media.completed && continuation !== null;
+
+  const continuationIsDifferentEpisode =
+    media.type === "tv" &&
+    continuation !== null &&
+    (
+      continuation.season !== media.season ||
+      continuation.episode !== media.episode
+    );
+
+  const isUpNext =
+    media.type === "tv" &&
+    continuation !== null &&
+    (media.completed || continuationIsDifferentEpisode);
+
   const season = continuation?.season ?? media.season;
   const episode = continuation?.episode ?? media.episode;
 
-  const posterImage = getImageUrl(media.backdrop_path || media.poster_path || "");
+  const posterImage = getImageUrl(
+    media.backdrop_path || media.poster_path || "",
+  );
 
   const getRedirectLink = useCallback(() => {
-    if (media.type === "movie") return `/movie/${media.media_id}/player`;
-    if (media.type === "tv") return `/tv/${media.media_id}/${season}/${episode}/player`;
+    if (media.type === "movie") {
+      return `/movie/${media.media_id}/player`;
+    }
+
+    if (media.type === "tv") {
+      return `/tv/${media.media_id}/${season}/${episode}/player`;
+    }
+
     return "/";
   }, [media, season, episode]);
 
@@ -35,8 +61,16 @@ const ResumeCard: React.FC<ResumeCardProps> = ({ media, continuation = null, onF
       event.preventDefault();
       event.stopPropagation();
 
-      removeWatchHistory(media.media_id, media.type, media.season, media.episode);
-      if (media.type === "tv") clearTvContinuation(media.media_id);
+      removeWatchHistory(
+        media.media_id,
+        media.type,
+        media.season,
+        media.episode,
+      );
+
+      if (media.type === "tv") {
+        clearTvContinuation(media.media_id);
+      }
     },
     [media.media_id, media.type, media.season, media.episode],
   );
@@ -54,22 +88,37 @@ const ResumeCard: React.FC<ResumeCardProps> = ({ media, continuation = null, onF
       onFocus={onFocus}
       onKeyDown={(event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+
         const current = event.currentTarget;
         const rail = current.closest("[data-rail]");
         if (!rail) return;
-        const items = Array.from(rail.querySelectorAll<HTMLElement>("[data-rail-item]"));
+
+        const items = Array.from(
+          rail.querySelectorAll<HTMLElement>("[data-rail-item]"),
+        );
+
         const index = items.indexOf(current);
         const direction = event.key === "ArrowRight" ? 1 : -1;
         const next = items[index + direction];
+
         if (!next) return;
+
         event.preventDefault();
         next.focus();
-        next.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        next.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+          inline: "center",
+        });
       }}
       data-rail-item
       className="block outline-none"
     >
-      <div className={cn("group motion-preset-focus relative aspect-video overflow-hidden rounded-[4px] text-white ring-offset-black transition duration-300 focus-within:ring-2 focus-within:ring-white/80")}>
+      <div
+        className={cn(
+          "group motion-preset-focus relative aspect-video overflow-hidden rounded-[4px] text-white ring-offset-black transition duration-300 focus-within:ring-2 focus-within:ring-white/80",
+        )}
+      >
         <button
           type="button"
           aria-label={`Remove ${media.title} from Continue Watching`}
@@ -87,7 +136,14 @@ const ResumeCard: React.FC<ResumeCardProps> = ({ media, continuation = null, onF
         </div>
 
         {media.type === "tv" && (
-          <Chip size="sm" variant="faded" radius="sm" color="warning" className="absolute right-2 top-2 z-20" classNames={{ content: "font-bold" }}>
+          <Chip
+            size="sm"
+            variant="faded"
+            radius="sm"
+            color="warning"
+            className="absolute right-2 top-2 z-20"
+            classNames={{ content: "font-bold" }}
+          >
             S{season} E{episode}
           </Chip>
         )}
@@ -97,9 +153,19 @@ const ResumeCard: React.FC<ResumeCardProps> = ({ media, continuation = null, onF
           size="sm"
           variant="faded"
           className="absolute left-2 top-2 z-20"
-          color={isUpNext ? "warning" : media.completed ? "success" : undefined}
+          color={
+            isUpNext
+              ? "warning"
+              : media.completed
+                ? "success"
+                : undefined
+          }
         >
-          {isUpNext ? "Up Next" : media.completed ? "Completed" : formatDuration(media.last_position)}
+          {isUpNext
+            ? "Up Next"
+            : media.completed
+              ? "Completed"
+              : formatDuration(media.last_position)}
         </Chip>
 
         <Progress
@@ -115,8 +181,13 @@ const ResumeCard: React.FC<ResumeCardProps> = ({ media, continuation = null, onF
 
         <div className="absolute bottom-0 z-3 flex w-full flex-col gap-1 p-3">
           <div className="grid grid-cols-[1fr_auto] items-end justify-between gap-5">
-            <h6 className="truncate text-sm font-semibold">{media.title}</h6>
-            <p className="truncate text-xs">{timeAgo(media.updated_at)}</p>
+            <h6 className="truncate text-sm font-semibold">
+              {media.title}
+            </h6>
+
+            <p className="truncate text-xs">
+              {timeAgo(media.updated_at)}
+            </p>
           </div>
 
           <div className="flex justify-between text-xs">
