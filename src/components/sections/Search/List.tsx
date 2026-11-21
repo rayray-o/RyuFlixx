@@ -10,21 +10,71 @@ import TvShowHomeCard from "@/components/sections/TV/Cards/Poster";
 import BackToTopButton from "@/components/ui/button/BackToTopButton";
 import { isEmpty } from "@/utils/helpers";
 import { getLoadingLabel } from "@/utils/movies";
+import {
+  getActiveProfileId,
+  PROFILE_UPDATED_EVENT,
+} from "@/utils/profiles";
 import { Spinner } from "@heroui/react";
 import { useInViewport } from "@mantine/hooks";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Movie, TV } from "tmdb-ts/dist/types";
+import { parseAsString, useQueryState } from "nuqs";
 import MoviePosterCard from "../Movie/Cards/Poster";
 import SearchFilter from "./Filter";
 
 const SearchList = () => {
   const { ref, inViewport } = useInViewport();
 
-  const [submittedSearchQuery, setSubmittedSearchQuery] =
-    useState("");
+  const [urlQuery] = useQueryState(
+    "q",
+    parseAsString.withDefault(""),
+  );
 
-  const triggered = !isEmpty(submittedSearchQuery.trim());
+  const [submittedSearchQuery, setSubmittedSearchQuery] =
+    useState(() => urlQuery.trim());
+
+  const [activeProfileId, setActiveProfileId] =
+    useState(getActiveProfileId);
+
+  const triggered = !isEmpty(
+    submittedSearchQuery.trim(),
+  );
+
+  useEffect(() => {
+    const refreshProfile = () => {
+      setActiveProfileId(getActiveProfileId());
+    };
+
+    window.addEventListener(
+      PROFILE_UPDATED_EVENT,
+      refreshProfile,
+    );
+
+    return () => {
+      window.removeEventListener(
+        PROFILE_UPDATED_EVENT,
+        refreshProfile,
+      );
+    };
+  }, []);
+
+  // Restore submitted searches when navigating Back/Forward.
+  useEffect(() => {
+    const restoreFromUrl = () => {
+      const query = new URLSearchParams(
+        window.location.search,
+      ).get("q") ?? "";
+
+      setSubmittedSearchQuery(query.trim());
+    };
+
+    window.addEventListener("popstate", restoreFromUrl);
+
+    return () => {
+      window.removeEventListener("popstate", restoreFromUrl);
+    };
+  }, []);
 
   const {
     data,
@@ -36,7 +86,10 @@ const SearchList = () => {
     hasNextPage,
   } = useInfiniteQuery({
     enabled: triggered,
-    queryKey: ["unified-search-list", submittedSearchQuery],
+    queryKey: [
+      "unified-search-list",
+      submittedSearchQuery,
+    ],
     queryFn: async ({ pageParam }): Promise<UnifiedSearchPage> => {
       const response = await getSearchResults(
         submittedSearchQuery,
@@ -76,12 +129,8 @@ const SearchList = () => {
   ]);
 
   const resultPages = data?.pages ?? [];
-
-  const firstPageResults =
-    resultPages[0]?.results ?? [];
-
-  const totalResults =
-    resultPages[0]?.total_results ?? 0;
+  const firstPageResults = resultPages[0]?.results ?? [];
+  const totalResults = resultPages[0]?.total_results ?? 0;
 
   const renderResult = (item: UnifiedSearchItem) => {
     if (item.media_type === "movie") {
@@ -158,6 +207,7 @@ const SearchList = () => {
   return (
     <div className="flex flex-col items-center gap-8">
       <SearchFilter
+        key={activeProfileId}
         isLoading={isFetching}
         onSearchSubmit={(value) =>
           setSubmittedSearchQuery(value.trim())
