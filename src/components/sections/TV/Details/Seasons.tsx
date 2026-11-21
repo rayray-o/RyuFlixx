@@ -5,6 +5,7 @@ import {
   forwardRef,
   memo,
   useDeferredValue,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -45,6 +46,7 @@ const TvShowsSeasonsSelection = forwardRef<HTMLElement, Props>(
 
     const [layout, setLayout] = useState<"list" | "grid">("list");
     const [sortedByName, setSortedByName] = useState(false);
+    const [seasonSelectOpen, setSeasonSelectOpen] = useState(false);
 
     const selectedSeason = useMemo(
       () =>
@@ -53,6 +55,134 @@ const TvShowsSeasonsSelection = forwardRef<HTMLElement, Props>(
         ),
       [filteredSeasons, seasonNumber],
     );
+
+    // Smooth pointer-edge auto-scroll for the season dropdown.
+    useEffect(() => {
+      if (!seasonSelectOpen) return;
+
+      let pointerY: number | null = null;
+      let scrollTarget: HTMLElement | null = null;
+      let animationFrame = 0;
+      let previousFrameTime = 0;
+
+      const stopScrolling = () => {
+        pointerY = null;
+        scrollTarget = null;
+        previousFrameTime = 0;
+
+        if (animationFrame) {
+          cancelAnimationFrame(animationFrame);
+          animationFrame = 0;
+        }
+      };
+
+      const animateScroll = (time: number) => {
+        if (!scrollTarget || pointerY === null) {
+          animationFrame = 0;
+          previousFrameTime = 0;
+          return;
+        }
+
+        const target = scrollTarget;
+        const bounds = target.getBoundingClientRect();
+
+        if (
+          pointerY < bounds.top ||
+          pointerY > bounds.bottom ||
+          target.scrollHeight <= target.clientHeight + 1
+        ) {
+          animationFrame = 0;
+          previousFrameTime = 0;
+          return;
+        }
+
+        const edgeSize = Math.min(58, bounds.height * 0.22);
+        let direction = 0;
+        let intensity = 0;
+
+        const distanceFromTop = pointerY - bounds.top;
+        const distanceFromBottom = bounds.bottom - pointerY;
+
+        if (distanceFromTop < edgeSize) {
+          direction = -1;
+          intensity = 1 - distanceFromTop / edgeSize;
+        } else if (distanceFromBottom < edgeSize) {
+          direction = 1;
+          intensity = 1 - distanceFromBottom / edgeSize;
+        }
+
+        if (!direction) {
+          animationFrame = 0;
+          previousFrameTime = 0;
+          return;
+        }
+
+        // Gradually accelerates toward the edge, without sudden jumps.
+        const speed = 100 + Math.pow(intensity, 1.7) * 850;
+        const elapsed = previousFrameTime
+          ? Math.min(time - previousFrameTime, 32) / 1000
+          : 0;
+
+        previousFrameTime = time;
+
+        const previousScrollTop = target.scrollTop;
+        target.scrollTop += direction * speed * elapsed;
+
+        // Stop at either end instead of continuously wasting frames.
+        if (
+          target.scrollTop === previousScrollTop &&
+          (target.scrollTop <= 0 ||
+            target.scrollTop >= target.scrollHeight - target.clientHeight)
+        ) {
+          animationFrame = 0;
+          previousFrameTime = 0;
+          return;
+        }
+
+        animationFrame = requestAnimationFrame(animateScroll);
+      };
+
+      const handlePointerMove = (event: PointerEvent) => {
+        if (event.pointerType === "touch") return;
+
+        const listbox =
+          document.querySelector<HTMLElement>('[role="listbox"]');
+
+        if (!listbox) {
+          stopScrolling();
+          return;
+        }
+
+        const bounds = listbox.getBoundingClientRect();
+
+        // Only activate while the pointer is actually over the dropdown.
+        if (
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom
+        ) {
+          stopScrolling();
+          return;
+        }
+
+        pointerY = event.clientY;
+        scrollTarget = listbox;
+
+        if (!animationFrame) {
+          animationFrame = requestAnimationFrame(animateScroll);
+        }
+      };
+
+      document.addEventListener("pointermove", handlePointerMove, {
+        passive: true,
+      });
+
+      return () => {
+        document.removeEventListener("pointermove", handlePointerMove);
+        stopScrolling();
+      };
+    }, [seasonSelectOpen]);
 
     const controlClass =
       "flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.045] px-3 text-sm font-medium text-white/65 transition-colors duration-150 hover:bg-white/[0.09]";
@@ -86,12 +216,14 @@ const TvShowsSeasonsSelection = forwardRef<HTMLElement, Props>(
                 selectedKeys={seasonNumber ? [seasonNumber] : []}
                 disallowEmptySelection
                 isDisabled={!filteredSeasons.length}
+                isOpen={seasonSelectOpen}
+                onOpenChange={setSeasonSelectOpen}
                 size="lg"
                 radius="lg"
                 variant="bordered"
                 listboxProps={{
                   className:
-                    "max-h-[min(60vh,420px)] overflow-y-auto overscroll-contain scroll-smooth py-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.25)_transparent]",
+                    "max-h-[min(60vh,420px)] overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                 }}
                 classNames={{
                   trigger:
