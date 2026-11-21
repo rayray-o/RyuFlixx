@@ -89,12 +89,16 @@ const TvShowsSeasonsSelection = forwardRef<HTMLElement, Props>(
                 size="lg"
                 radius="lg"
                 variant="bordered"
+                listboxProps={{
+                  className:
+                    "max-h-[min(60vh,420px)] overflow-y-auto overscroll-contain scroll-smooth py-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.25)_transparent]",
+                }}
                 classNames={{
                   trigger:
                     "h-12 min-h-12 border border-white/10 bg-white/[0.045] shadow-none data-[hover=true]:bg-white/[0.075] data-[focus=true]:border-warning/60",
                   value: "text-sm font-semibold text-white",
                   popoverContent:
-                    "border border-white/10 bg-[#19191c] text-white",
+                    "max-h-[min(65vh,460px)] overflow-hidden border border-white/10 bg-[#19191c] text-white",
                 }}
                 onChange={(event) => {
                   setSearch("");
