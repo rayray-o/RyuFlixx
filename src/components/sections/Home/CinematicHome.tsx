@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { TouchEvent, MouseEvent } from "react";
 import { useInViewport } from "@mantine/hooks";
 import { useQuery } from "@tanstack/react-query";
 import type { Movie, TV } from "tmdb-ts/dist/types";
@@ -430,6 +431,14 @@ export default function CinematicHome() {
   const rafTwoRef = useRef<number | null>(null);
   const heroTimer = useRef<number | null>(null);
 
+  // Mobile hero swipe state
+  const heroTouchStart = useRef<{
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const suppressHeroClick = useRef(false);
+
   const [heroLogo, setHeroLogo] = useState<{
     key: string;
     url: string | null;
@@ -529,6 +538,97 @@ export default function CinematicHome() {
         : heroCandidates[0],
     );
   }, [heroCandidates]);
+
+  // Swipe navigation uses the existing selected state,
+  // so the normal backdrop transition runs unchanged.
+  const moveHero = (direction: 1 | -1) => {
+    if (heroCandidates.length < 2) return;
+
+    setSelected((current) => {
+      if (!current) {
+        return direction === 1
+          ? heroCandidates[0]
+          : heroCandidates[heroCandidates.length - 1];
+      }
+
+      const currentIndex = heroCandidates.findIndex(
+        (item) =>
+          item.id === current.id &&
+          item.content === current.content,
+      );
+
+      const safeIndex = currentIndex < 0 ? 0 : currentIndex;
+
+      const nextIndex =
+        (safeIndex + direction + heroCandidates.length) %
+        heroCandidates.length;
+
+      return heroCandidates[nextIndex];
+    });
+  };
+
+  const handleHeroTouchStart = (
+    event: TouchEvent<HTMLElement>,
+  ) => {
+    suppressHeroClick.current = false;
+
+    const touch = event.touches[0];
+
+    if (!touch) return;
+
+    heroTouchStart.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+    };
+  };
+
+  const handleHeroTouchEnd = (
+    event: TouchEvent<HTMLElement>,
+  ) => {
+    const start = heroTouchStart.current;
+    heroTouchStart.current = null;
+
+    if (!start || !isMobile) return;
+
+    const touch = event.changedTouches[0];
+
+    if (!touch) return;
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+
+    const horizontalDistance = Math.abs(deltaX);
+    const verticalDistance = Math.abs(deltaY);
+
+    // Ignore taps, vertical scrolling, and small movements.
+    if (
+      horizontalDistance < 48 ||
+      verticalDistance > 75 ||
+      horizontalDistance < verticalDistance * 1.25
+    ) {
+      return;
+    }
+
+    suppressHeroClick.current = true;
+
+    // Left swipe = next. Right swipe = previous.
+    moveHero(deltaX < 0 ? 1 : -1);
+  };
+
+  const handleHeroTouchCancel = () => {
+    heroTouchStart.current = null;
+    suppressHeroClick.current = false;
+  };
+
+  const handleHeroClickCapture = (
+    event: MouseEvent<HTMLElement>,
+  ) => {
+    if (!suppressHeroClick.current) return;
+
+    suppressHeroClick.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
   useEffect(() => {
     const next = selected?.backdrop;
@@ -848,6 +948,11 @@ export default function CinematicHome() {
       <div className="relative z-10 min-w-0">
         {/* Hero */}
         <section
+          onTouchStart={handleHeroTouchStart}
+          onTouchEnd={handleHeroTouchEnd}
+          onTouchCancel={handleHeroTouchCancel}
+          onClickCapture={handleHeroClickCapture}
+          style={{ touchAction: "pan-y" }}
           className={cn(
             "relative flex items-end",
             "min-h-[560px] px-5 pb-14 pt-24",
@@ -1053,3 +1158,4 @@ export default function CinematicHome() {
     </div>
   );
 }
+
