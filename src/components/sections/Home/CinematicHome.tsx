@@ -418,6 +418,7 @@ export default function CinematicHome() {
   const [history, setHistory] = useState<LocalWatchHistory[]>([]);
   const [selected, setSelected] = useState<Candidate | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [isHeroInteracting, setIsHeroInteracting] = useState(false);
 
   const [displayedBackdrop, setDisplayedBackdrop] = useState("");
   const [transition, setTransition] = useState<Transition | null>(null);
@@ -485,17 +486,28 @@ export default function CinematicHome() {
     return () => media.removeEventListener?.("change", update);
   }, []);
 
-  const currentHistory = useMemo(
-    () =>
-      history.filter(
-        (item) =>
-          item.type === content &&
-          (!item.completed ||
-            (item.type === "tv" &&
-              !!getTvContinuation(item.media_id))),
-      ),
-    [history, content],
-  );
+  // Deduplicate Continue Watching by media ID.
+  // History is sorted newest first, so the first entry is the newest episode.
+  const currentHistory = useMemo(() => {
+    const filtered = history.filter(
+      (item) =>
+        item.type === content &&
+        (!item.completed ||
+          (item.type === "tv" &&
+            !!getTvContinuation(item.media_id))),
+    );
+
+    const seen = new Set<string>();
+
+    return filtered.filter((item) => {
+      const identity = `${item.type}-${item.media_id}`;
+
+      if (seen.has(identity)) return false;
+
+      seen.add(identity);
+      return true;
+    });
+  }, [history, content]);
 
   const fallbackQuery =
     siteConfig.queryLists[
@@ -572,6 +584,14 @@ export default function CinematicHome() {
   ) => {
     suppressHeroClick.current = false;
 
+    // Stop autoplay immediately when the user touches the hero.
+    if (heroTimer.current !== null) {
+      window.clearInterval(heroTimer.current);
+      heroTimer.current = null;
+    }
+
+    setIsHeroInteracting(true);
+
     const touch = event.touches[0];
 
     if (!touch) return;
@@ -587,6 +607,9 @@ export default function CinematicHome() {
   ) => {
     const start = heroTouchStart.current;
     heroTouchStart.current = null;
+
+    // Restart autoplay with a fresh countdown after the interaction.
+    setIsHeroInteracting(false);
 
     if (!start || !isMobile) return;
 
@@ -618,6 +641,7 @@ export default function CinematicHome() {
   const handleHeroTouchCancel = () => {
     heroTouchStart.current = null;
     suppressHeroClick.current = false;
+    setIsHeroInteracting(false);
   };
 
   const handleHeroClickCapture = (
@@ -791,8 +815,16 @@ export default function CinematicHome() {
     return () => controller.abort();
   }, [selected?.id, selected?.content]);
 
+  // Mobile autoplay. Pauses during touch interaction and restarts
+  // with a full 7.5-second countdown when the interaction ends.
   useEffect(() => {
-    if (!isMobile || heroCandidates.length < 2) return;
+    if (
+      !isMobile ||
+      isHeroInteracting ||
+      heroCandidates.length < 2
+    ) {
+      return;
+    }
 
     const advance = () => {
       if (document.hidden) return;
@@ -821,7 +853,7 @@ export default function CinematicHome() {
 
       heroTimer.current = null;
     };
-  }, [isMobile, heroCandidates]);
+  }, [isMobile, isHeroInteracting, heroCandidates]);
 
   useEffect(
     () => () => {
@@ -1158,4 +1190,3 @@ export default function CinematicHome() {
     </div>
   );
 }
-
