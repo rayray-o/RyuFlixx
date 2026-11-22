@@ -1,4 +1,3 @@
-
 "use client";
 
 export const DEFAULT_PROFILE_ID = "default";
@@ -31,7 +30,9 @@ export const PROFILE_AVATARS = [
 ];
 
 const DEFAULT_AVATAR = PROFILE_AVATARS[0];
+
 const BEHAVIOR_MEMORY_KEY = "ryuflix_behavioral_memory_v1";
+const TASTE_PROFILE_KEY = "ryuflix_taste_profile";
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -83,18 +84,24 @@ export function getProfiles(): RyuProfile[] {
 
   return [
     defaultProfile,
-    ...stored.filter((profile) => profile.id !== DEFAULT_PROFILE_ID),
+    ...stored.filter(
+      (profile) => profile.id !== DEFAULT_PROFILE_ID,
+    ),
   ];
 }
 
 export function getActiveProfileId(): string {
   if (!isBrowser()) return DEFAULT_PROFILE_ID;
 
-  const id = window.localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY);
+  const id = window.localStorage.getItem(
+    ACTIVE_PROFILE_STORAGE_KEY,
+  );
 
   if (!id) return DEFAULT_PROFILE_ID;
 
-  return getProfiles().some((profile) => profile.id === id)
+  return getProfiles().some(
+    (profile) => profile.id === id,
+  )
     ? id
     : DEFAULT_PROFILE_ID;
 }
@@ -103,7 +110,9 @@ export function getActiveProfile(): RyuProfile {
   const id = getActiveProfileId();
 
   return (
-    getProfiles().find((profile) => profile.id === id) ?? {
+    getProfiles().find(
+      (profile) => profile.id === id,
+    ) ?? {
       id: DEFAULT_PROFILE_ID,
       name: "Default",
       avatar: DEFAULT_AVATAR,
@@ -116,7 +125,9 @@ export function getActiveProfile(): RyuProfile {
 export function getProfileStorageKey(baseKey: string): string {
   const profileId = getActiveProfileId();
 
-  if (profileId === DEFAULT_PROFILE_ID) return baseKey;
+  if (profileId === DEFAULT_PROFILE_ID) {
+    return baseKey;
+  }
 
   return `${baseKey}__profile_${profileId}`;
 }
@@ -127,50 +138,113 @@ function saveProfiles(profiles: RyuProfile[]) {
   window.localStorage.setItem(
     PROFILES_STORAGE_KEY,
     JSON.stringify(
-      profiles.filter((profile) => profile.id !== DEFAULT_PROFILE_ID),
+      profiles.filter(
+        (profile) => profile.id !== DEFAULT_PROFILE_ID,
+      ),
     ),
   );
 }
 
-function profileStorageKey(profileId: string, baseKey: string) {
+function profileStorageKey(
+  profileId: string,
+  baseKey: string,
+) {
   return profileId === DEFAULT_PROFILE_ID
     ? baseKey
     : `${baseKey}__profile_${profileId}`;
 }
 
-function saveOutgoingBehaviorMemory(profileId: string) {
+function saveOutgoingStorage(
+  profileId: string,
+  baseKey: string,
+) {
   if (!isBrowser()) return;
 
-  const current = window.localStorage.getItem(BEHAVIOR_MEMORY_KEY);
-  const destination = profileStorageKey(profileId, BEHAVIOR_MEMORY_KEY);
+  const current = window.localStorage.getItem(baseKey);
+  const destination = profileStorageKey(
+    profileId,
+    baseKey,
+  );
 
   if (current !== null) {
-    window.localStorage.setItem(destination, current);
+    window.localStorage.setItem(
+      destination,
+      current,
+    );
   } else {
     window.localStorage.removeItem(destination);
   }
 }
 
-function restoreBehaviorMemory(profileId: string) {
+function restoreProfileStorage(
+  profileId: string,
+  baseKey: string,
+) {
   if (!isBrowser()) return;
 
-  const source = profileStorageKey(profileId, BEHAVIOR_MEMORY_KEY);
-  const memory = window.localStorage.getItem(source);
+  const source = profileStorageKey(
+    profileId,
+    baseKey,
+  );
 
-  if (memory === null) {
-    window.localStorage.removeItem(BEHAVIOR_MEMORY_KEY);
+  const value = window.localStorage.getItem(source);
+
+  if (value === null) {
+    window.localStorage.removeItem(baseKey);
   } else {
-    window.localStorage.setItem(BEHAVIOR_MEMORY_KEY, memory);
+    window.localStorage.setItem(
+      baseKey,
+      value,
+    );
   }
+}
+
+function saveOutgoingBehaviorMemory(profileId: string) {
+  saveOutgoingStorage(
+    profileId,
+    BEHAVIOR_MEMORY_KEY,
+  );
+}
+
+function restoreBehaviorMemory(profileId: string) {
+  restoreProfileStorage(
+    profileId,
+    BEHAVIOR_MEMORY_KEY,
+  );
+}
+
+function saveOutgoingTasteProfile(profileId: string) {
+  saveOutgoingStorage(
+    profileId,
+    TASTE_PROFILE_KEY,
+  );
+}
+
+function restoreTasteProfile(profileId: string) {
+  restoreProfileStorage(
+    profileId,
+    TASTE_PROFILE_KEY,
+  );
 }
 
 function notifyProfileChanged() {
   if (!isBrowser()) return;
 
-  window.dispatchEvent(new CustomEvent(PROFILE_UPDATED_EVENT));
-  window.dispatchEvent(new CustomEvent("ryuflix-history-updated"));
-  window.dispatchEvent(new CustomEvent("ryuflix-watchlist-updated"));
-  window.dispatchEvent(new CustomEvent("ryuflix-tv-continuation-updated"));
+  window.dispatchEvent(
+    new CustomEvent(PROFILE_UPDATED_EVENT),
+  );
+
+  window.dispatchEvent(
+    new CustomEvent("ryuflix-history-updated"),
+  );
+
+  window.dispatchEvent(
+    new CustomEvent("ryuflix-watchlist-updated"),
+  );
+
+  window.dispatchEvent(
+    new CustomEvent("ryuflix-tv-continuation-updated"),
+  );
 }
 
 export function createProfile(
@@ -188,9 +262,12 @@ export function createProfile(
   if (profiles.length >= MAX_PROFILES) return null;
 
   const id =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
+    typeof crypto !== "undefined" &&
+    "randomUUID" in crypto
       ? crypto.randomUUID()
-      : `profile_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      : `profile_${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2, 9)}`;
 
   const profile: RyuProfile = {
     id,
@@ -210,7 +287,12 @@ export function renameProfile(
   profileId: string,
   name: string,
 ): boolean {
-  if (!isBrowser() || profileId === DEFAULT_PROFILE_ID) return false;
+  if (
+    !isBrowser() ||
+    profileId === DEFAULT_PROFILE_ID
+  ) {
+    return false;
+  }
 
   const cleanName = name.trim().slice(0, 24);
 
@@ -218,7 +300,11 @@ export function renameProfile(
 
   const profiles = getProfiles();
 
-  if (!profiles.some((profile) => profile.id === profileId)) {
+  if (
+    !profiles.some(
+      (profile) => profile.id === profileId,
+    )
+  ) {
     return false;
   }
 
@@ -238,12 +324,24 @@ export function updateProfileAvatar(
   profileId: string,
   avatar: string,
 ): boolean {
-  if (!isBrowser() || profileId === DEFAULT_PROFILE_ID) return false;
-  if (!PROFILE_AVATARS.includes(avatar)) return false;
+  if (
+    !isBrowser() ||
+    profileId === DEFAULT_PROFILE_ID
+  ) {
+    return false;
+  }
+
+  if (!PROFILE_AVATARS.includes(avatar)) {
+    return false;
+  }
 
   const profiles = getProfiles();
 
-  if (!profiles.some((profile) => profile.id === profileId)) {
+  if (
+    !profiles.some(
+      (profile) => profile.id === profileId,
+    )
+  ) {
     return false;
   }
 
@@ -264,34 +362,51 @@ export function switchProfile(profileId: string): boolean {
 
   const profiles = getProfiles();
 
-  if (!profiles.some((profile) => profile.id === profileId)) {
+  if (
+    !profiles.some(
+      (profile) => profile.id === profileId,
+    )
+  ) {
     return false;
   }
 
   const currentId = getActiveProfileId();
 
-  if (currentId === profileId) return true;
+  if (currentId === profileId) {
+    return true;
+  }
 
+  // Save the active profile's data before switching.
   saveOutgoingBehaviorMemory(currentId);
+  saveOutgoingTasteProfile(currentId);
 
   window.localStorage.setItem(
     ACTIVE_PROFILE_STORAGE_KEY,
     profileId,
   );
 
+  // Restore only the destination profile's data.
   restoreBehaviorMemory(profileId);
+  restoreTasteProfile(profileId);
+
   notifyProfileChanged();
 
   return true;
 }
 
 export function deleteProfile(profileId: string): boolean {
-  if (!isBrowser() || profileId === DEFAULT_PROFILE_ID) {
+  if (
+    !isBrowser() ||
+    profileId === DEFAULT_PROFILE_ID
+  ) {
     return false;
   }
 
   const profiles = getProfiles();
-  const target = profiles.find((profile) => profile.id === profileId);
+
+  const target = profiles.find(
+    (profile) => profile.id === profileId,
+  );
 
   if (!target) return false;
 
@@ -299,6 +414,7 @@ export function deleteProfile(profileId: string): boolean {
 
   if (activeId === profileId) {
     saveOutgoingBehaviorMemory(profileId);
+    saveOutgoingTasteProfile(profileId);
 
     window.localStorage.setItem(
       ACTIVE_PROFILE_STORAGE_KEY,
@@ -306,6 +422,7 @@ export function deleteProfile(profileId: string): boolean {
     );
 
     restoreBehaviorMemory(DEFAULT_PROFILE_ID);
+    restoreTasteProfile(DEFAULT_PROFILE_ID);
   }
 
   const suffix = `__profile_${profileId}`;
@@ -323,13 +440,26 @@ export function deleteProfile(profileId: string): boolean {
   }
 
   window.localStorage.removeItem(
-    profileStorageKey(profileId, BEHAVIOR_MEMORY_KEY),
+    profileStorageKey(
+      profileId,
+      BEHAVIOR_MEMORY_KEY,
+    ),
+  );
+
+  window.localStorage.removeItem(
+    profileStorageKey(
+      profileId,
+      TASTE_PROFILE_KEY,
+    ),
   );
 
   saveProfiles(
-    profiles.filter((profile) => profile.id !== profileId),
+    profiles.filter(
+      (profile) => profile.id !== profileId,
+    ),
   );
 
   notifyProfileChanged();
+
   return true;
-}
+      }
