@@ -7,6 +7,7 @@ import {
   getWatchHistory,
 } from "@/utils/localStorage";
 import {
+  getBehavioralMemory,
   getBehavioralSignal,
   getBehavioralSummary,
 } from "@/utils/personalization/behavioral-memory";
@@ -15,6 +16,10 @@ import {
   type FeatureVectorItem,
   type FeatureVectorSeed,
 } from "@/utils/personalization/feature-vector-engine";
+import {
+  getLearnedRankingScores,
+  type LearnedTrainingExample,
+} from "@/utils/personalization/learned-ranking-engine";
 import {
   getPersonalizedRecommendations,
   type RecommendationItem,
@@ -29,6 +34,7 @@ const MAX_CACHE_ENTRIES = 16;
 const MAX_DETAIL_CACHE_ENTRIES = 300;
 const MAX_ENRICHED_CANDIDATES = 32;
 const MAX_HISTORY_SEEDS = 5;
+const MAX_TRAINING_TITLES = 18;
 const DETAIL_CONCURRENCY = 4;
 
 type DiscoverResponse = {
@@ -39,6 +45,23 @@ type HistorySeed = {
   id: number;
   score: number;
   updatedAt: string;
+};
+
+type TrainingSignal = {
+  id: number;
+  mediaType: ContentType;
+  label: number;
+  weight: number;
+  timestamp: string;
+};
+
+type TrainingHistoryGroup = {
+  id: number;
+  mediaType: ContentType;
+  progressTotal: number;
+  entries: number;
+  completions: number;
+  lastWatchedAt: string;
 };
 
 type CandidateRecord = {
@@ -75,6 +98,11 @@ const recommendationCache = new Map<
 >();
 
 const detailCache = new Map<string, CachedDetails>();
+
+const detailInFlight = new Map<
+  string,
+  Promise<DetailedFeatureItem | null>
+>();
 
 function number(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -346,28 +374,46 @@ async function fetchDetailedItem(
     return cached.item;
   }
 
-  const response = await tmdb<Record<string, unknown>>(
-    `/${mediaType}/${id}?append_to_response=credits,keywords`,
-  );
+  const existingRequest = detailInFlight.get(key);
 
-  if (!response) {
-    return null;
+  if (existingRequest) {
+    return existingRequest;
   }
 
-  const item = buildDetailedFeatureItem(
-    response,
-    mediaType,
-    id,
-  );
+  const request = (async () => {
+    const response = await tmdb<Record<string, unknown>>(
+      `/${mediaType}/${id}?append_to_response=credits,keywords`,
+    );
 
-  detailCache.set(key, {
-    expiresAt: Date.now() + DETAIL_CACHE_TTL,
-    item,
-  });
+    if (!response) {
+      return null;
+    }
 
-  pruneDetailCache();
+    const item = buildDetailedFeatureItem(
+      response,
+      mediaType,
+      id,
+    );
 
-  return item;
+    detailCache.set(key, {
+      expiresAt: Date.now() + DETAIL_CACHE_TTL,
+      item,
+    });
+
+    pruneDetailCache();
+
+    return item;
+  })();
+
+  detailInFlight.set(key, request);
+
+  try {
+    return await request;
+  } finally {
+    if (detailInFlight.get(key) === request) {
+      detailInFlight.delete(key);
+    }
+  }
 }
 
 async function mapWithConcurrency<T, R>(
@@ -460,7 +506,6 @@ function getHistorySeeds(
       continue;
     }
 
-    // A strong abandonment signal should not become a positive seed.
     if (signal < -0.5 && !entry.completed) {
       continue;
     }
@@ -493,6 +538,181 @@ function getHistorySeeds(
       );
     })
     .slice(0, MAX_HISTORY_SEEDS);
+}
+
+/**
+ * Build training signals from the active profile's viewing history.
+ *
+ * Completed titles and sustained viewing are positive examples.
+ * Very early abandonment is a weak negative example, not a strong
+ * declaration that the user disliked the title.
+ *
+ * TV episodes are grouped under their parent show.
+ */
+function getTrainingSignals(): TrainingSignal[] {
+  const history = getWatchHistory();
+  const memory = getBehavioralMemory();
+
+  const groups = new Map<
+    string,
+    TrainingHistoryGroup
+  >();
+
+  for (const entry of history) {
+    if (
+      !entry ||
+      (entry.type !== "movie" && entry.type !== "tv") ||
+      !Number.isFinite(entry.media_id)
+    ) {
+      continue;
+    }
+
+    const progress =
+      entry.completed
+        ? 1
+        : entry.duration > 0
+          ? clamp(
+              entry.last_position / entry.duration,
+              0,
+              1,
+            )
+          : 0;
+
+    // A title with no meaningful playback is not a useful label.
+    if (progress <= 0 && !entry.completed) {
+      continue;
+    }
+
+    const key = `${entry.type}:${entry.media_id}`;
+
+    const group = groups.get(key) ?? {
+      id: entry.media_id,
+      mediaType: entry.type,
+      progressTotal: 0,
+      entries: 0,
+      completions: 0,
+      lastWatchedAt: entry.updated_at,
+    };
+
+    group.progressTotal += progress;
+    group.entries += 1;
+
+    if (entry.completed) {
+      group.completions += 1;
+    }
+
+    if (
+      new Date(entry.updated_at).getTime() >
+      new Date(group.lastWatchedAt).getTime()
+    ) {
+      group.lastWatchedAt = entry.updated_at;
+    }
+
+    groups.set(key, group);
+  }
+
+  const eventCounts = new Map<
+    string,
+    {
+      abandons: number;
+      rewatches: number;
+    }
+  >();
+
+  for (const event of memory.events) {
+    const key = `${event.mediaType}:${event.mediaId}`;
+
+    const counts = eventCounts.get(key) ?? {
+      abandons: 0,
+      rewatches: 0,
+    };
+
+    if (event.event === "abandoned") {
+      counts.abandons += 1;
+    }
+
+    if (event.event === "rewatched") {
+      counts.rewatches += 1;
+    }
+
+    eventCounts.set(key, counts);
+  }
+
+  const signals: TrainingSignal[] = [];
+
+  for (const [key, group] of groups) {
+    if (group.entries === 0) {
+      continue;
+    }
+
+    const averageProgress =
+      group.progressTotal / group.entries;
+
+    const completionRate =
+      group.completions / group.entries;
+
+    const events = eventCounts.get(key) ?? {
+      abandons: 0,
+      rewatches: 0,
+    };
+
+    let label: number;
+
+    if (completionRate >= 0.75) {
+      label = 0.98;
+    } else if (completionRate > 0) {
+      label = 0.9;
+    } else if (averageProgress >= 0.75) {
+      label = 0.92;
+    } else if (averageProgress >= 0.5) {
+      label = 0.82;
+    } else if (averageProgress >= 0.3) {
+      label = 0.7;
+    } else if (averageProgress >= 0.12) {
+      label = 0.56;
+    } else {
+      label = 0.2;
+    }
+
+    // Only use abandonment as a negative when engagement was very low.
+    if (
+      events.abandons > 0 &&
+      averageProgress < 0.18 &&
+      group.completions === 0
+    ) {
+      label = 0.12;
+    }
+
+    if (events.rewatches > 0) {
+      label = Math.max(label, 0.97);
+    }
+
+    const weight = clamp(
+      0.35 +
+        averageProgress +
+        completionRate * 0.75 +
+        Math.log2(group.entries + 1) * 0.15 +
+        events.rewatches * 0.2,
+      0.3,
+      2.5,
+    );
+
+    signals.push({
+      id: group.id,
+      mediaType: group.mediaType,
+      label,
+      weight,
+      timestamp: group.lastWatchedAt,
+    });
+  }
+
+  return signals
+    .sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() -
+        new Date(a.timestamp).getTime(),
+    )
+    .slice(0, MAX_TRAINING_TITLES);
 }
 
 /**
@@ -556,6 +776,7 @@ function activityFingerprint(): string {
       entry.media_id,
       entry.updated_at,
       entry.completed ? 1 : 0,
+      entry.last_position,
     ].join(":"));
 
   const watchlist = getLocalWatchlist()
@@ -592,7 +813,6 @@ function addCandidate(
     existing.sourceScore += weight;
   }
 
-  // Retain the richest version when sources differ.
   if (
     (!existing.item.overview && item.overview) ||
     (!existing.item.poster_path && item.poster_path) ||
@@ -716,7 +936,10 @@ function pruneRecommendationCache(): void {
  * 4. Weight rare features using inverse document frequency.
  * 5. Compare candidates with the user's weighted feature vector
  *    and individual watched titles.
- * 6. Rank and diversify the final list.
+ * 6. Train a profile-specific Factorization Machine from viewing history.
+ * 7. Combine content similarity, learned engagement probability,
+ *    source agreement and catalogue quality.
+ * 8. Diversify the final list.
  *
  * Imported taste is optional. Viewing history can build the
  * recommendation profile automatically.
@@ -747,6 +970,7 @@ export async function getGorseInspiredRecommendations(
   }
 
   const seeds = getHistorySeeds(mediaType);
+  const trainingSignals = getTrainingSignals();
 
   const requests: SourceRequest[] = [
     {
@@ -877,13 +1101,16 @@ export async function getGorseInspiredRecommendations(
 
   preliminary.sort((a, b) => b.score - a.score);
 
-  // Enrich only the strongest preliminary candidates.
   const candidatesToEnrich = preliminary.slice(
     0,
     MAX_ENRICHED_CANDIDATES,
   );
 
-  const [candidateDetails, seedDetails] = await Promise.all([
+  const [
+    candidateDetails,
+    seedDetails,
+    trainingDetails,
+  ] = await Promise.all([
     mapWithConcurrency(
       candidatesToEnrich,
       DETAIL_CONCURRENCY,
@@ -900,6 +1127,15 @@ export async function getGorseInspiredRecommendations(
         fetchDetailedItem(
           seed.id,
           mediaType,
+        ),
+    ),
+    mapWithConcurrency(
+      trainingSignals,
+      DETAIL_CONCURRENCY,
+      (signal) =>
+        fetchDetailedItem(
+          signal.id,
+          signal.mediaType,
         ),
     ),
   ]);
@@ -920,23 +1156,53 @@ export async function getGorseInspiredRecommendations(
     });
   });
 
+  const trainingExamples: LearnedTrainingExample[] = [];
+
+  trainingDetails.forEach((item, index) => {
+    const signal = trainingSignals[index];
+
+    if (!item || !signal) return;
+
+    trainingExamples.push({
+      item,
+      label: signal.label,
+      weight: signal.weight,
+      timestamp: signal.timestamp,
+    });
+  });
+
   const contentSimilarity = getFeatureSimilarityScores(
     enrichedCandidates,
     enrichedSeeds,
     tasteProfile,
   );
 
+  const learnedScores = getLearnedRankingScores(
+    enrichedCandidates,
+    trainingExamples,
+  );
+
   const ranked: RankedCandidate[] = preliminary.map(
     ({ item, score }) => {
-      const similarity =
-        contentSimilarity.get(
-          `${item.mediaType}:${item.id}`,
-        ) ?? 0;
+      const key = `${item.mediaType}:${item.id}`;
 
-      // Content similarity is a ranking signal, not the only signal.
+      const similarity =
+        contentSimilarity.get(key) ?? 0;
+
+      const learnedProbability =
+        learnedScores.get(key);
+
+      const learnedBoost =
+        learnedProbability === undefined
+          ? 0
+          : (learnedProbability - 0.5) * 28;
+
       return {
         ...item,
-        _score: score + similarity * 18,
+        _score:
+          score +
+          similarity * 18 +
+          learnedBoost,
       };
     },
   );
@@ -963,4 +1229,5 @@ export async function getGorseInspiredRecommendations(
 export function clearGorseInspiredRecommendationCache(): void {
   recommendationCache.clear();
   detailCache.clear();
-    }
+  detailInFlight.clear();
+  }
