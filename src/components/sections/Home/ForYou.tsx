@@ -7,9 +7,10 @@ import Carousel from "@/components/ui/wrapper/Carousel";
 import type { ContentType } from "@/types";
 import type { TasteProfile } from "@/utils/personalization/taste-engine";
 import {
-  getPersonalizedRecommendations,
-  type RecommendationItem,
-} from "@/utils/personalization/recommendation-engine";
+  clearGorseInspiredRecommendationCache,
+  getGorseInspiredRecommendations,
+} from "@/utils/personalization/gorse-inspired-engine";
+import { PROFILE_UPDATED_EVENT } from "@/utils/profiles";
 import { Skeleton } from "@heroui/react";
 import { useEffect, useRef, useState } from "react";
 
@@ -24,10 +25,7 @@ type StoredTasteProfile = {
 
 function readProfile(): TasteProfile | null {
   try {
-    const raw =
-      window.localStorage.getItem(
-        PROFILE_KEY,
-      );
+    const raw = window.localStorage.getItem(PROFILE_KEY);
 
     if (!raw) {
       return null;
@@ -37,44 +35,21 @@ function readProfile(): TasteProfile | null {
       raw,
     ) as StoredTasteProfile | TasteProfile;
 
-    if (
-      !parsed ||
-      typeof parsed !== "object"
-    ) {
+    if (!parsed || typeof parsed !== "object") {
       return null;
     }
 
-    /*
-     * The Personalize page stores a wrapper:
-     *
-     * {
-     *   provider,
-     *   importedAt,
-     *   version,
-     *   tasteProfile: {...}
-     * }
-     *
-     * This was the exact reason For You was
-     * disappearing after the loading state.
-     */
     if (
       "tasteProfile" in parsed &&
       parsed.tasteProfile &&
-      typeof parsed.tasteProfile ===
-        "object"
+      typeof parsed.tasteProfile === "object"
     ) {
       return parsed.tasteProfile;
     }
 
-    /*
-     * Also accept a raw TasteProfile so the
-     * component remains compatible with any
-     * older localStorage value.
-     */
     if (
       "confidence" in parsed &&
-      typeof parsed.confidence ===
-        "number"
+      typeof parsed.confidence === "number"
     ) {
       return parsed as TasteProfile;
     }
@@ -89,112 +64,105 @@ interface ForYouProps {
   type: ContentType;
 }
 
-const ForYou: React.FC<ForYouProps> = ({
-  type,
-}) => {
-  const [items, setItems] =
-    useState<RecommendationItem[]>(
-      [],
-    );
+const ForYou: React.FC<ForYouProps> = ({ type }) => {
+  const [items, setItems] = useState<
+    Awaited<
+      ReturnType<typeof getGorseInspiredRecommendations>
+    >
+  >([]);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [loading, setLoading] = useState(true);
 
-  const [hasProfile, setHasProfile] =
-    useState(false);
-
-  const requestIdRef =
-    useRef(0);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
-    const requestId =
-      ++requestIdRef.current;
-
     let cancelled = false;
 
     const load = async () => {
-      const profile =
-        readProfile();
+      const requestId = ++requestIdRef.current;
 
-      /*
-       * No personalization profile exists.
-       * Hide the section only after we have
-       * actually checked localStorage.
-       */
-      if (!profile) {
-        if (
-          !cancelled &&
-          requestId ===
-            requestIdRef.current
-        ) {
-          setHasProfile(false);
-          setLoading(false);
-        }
-
-        return;
-      }
-
-      setHasProfile(true);
+      setLoading(true);
+      setItems([]);
 
       try {
         const recommendations =
-          await getPersonalizedRecommendations(
-            profile,
+          await getGorseInspiredRecommendations(
             type,
             12,
+            readProfile(),
           );
 
         if (
           cancelled ||
-          requestId !==
-            requestIdRef.current
+          requestId !== requestIdRef.current
         ) {
           return;
         }
 
-        if (
-          recommendations.length > 0
-        ) {
-          setItems(
-            recommendations,
-          );
-        }
-
-        setLoading(false);
+        setItems(recommendations);
       } catch {
         if (
           cancelled ||
-          requestId !==
-            requestIdRef.current
+          requestId !== requestIdRef.current
         ) {
           return;
         }
 
-        /*
-         * Keep the section alive even if
-         * recommendation generation fails.
-         */
-        setLoading(false);
+        setItems([]);
+      } finally {
+        if (
+          !cancelled &&
+          requestId === requestIdRef.current
+        ) {
+          setLoading(false);
+        }
+      }
+    };
+
+    const handleProfileChange = () => {
+      clearGorseInspiredRecommendationCache();
+      void load();
+    };
+
+    const handleStorageChange = (
+      event: StorageEvent,
+    ) => {
+      if (
+        event.key === null ||
+        event.key === PROFILE_KEY ||
+        event.key === "ryuflix_active_profile_v1"
+      ) {
+        handleProfileChange();
       }
     };
 
     void load();
 
+    window.addEventListener(
+      PROFILE_UPDATED_EVENT,
+      handleProfileChange,
+    );
+
+    window.addEventListener(
+      "storage",
+      handleStorageChange,
+    );
+
     return () => {
       cancelled = true;
+      requestIdRef.current += 1;
+
+      window.removeEventListener(
+        PROFILE_UPDATED_EVENT,
+        handleProfileChange,
+      );
+
+      window.removeEventListener(
+        "storage",
+        handleStorageChange,
+      );
     };
   }, [type]);
-
-  /*
-   * Only hide For You when we have confirmed
-   * that there is genuinely no profile.
-   */
-  if (
-    !hasProfile &&
-    !loading
-  ) {
-    return null;
-  }
 
   return (
     <section className="min-h-[250px] md:min-h-[300px]">
@@ -205,8 +173,7 @@ const ForYou: React.FC<ForYouProps> = ({
           </SectionTitle>
         </div>
 
-        {loading &&
-        items.length === 0 ? (
+        {loading && items.length === 0 ? (
           <Skeleton className="h-[250px] rounded-lg md:h-[300px]" />
         ) : items.length > 0 ? (
           <Carousel>
@@ -215,18 +182,13 @@ const ForYou: React.FC<ForYouProps> = ({
                 key={`${item.mediaType}-${item.id}`}
                 className="embla__slide flex min-h-fit max-w-fit items-center px-1 py-2"
               >
-                {item.mediaType ===
-                "movie" ? (
+                {item.mediaType === "movie" ? (
                   <MoviePosterCard
-                    movie={
-                      item as never
-                    }
+                    movie={item as never}
                   />
                 ) : (
                   <TvShowPosterCard
-                    tv={
-                      item as never
-                    }
+                    tv={item as never}
                   />
                 )}
               </div>
@@ -235,7 +197,7 @@ const ForYou: React.FC<ForYouProps> = ({
         ) : (
           <div className="flex h-[250px] items-center justify-center rounded-lg bg-default-100/40 md:h-[300px]">
             <span className="text-sm text-default-500">
-              Finding something for you...
+              Recommendations are temporarily unavailable.
             </span>
           </div>
         )}
