@@ -11,6 +11,11 @@ import {
   getBehavioralSummary,
 } from "@/utils/personalization/behavioral-memory";
 import {
+  getFeatureSimilarityScores,
+  type FeatureVectorItem,
+  type FeatureVectorSeed,
+} from "@/utils/personalization/feature-vector-engine";
+import {
   getPersonalizedRecommendations,
   type RecommendationItem,
 } from "@/utils/personalization/recommendation-engine";
@@ -19,7 +24,12 @@ import type { TasteProfile } from "@/utils/personalization/taste-engine";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const REQUEST_TIMEOUT = 6500;
 const CACHE_TTL = 3 * 60 * 1000;
+const DETAIL_CACHE_TTL = 12 * 60 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 16;
+const MAX_DETAIL_CACHE_ENTRIES = 300;
+const MAX_ENRICHED_CANDIDATES = 32;
+const MAX_HISTORY_SEEDS = 5;
+const DETAIL_CONCURRENCY = 4;
 
 type DiscoverResponse = {
   results?: Array<Record<string, unknown>>;
@@ -52,10 +62,19 @@ type CachedRecommendations = {
   items: RecommendationItem[];
 };
 
+type CachedDetails = {
+  expiresAt: number;
+  item: DetailedFeatureItem;
+};
+
+type DetailedFeatureItem = FeatureVectorItem;
+
 const recommendationCache = new Map<
   string,
   CachedRecommendations
 >();
+
+const detailCache = new Map<string, CachedDetails>();
 
 function number(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -69,6 +88,29 @@ function string(value: unknown): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function asObject(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function asObjects(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(asObject)
+    .filter(
+      (item): item is Record<string, unknown> =>
+        item !== null,
+    );
 }
 
 function normalizeItem(
@@ -183,17 +225,196 @@ async function fetchCollection(
     );
 }
 
+function getNamedValues(
+  value: unknown,
+  property = "name",
+): string[] {
+  return asObjects(value)
+    .map((item) => string(item[property]).trim())
+    .filter(Boolean);
+}
+
+function getKeywordValues(
+  value: unknown,
+): string[] {
+  const object = asObject(value);
+
+  if (!object) {
+    return [];
+  }
+
+  return getNamedValues(
+    object.keywords ?? object.results,
+  );
+}
+
+function getCountryValues(
+  raw: Record<string, unknown>,
+  mediaType: ContentType,
+): string[] {
+  if (mediaType === "tv") {
+    return Array.isArray(raw.origin_country)
+      ? raw.origin_country.filter(
+          (value): value is string =>
+            typeof value === "string" && value.length > 0,
+        )
+      : [];
+  }
+
+  return getNamedValues(raw.production_countries);
+}
+
+function buildDetailedFeatureItem(
+  raw: Record<string, unknown>,
+  mediaType: ContentType,
+  id: number,
+): DetailedFeatureItem {
+  const credits = asObject(raw.credits);
+  const cast = asObjects(credits?.cast);
+  const crew = asObjects(credits?.crew);
+
+  const directors = crew
+    .filter(
+      (person) =>
+        string(person.job).toLowerCase() === "director",
+    )
+    .map((person) => string(person.name))
+    .filter(Boolean);
+
+  if (mediaType === "tv") {
+    directors.push(
+      ...getNamedValues(raw.created_by),
+    );
+  }
+
+  const languages = asObjects(raw.spoken_languages)
+    .map((language) => string(language.iso_639_1))
+    .filter(Boolean);
+
+  const releaseDate =
+    mediaType === "movie"
+      ? string(raw.release_date)
+      : string(raw.first_air_date);
+
+  return {
+    id,
+    mediaType,
+    genres: getNamedValues(raw.genres),
+    keywords: getKeywordValues(raw.keywords),
+    directors: [...new Set(directors)],
+    cast: cast
+      .slice(0, 12)
+      .map((person) => string(person.name))
+      .filter(Boolean),
+    languages,
+    countries: getCountryValues(raw, mediaType),
+    releaseDate: releaseDate || undefined,
+  };
+}
+
+function pruneDetailCache(): void {
+  const now = Date.now();
+
+  for (const [key, value] of detailCache) {
+    if (value.expiresAt <= now) {
+      detailCache.delete(key);
+    }
+  }
+
+  while (detailCache.size > MAX_DETAIL_CACHE_ENTRIES) {
+    const oldestKey = detailCache.keys().next().value;
+
+    if (!oldestKey) {
+      break;
+    }
+
+    detailCache.delete(oldestKey);
+  }
+}
+
+async function fetchDetailedItem(
+  id: number,
+  mediaType: ContentType,
+): Promise<DetailedFeatureItem | null> {
+  const key = `${mediaType}:${id}`;
+
+  pruneDetailCache();
+
+  const cached = detailCache.get(key);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.item;
+  }
+
+  const response = await tmdb<Record<string, unknown>>(
+    `/${mediaType}/${id}?append_to_response=credits,keywords`,
+  );
+
+  if (!response) {
+    return null;
+  }
+
+  const item = buildDetailedFeatureItem(
+    response,
+    mediaType,
+    id,
+  );
+
+  detailCache.set(key, {
+    expiresAt: Date.now() + DETAIL_CACHE_TTL,
+    item,
+  });
+
+  pruneDetailCache();
+
+  return item;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const workerCount = Math.min(
+    Math.max(1, concurrency),
+    items.length,
+  );
+
+  const workers = Array.from(
+    { length: workerCount },
+    async () => {
+      while (true) {
+        const index = nextIndex++;
+
+        if (index >= items.length) {
+          return;
+        }
+
+        results[index] = await mapper(
+          items[index],
+          index,
+        );
+      }
+    },
+  );
+
+  await Promise.all(workers);
+
+  return results;
+}
+
 /**
- * A movie or show becomes a recommendation seed when the active
+ * A title becomes a positive recommendation seed when the active
  * profile has meaningfully watched it.
- *
- * A short opening alone is not treated as a strong preference.
- * Completed titles and substantial viewing progress carry more weight.
  */
 function getHistorySeeds(
   mediaType: ContentType,
 ): HistorySeed[] {
   const history = getWatchHistory();
+
   const recentById = new Map<
     number,
     (typeof history)[number]
@@ -208,7 +429,7 @@ function getHistorySeeds(
       recentById.set(entry.media_id, entry);
     }
 
-    if (recentById.size >= 12) {
+    if (recentById.size >= 16) {
       break;
     }
   }
@@ -232,7 +453,7 @@ function getHistorySeeds(
 
     const meaningful =
       entry.completed ||
-      progress >= 0.25 ||
+      progress >= 0.2 ||
       signal >= 1.5;
 
     if (!meaningful) {
@@ -245,11 +466,11 @@ function getHistorySeeds(
     }
 
     const score = clamp(
-      4 +
-        progress * 5 +
+      2 +
+        progress * 6 +
         (entry.completed ? 3 : 0) +
-        Math.max(0, signal) * 0.35,
-      2,
+        Math.max(0, signal) * 0.3,
+      1,
       12,
     );
 
@@ -271,14 +492,12 @@ function getHistorySeeds(
         new Date(a.updatedAt).getTime()
       );
     })
-    .slice(0, 3);
+    .slice(0, MAX_HISTORY_SEEDS);
 }
 
 /**
  * Exclude items already present in this profile's watch history
  * or watchlist.
- *
- * The stored structures use `type` and `media_id` / `id`.
  */
 function getExcludedIds(): Set<string> {
   const excluded = new Set<string>();
@@ -368,13 +587,12 @@ function addCandidate(
     return;
   }
 
-  // Count each source only once per candidate.
   if (!existing.sources.has(source)) {
     existing.sources.add(source);
     existing.sourceScore += weight;
   }
 
-  // Retain the richest version of the item when sources differ.
+  // Retain the richest version when sources differ.
   if (
     (!existing.item.overview && item.overview) ||
     (!existing.item.poster_path && item.poster_path) ||
@@ -406,19 +624,10 @@ function qualityScore(
     number(item.popularity),
   );
 
-  const ratingScore = rating * 1.3;
-
-  // Logarithmic weighting prevents huge vote counts from dominating.
-  const voteConfidence =
-    Math.log10(voteCount + 1) * 1.25;
-
-  const popularityScore =
-    Math.log10(popularity + 1) * 1.1;
-
   return (
-    ratingScore +
-    voteConfidence +
-    popularityScore
+    rating * 1.3 +
+    Math.log10(voteCount + 1) * 1.25 +
+    Math.log10(popularity + 1) * 1.1
   );
 }
 
@@ -478,7 +687,7 @@ function diversify(
   );
 }
 
-function pruneCache(): void {
+function pruneRecommendationCache(): void {
   const now = Date.now();
 
   for (const [key, value] of recommendationCache) {
@@ -488,8 +697,7 @@ function pruneCache(): void {
   }
 
   while (recommendationCache.size > MAX_CACHE_ENTRIES) {
-    const oldestKey =
-      recommendationCache.keys().next().value;
+    const oldestKey = recommendationCache.keys().next().value;
 
     if (!oldestKey) {
       break;
@@ -500,15 +708,18 @@ function pruneCache(): void {
 }
 
 /**
- * Gorse-inspired local recommendation pipeline:
+ * Local multi-source recommendation pipeline:
  *
  * 1. Retrieve candidates from independent sources.
  * 2. Merge candidates by media identity.
- * 3. Rank using source agreement, catalogue quality and optional taste.
- * 4. Diversify the final list.
+ * 3. Build sparse metadata feature vectors.
+ * 4. Weight rare features using inverse document frequency.
+ * 5. Compare candidates with the user's weighted feature vector
+ *    and individual watched titles.
+ * 6. Rank and diversify the final list.
  *
- * A profile import is optional. Without one, the system still uses
- * trending, popular, top-rated and behaviour-based similar titles.
+ * Imported taste is optional. Viewing history can build the
+ * recommendation profile automatically.
  */
 export async function getGorseInspiredRecommendations(
   mediaType: ContentType,
@@ -527,7 +738,7 @@ export async function getGorseInspiredRecommendations(
     activityFingerprint(),
   ].join("|");
 
-  pruneCache();
+  pruneRecommendationCache();
 
   const cached = recommendationCache.get(cacheKey);
 
@@ -536,6 +747,7 @@ export async function getGorseInspiredRecommendations(
   }
 
   const seeds = getHistorySeeds(mediaType);
+
   const requests: SourceRequest[] = [
     {
       name: "trending",
@@ -566,8 +778,6 @@ export async function getGorseInspiredRecommendations(
     },
   ];
 
-  // Similarity retrieval is only possible once the profile has
-  // meaningful viewing history.
   for (const seed of seeds) {
     requests.push({
       name: `similar-to-${seed.id}`,
@@ -580,7 +790,6 @@ export async function getGorseInspiredRecommendations(
     });
   }
 
-  // Imported taste is an additional source, never an activation gate.
   if (tasteProfile) {
     requests.push({
       name: "imported-taste",
@@ -619,7 +828,7 @@ export async function getGorseInspiredRecommendations(
       const isTasteSource =
         source.name === "imported-taste";
 
-      const tastePositionWeight = isTasteSource
+      const sourceWeight = isTasteSource
         ? Math.max(3, 13 - index * 0.65)
         : source.weight;
 
@@ -627,7 +836,7 @@ export async function getGorseInspiredRecommendations(
         candidates,
         item,
         source.name,
-        tastePositionWeight,
+        sourceWeight,
       );
     });
   }
@@ -635,7 +844,10 @@ export async function getGorseInspiredRecommendations(
   const excluded = getExcludedIds();
   const activitySummary = getBehavioralSummary();
 
-  const ranked: RankedCandidate[] = [];
+  const preliminary: Array<{
+    item: RecommendationItem;
+    score: number;
+  }> = [];
 
   for (const candidate of candidates.values()) {
     const item = candidate.item;
@@ -653,17 +865,81 @@ export async function getGorseInspiredRecommendations(
         ? 2
         : 0;
 
-    const score =
-      qualityScore(item) +
-      candidate.sourceScore +
-      sourceAgreement +
-      mediaPreferenceBoost;
-
-    ranked.push({
-      ...item,
-      _score: score,
+    preliminary.push({
+      item,
+      score:
+        qualityScore(item) +
+        candidate.sourceScore +
+        sourceAgreement +
+        mediaPreferenceBoost,
     });
   }
+
+  preliminary.sort((a, b) => b.score - a.score);
+
+  // Enrich only the strongest preliminary candidates.
+  const candidatesToEnrich = preliminary.slice(
+    0,
+    MAX_ENRICHED_CANDIDATES,
+  );
+
+  const [candidateDetails, seedDetails] = await Promise.all([
+    mapWithConcurrency(
+      candidatesToEnrich,
+      DETAIL_CONCURRENCY,
+      (candidate) =>
+        fetchDetailedItem(
+          candidate.item.id,
+          candidate.item.mediaType,
+        ),
+    ),
+    mapWithConcurrency(
+      seeds,
+      DETAIL_CONCURRENCY,
+      (seed) =>
+        fetchDetailedItem(
+          seed.id,
+          mediaType,
+        ),
+    ),
+  ]);
+
+  const enrichedCandidates = candidateDetails.filter(
+    (item): item is DetailedFeatureItem =>
+      item !== null,
+  );
+
+  const enrichedSeeds: FeatureVectorSeed[] = [];
+
+  seedDetails.forEach((item, index) => {
+    if (!item) return;
+
+    enrichedSeeds.push({
+      item,
+      weight: seeds[index]?.score ?? 1,
+    });
+  });
+
+  const contentSimilarity = getFeatureSimilarityScores(
+    enrichedCandidates,
+    enrichedSeeds,
+    tasteProfile,
+  );
+
+  const ranked: RankedCandidate[] = preliminary.map(
+    ({ item, score }) => {
+      const similarity =
+        contentSimilarity.get(
+          `${item.mediaType}:${item.id}`,
+        ) ?? 0;
+
+      // Content similarity is a ranking signal, not the only signal.
+      return {
+        ...item,
+        _score: score + similarity * 18,
+      };
+    },
+  );
 
   ranked.sort((a, b) => b._score - a._score);
 
@@ -672,15 +948,13 @@ export async function getGorseInspiredRecommendations(
     safeLimit,
   );
 
-  // Do not cache an empty result. A temporary API failure should
-  // be allowed to retry on the next visit.
   if (recommendations.length > 0) {
     recommendationCache.set(cacheKey, {
       expiresAt: Date.now() + CACHE_TTL,
       items: recommendations,
     });
 
-    pruneCache();
+    pruneRecommendationCache();
   }
 
   return recommendations;
@@ -688,4 +962,5 @@ export async function getGorseInspiredRecommendations(
 
 export function clearGorseInspiredRecommendationCache(): void {
   recommendationCache.clear();
-  }
+  detailCache.clear();
+    }
