@@ -1,3 +1,4 @@
+
 "use client";
 
 import { env } from "@/utils/env";
@@ -7,10 +8,11 @@ import {
   getWatchHistory,
 } from "@/utils/localStorage";
 import {
-  getBehavioralMemory,
-  getBehavioralSignal,
   getBehavioralSummary,
 } from "@/utils/personalization/behavioral-memory";
+import {
+  getFeedbackVectors,
+} from "@/utils/personalization/feedback-vector-engine";
 import {
   getFeatureSimilarityScores,
   type FeatureVectorItem,
@@ -53,15 +55,6 @@ type TrainingSignal = {
   label: number;
   weight: number;
   timestamp: string;
-};
-
-type TrainingHistoryGroup = {
-  id: number;
-  mediaType: ContentType;
-  progressTotal: number;
-  entries: number;
-  completions: number;
-  lastWatchedAt: string;
 };
 
 type CandidateRecord = {
@@ -453,80 +446,41 @@ async function mapWithConcurrency<T, R>(
 }
 
 /**
- * A title becomes a positive recommendation seed when the active
- * profile has meaningfully watched it.
+ * Builds recommendation seeds from normalized feedback.
+ *
+ * Stronger positive engagement receives a higher seed weight.
+ * Weak or contradictory feedback is not used as a positive seed.
  */
 function getHistorySeeds(
   mediaType: ContentType,
 ): HistorySeed[] {
-  const history = getWatchHistory();
+  return getFeedbackVectors(mediaType)
+    .filter((vector) => {
+      if (vector.confidence < 0.12) {
+        return false;
+      }
 
-  const recentById = new Map<
-    number,
-    (typeof history)[number]
-  >();
+      if (vector.positive <= vector.negative) {
+        return false;
+      }
 
-  for (const entry of history) {
-    if (entry.type !== mediaType) {
-      continue;
-    }
-
-    if (!recentById.has(entry.media_id)) {
-      recentById.set(entry.media_id, entry);
-    }
-
-    if (recentById.size >= 16) {
-      break;
-    }
-  }
-
-  const seeds: HistorySeed[] = [];
-
-  for (const entry of recentById.values()) {
-    const progress =
-      entry.duration > 0
-        ? clamp(
-            entry.last_position / entry.duration,
-            0,
-            1,
-          )
-        : 0;
-
-    const signal = getBehavioralSignal(
-      entry.media_id,
-      mediaType,
-    );
-
-    const meaningful =
-      entry.completed ||
-      progress >= 0.2 ||
-      signal >= 1.5;
-
-    if (!meaningful) {
-      continue;
-    }
-
-    if (signal < -0.5 && !entry.completed) {
-      continue;
-    }
-
-    const score = clamp(
-      2 +
-        progress * 6 +
-        (entry.completed ? 3 : 0) +
-        Math.max(0, signal) * 0.3,
-      1,
-      12,
-    );
-
-    seeds.push({
-      id: entry.media_id,
-      score,
-      updatedAt: entry.updated_at,
-    });
-  }
-
-  return seeds
+      return (
+        vector.positive >= 0.12 ||
+        vector.watchlisted
+      );
+    })
+    .map((vector) => ({
+      id: vector.id,
+      score: clamp(
+        1.5 +
+          vector.positive * 8 +
+          vector.confidence * 2 -
+          vector.negative * 5,
+        1,
+        12,
+      ),
+      updatedAt: vector.timestamp,
+    }))
     .sort((a, b) => {
       if (b.score !== a.score) {
         return b.score - a.score;
@@ -541,172 +495,54 @@ function getHistorySeeds(
 }
 
 /**
- * Build training signals from the active profile's viewing history.
+ * Converts feedback vectors into training signals.
  *
- * Completed titles and sustained viewing are positive examples.
- * Very early abandonment is a weak negative example, not a strong
- * declaration that the user disliked the title.
- *
- * TV episodes are grouped under their parent show.
+ * Early abandonment is treated as weak negative evidence.
+ * It is not treated as an explicit dislike.
+ * Unseen titles are never created as negative examples.
  */
 function getTrainingSignals(): TrainingSignal[] {
-  const history = getWatchHistory();
-  const memory = getBehavioralMemory();
+  return getFeedbackVectors()
+    .filter((vector) => {
+      if (vector.confidence < 0.16) {
+        return false;
+      }
 
-  const groups = new Map<
-    string,
-    TrainingHistoryGroup
-  >();
+      if (Math.abs(vector.label - 0.5) < 0.01) {
+        return false;
+      }
 
-  for (const entry of history) {
-    if (
-      !entry ||
-      (entry.type !== "movie" && entry.type !== "tv") ||
-      !Number.isFinite(entry.media_id)
-    ) {
-      continue;
-    }
+      return (
+        vector.positive > 0 ||
+        vector.negative > 0 ||
+        vector.watchlisted
+      );
+    })
+    .map((vector) => {
+      const isWeakNegative =
+        vector.negative > 0 &&
+        vector.progress < 0.12 &&
+        vector.abandons > 0;
 
-    const progress =
-      entry.completed
-        ? 1
-        : entry.duration > 0
-          ? clamp(
-              entry.last_position / entry.duration,
-              0,
-              1,
-            )
-          : 0;
+      return {
+        id: vector.id,
+        mediaType: vector.mediaType,
 
-    // A title with no meaningful playback is not a useful label.
-    if (progress <= 0 && !entry.completed) {
-      continue;
-    }
+        label: isWeakNegative
+          ? 0.2
+          : vector.label,
 
-    const key = `${entry.type}:${entry.media_id}`;
+        weight: isWeakNegative
+          ? clamp(vector.weight * 0.35, 0.1, 0.35)
+          : clamp(
+              vector.weight * vector.confidence,
+              0.1,
+              2.5,
+            ),
 
-    const group = groups.get(key) ?? {
-      id: entry.media_id,
-      mediaType: entry.type,
-      progressTotal: 0,
-      entries: 0,
-      completions: 0,
-      lastWatchedAt: entry.updated_at,
-    };
-
-    group.progressTotal += progress;
-    group.entries += 1;
-
-    if (entry.completed) {
-      group.completions += 1;
-    }
-
-    if (
-      new Date(entry.updated_at).getTime() >
-      new Date(group.lastWatchedAt).getTime()
-    ) {
-      group.lastWatchedAt = entry.updated_at;
-    }
-
-    groups.set(key, group);
-  }
-
-  const eventCounts = new Map<
-    string,
-    {
-      abandons: number;
-      rewatches: number;
-    }
-  >();
-
-  for (const event of memory.events) {
-    const key = `${event.mediaType}:${event.mediaId}`;
-
-    const counts = eventCounts.get(key) ?? {
-      abandons: 0,
-      rewatches: 0,
-    };
-
-    if (event.event === "abandoned") {
-      counts.abandons += 1;
-    }
-
-    if (event.event === "rewatched") {
-      counts.rewatches += 1;
-    }
-
-    eventCounts.set(key, counts);
-  }
-
-  const signals: TrainingSignal[] = [];
-
-  for (const [key, group] of groups) {
-    if (group.entries === 0) {
-      continue;
-    }
-
-    const averageProgress =
-      group.progressTotal / group.entries;
-
-    const completionRate =
-      group.completions / group.entries;
-
-    const events = eventCounts.get(key) ?? {
-      abandons: 0,
-      rewatches: 0,
-    };
-
-    let label: number;
-
-    if (completionRate >= 0.75) {
-      label = 0.98;
-    } else if (completionRate > 0) {
-      label = 0.9;
-    } else if (averageProgress >= 0.75) {
-      label = 0.92;
-    } else if (averageProgress >= 0.5) {
-      label = 0.82;
-    } else if (averageProgress >= 0.3) {
-      label = 0.7;
-    } else if (averageProgress >= 0.12) {
-      label = 0.56;
-    } else {
-      label = 0.2;
-    }
-
-    // Only use abandonment as a negative when engagement was very low.
-    if (
-      events.abandons > 0 &&
-      averageProgress < 0.18 &&
-      group.completions === 0
-    ) {
-      label = 0.12;
-    }
-
-    if (events.rewatches > 0) {
-      label = Math.max(label, 0.97);
-    }
-
-    const weight = clamp(
-      0.35 +
-        averageProgress +
-        completionRate * 0.75 +
-        Math.log2(group.entries + 1) * 0.15 +
-        events.rewatches * 0.2,
-      0.3,
-      2.5,
-    );
-
-    signals.push({
-      id: group.id,
-      mediaType: group.mediaType,
-      label,
-      weight,
-      timestamp: group.lastWatchedAt,
-    });
-  }
-
-  return signals
+        timestamp: vector.timestamp,
+      };
+    })
     .sort(
       (a, b) =>
         new Date(b.timestamp).getTime() -
@@ -768,6 +604,10 @@ function tasteFingerprint(
   });
 }
 
+/**
+ * Include feedback vectors in the cache identity so a change in
+ * behavioral evidence cannot keep returning stale recommendations.
+ */
 function activityFingerprint(): string {
   const history = getWatchHistory()
     .slice(0, 20)
@@ -783,9 +623,21 @@ function activityFingerprint(): string {
     .map((entry) => `${entry.type}:${entry.id}`)
     .sort();
 
+  const feedback = getFeedbackVectors()
+    .map((vector) => [
+      vector.mediaType,
+      vector.id,
+      vector.label,
+      vector.weight,
+      vector.confidence,
+      vector.timestamp,
+      vector.evidence.join(","),
+    ].join(":"));
+
   return JSON.stringify({
     history,
     watchlist,
+    feedback,
   });
 }
 
@@ -936,7 +788,7 @@ function pruneRecommendationCache(): void {
  * 4. Weight rare features using inverse document frequency.
  * 5. Compare candidates with the user's weighted feature vector
  *    and individual watched titles.
- * 6. Train a profile-specific Factorization Machine from viewing history.
+ * 6. Train a profile-specific Factorization Machine from feedback.
  * 7. Combine content similarity, learned engagement probability,
  *    source agreement and catalogue quality.
  * 8. Diversify the final list.
@@ -1230,4 +1082,4 @@ export function clearGorseInspiredRecommendationCache(): void {
   recommendationCache.clear();
   detailCache.clear();
   detailInFlight.clear();
-  }
+}
