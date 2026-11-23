@@ -2,6 +2,7 @@
 "use client";
 
 import CinematicMediaCard from "@/components/sections/Home/CinematicMediaCard";
+import RecommendationFeedback from "@/components/sections/Home/RecommendationFeedback";
 import SectionTitle from "@/components/ui/other/SectionTitle";
 import Carousel from "@/components/ui/wrapper/Carousel";
 import type { ContentType } from "@/types";
@@ -10,6 +11,10 @@ import {
   clearGorseInspiredRecommendationCache,
   getGorseInspiredRecommendations,
 } from "@/utils/personalization/gorse-inspired-engine";
+import {
+  EXPLICIT_FEEDBACK_UPDATED_EVENT,
+  getAllExplicitFeedback,
+} from "@/utils/personalization/explicit-feedback-engine";
 import { PROFILE_UPDATED_EVENT } from "@/utils/profiles";
 import { Skeleton } from "@heroui/react";
 import { useEffect, useRef, useState } from "react";
@@ -79,13 +84,12 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
       const requestId = ++requestIdRef.current;
 
       setLoading(true);
-      setItems([]);
 
       try {
         const recommendations =
           await getGorseInspiredRecommendations(
             type,
-            12,
+            20,
             readProfile(),
           );
 
@@ -96,7 +100,28 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
           return;
         }
 
-        setItems(recommendations);
+        const excluded = new Set(
+          getAllExplicitFeedback()
+            .filter(
+              (feedback) =>
+                feedback.value === "dislike" ||
+                feedback.value === "not_interested",
+            )
+            .map(
+              (feedback) =>
+                `${feedback.mediaType}:${feedback.id}`,
+            ),
+        );
+
+        const visibleRecommendations =
+          recommendations.filter(
+            (item) =>
+              !excluded.has(
+                `${item.mediaType}:${item.id}`,
+              ),
+          );
+
+        setItems(visibleRecommendations.slice(0, 12));
       } catch {
         if (
           cancelled ||
@@ -116,7 +141,7 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
       }
     };
 
-    const handleProfileChange = () => {
+    const refresh = () => {
       clearGorseInspiredRecommendationCache();
       void load();
     };
@@ -129,7 +154,7 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
         event.key === PROFILE_KEY ||
         event.key === "ryuflix_active_profile_v1"
       ) {
-        handleProfileChange();
+        refresh();
       }
     };
 
@@ -137,7 +162,12 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
 
     window.addEventListener(
       PROFILE_UPDATED_EVENT,
-      handleProfileChange,
+      refresh,
+    );
+
+    window.addEventListener(
+      EXPLICIT_FEEDBACK_UPDATED_EVENT,
+      refresh,
     );
 
     window.addEventListener(
@@ -151,7 +181,12 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
 
       window.removeEventListener(
         PROFILE_UPDATED_EVENT,
-        handleProfileChange,
+        refresh,
+      );
+
+      window.removeEventListener(
+        EXPLICIT_FEEDBACK_UPDATED_EVENT,
+        refresh,
       );
 
       window.removeEventListener(
@@ -163,17 +198,15 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
 
   return (
     <section className="relative py-5 md:py-7 lg:py-9">
-      {/* Parent already handles horizontal alignment. */}
       <div className="mb-4">
         <SectionTitle>
           For You
         </SectionTitle>
       </div>
 
-      {/* No second horizontal padding layer. */}
       <div className="overflow-hidden">
         {loading && items.length === 0 ? (
-          <div className="flex gap-3 overflow-hidden pb-3 md:gap-4 lg:gap-5 2xl:gap-6">
+          <div className="flex gap-3 overflow-hidden pb-3 md:gap-4 lg:gap-5">
             {Array.from({ length: 4 }).map((_, index) => (
               <Skeleton
                 key={index}
@@ -191,10 +224,15 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
             {items.map((item) => (
               <div
                 key={`${item.mediaType}-${item.id}`}
-                className="embla__slide flex min-h-fit max-w-fit items-center px-1 py-2"
+                className="embla__slide flex min-h-fit max-w-fit flex-col items-stretch px-1 py-2"
               >
                 <CinematicMediaCard
                   media={item as never}
+                />
+
+                <RecommendationFeedback
+                  id={item.id}
+                  mediaType={item.mediaType}
                 />
               </div>
             ))}
