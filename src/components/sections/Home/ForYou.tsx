@@ -1,3 +1,4 @@
+
 "use client";
 
 import CinematicMediaCard from "@/components/sections/Home/CinematicMediaCard";
@@ -26,9 +27,7 @@ function readProfile(): TasteProfile | null {
   try {
     const raw = window.localStorage.getItem(PROFILE_KEY);
 
-    if (!raw) {
-      return null;
-    }
+    if (!raw) return null;
 
     const parsed = JSON.parse(
       raw,
@@ -71,7 +70,6 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
   >([]);
 
   const [loading, setLoading] = useState(true);
-
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -165,13 +163,15 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
 
   return (
     <section className="relative py-5 md:py-7 lg:py-9">
-      <div className="mb-4 px-5 md:px-10 lg:px-14 2xl:px-20">
+      {/* Parent already handles horizontal alignment. */}
+      <div className="mb-4">
         <SectionTitle>
           For You
         </SectionTitle>
       </div>
 
-      <div className="overflow-hidden pl-5 md:pl-10 lg:pl-14 2xl:pl-20">
+      {/* No second horizontal padding layer. */}
+      <div className="overflow-hidden">
         {loading && items.length === 0 ? (
           <div className="flex gap-3 overflow-hidden pb-3 md:gap-4 lg:gap-5 2xl:gap-6">
             {Array.from({ length: 4 }).map((_, index) => (
