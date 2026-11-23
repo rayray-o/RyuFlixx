@@ -36,6 +36,7 @@ const MAX_CACHE_ENTRIES = 16;
 const MAX_DETAIL_CACHE_ENTRIES = 300;
 const MAX_ENRICHED_CANDIDATES = 32;
 const MAX_HISTORY_SEEDS = 5;
+const MAX_NEGATIVE_SEEDS = 10;
 const MAX_TRAINING_TITLES = 18;
 const DETAIL_CONCURRENCY = 4;
 
@@ -445,12 +446,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-/**
- * Builds recommendation seeds from normalized feedback.
- *
- * Stronger positive engagement receives a higher seed weight.
- * Weak or contradictory feedback is not used as a positive seed.
- */
 function getHistorySeeds(
   mediaType: ContentType,
 ): HistorySeed[] {
@@ -461,6 +456,11 @@ function getHistorySeeds(
       }
 
       if (vector.positive <= vector.negative) {
+        return false;
+      }
+
+      if (vector.explicitFeedback === "dislike" ||
+          vector.explicitFeedback === "not_interested") {
         return false;
       }
 
@@ -495,12 +495,41 @@ function getHistorySeeds(
 }
 
 /**
- * Converts feedback vectors into training signals.
- *
- * Early abandonment is treated as weak negative evidence.
- * It is not treated as an explicit dislike.
- * Unseen titles are never created as negative examples.
+ * Only explicit dislikes become negative content seeds.
+ * Abandoning a title is not enough to label its metadata undesirable.
  */
+function getNegativeHistorySeeds(
+  mediaType: ContentType,
+): HistorySeed[] {
+  return getFeedbackVectors(mediaType)
+    .filter((vector) =>
+      vector.explicitFeedback === "dislike" &&
+      vector.confidence >= 0.2,
+    )
+    .map((vector) => ({
+      id: vector.id,
+      score: clamp(
+        2 +
+          vector.negative * 8 +
+          vector.confidence * 2,
+        1,
+        12,
+      ),
+      updatedAt: vector.timestamp,
+    }))
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+
+      return (
+        new Date(b.updatedAt).getTime() -
+        new Date(a.updatedAt).getTime()
+      );
+    })
+    .slice(0, MAX_NEGATIVE_SEEDS);
+}
+
 function getTrainingSignals(): TrainingSignal[] {
   return getFeedbackVectors()
     .filter((vector) => {
@@ -552,8 +581,8 @@ function getTrainingSignals(): TrainingSignal[] {
 }
 
 /**
- * Exclude items already present in this profile's watch history
- * or watchlist.
+ * Exclude watched titles, watchlisted titles and titles
+ * explicitly marked "Not interested".
  */
 function getExcludedIds(): Set<string> {
   const excluded = new Set<string>();
@@ -582,6 +611,14 @@ function getExcludedIds(): Set<string> {
     }
   }
 
+  for (const vector of getFeedbackVectors()) {
+    if (vector.explicitFeedback === "not_interested") {
+      excluded.add(
+        `${vector.mediaType}:${vector.id}`,
+      );
+    }
+  }
+
   return excluded;
 }
 
@@ -604,10 +641,6 @@ function tasteFingerprint(
   });
 }
 
-/**
- * Include feedback vectors in the cache identity so a change in
- * behavioral evidence cannot keep returning stale recommendations.
- */
 function activityFingerprint(): string {
   const history = getWatchHistory()
     .slice(0, 20)
@@ -631,6 +664,7 @@ function activityFingerprint(): string {
       vector.weight,
       vector.confidence,
       vector.timestamp,
+      vector.explicitFeedback ?? "",
       vector.evidence.join(","),
     ].join(":"));
 
@@ -779,23 +813,6 @@ function pruneRecommendationCache(): void {
   }
 }
 
-/**
- * Local multi-source recommendation pipeline:
- *
- * 1. Retrieve candidates from independent sources.
- * 2. Merge candidates by media identity.
- * 3. Build sparse metadata feature vectors.
- * 4. Weight rare features using inverse document frequency.
- * 5. Compare candidates with the user's weighted feature vector
- *    and individual watched titles.
- * 6. Train a profile-specific Factorization Machine from feedback.
- * 7. Combine content similarity, learned engagement probability,
- *    source agreement and catalogue quality.
- * 8. Diversify the final list.
- *
- * Imported taste is optional. Viewing history can build the
- * recommendation profile automatically.
- */
 export async function getGorseInspiredRecommendations(
   mediaType: ContentType,
   limit = 12,
@@ -822,6 +839,7 @@ export async function getGorseInspiredRecommendations(
   }
 
   const seeds = getHistorySeeds(mediaType);
+  const negativeSeeds = getNegativeHistorySeeds(mediaType);
   const trainingSignals = getTrainingSignals();
 
   const requests: SourceRequest[] = [
@@ -961,6 +979,7 @@ export async function getGorseInspiredRecommendations(
   const [
     candidateDetails,
     seedDetails,
+    negativeSeedDetails,
     trainingDetails,
   ] = await Promise.all([
     mapWithConcurrency(
@@ -974,6 +993,15 @@ export async function getGorseInspiredRecommendations(
     ),
     mapWithConcurrency(
       seeds,
+      DETAIL_CONCURRENCY,
+      (seed) =>
+        fetchDetailedItem(
+          seed.id,
+          mediaType,
+        ),
+    ),
+    mapWithConcurrency(
+      negativeSeeds,
       DETAIL_CONCURRENCY,
       (seed) =>
         fetchDetailedItem(
@@ -1008,6 +1036,17 @@ export async function getGorseInspiredRecommendations(
     });
   });
 
+  const enrichedNegativeSeeds: FeatureVectorSeed[] = [];
+
+  negativeSeedDetails.forEach((item, index) => {
+    if (!item) return;
+
+    enrichedNegativeSeeds.push({
+      item,
+      weight: negativeSeeds[index]?.score ?? 1,
+    });
+  });
+
   const trainingExamples: LearnedTrainingExample[] = [];
 
   trainingDetails.forEach((item, index) => {
@@ -1027,6 +1066,7 @@ export async function getGorseInspiredRecommendations(
     enrichedCandidates,
     enrichedSeeds,
     tasteProfile,
+    enrichedNegativeSeeds,
   );
 
   const learnedScores = getLearnedRankingScores(
