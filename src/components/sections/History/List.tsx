@@ -6,6 +6,7 @@ import SectionTitle from "@/components/ui/other/SectionTitle";
 import {
   clearWatchHistory,
   getWatchHistory,
+  getTvContinuation,
   LocalWatchHistory,
   removeWatchHistory,
 } from "@/utils/localStorage";
@@ -80,8 +81,16 @@ function HistoryCard({
 
   const isTv = media.type === "tv";
 
+  // Use the same authoritative continuation source as Continue Watching.
+  const continuation = isTv
+    ? getTvContinuation(media.media_id)
+    : null;
+
+  const season = continuation?.season ?? media.season;
+  const episode = continuation?.episode ?? media.episode;
+
   const href = isTv
-    ? `/tv/${media.media_id}/${media.season}/${media.episode}/player`
+    ? `/tv/${media.media_id}/${season ?? 1}/${episode ?? 1}/player`
     : `/movie/${media.media_id}/player`;
 
   const image = getImageUrl(
@@ -89,11 +98,6 @@ function HistoryCard({
   );
 
   const watchedDate = formatWatchedDate(media.updated_at);
-
-  const episodeLabel =
-    isTv && media.season != null && media.episode != null
-      ? `SEASON ${media.season} · EPISODE ${media.episode}`
-      : "";
 
   useEffect(() => {
     const element = titleRef.current;
@@ -131,38 +135,26 @@ function HistoryCard({
       <Link
         href={href}
         className="relative block aspect-video overflow-hidden"
-        aria-label={`Continue ${media.title}`}
+        aria-label={
+          isTv
+            ? `Continue ${media.title}`
+            : `Watch ${media.title}`
+        }
       >
-        {/* Image layer */}
         {image ? (
           <img
             src={image}
             alt={media.title}
             loading="lazy"
-            className="history-card-image absolute inset-0 z-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
+            className="absolute inset-0 z-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
           />
         ) : (
           <div className="absolute inset-0 z-0 bg-neutral-900" />
         )}
 
-        {/* Bottom image fade */}
         <div className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
 
-        {/* Content layer */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] p-4 sm:p-5">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-white/20 bg-black/25 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.2em] text-white/75 backdrop-blur-md">
-              {isTv ? "TV Series" : "Movie"}
-            </span>
-
-            {episodeLabel && (
-              <span className="text-[10px] font-semibold tracking-[0.12em] text-white/70">
-                {episodeLabel}
-              </span>
-            )}
-          </div>
-
-          {/* Druk Wide cinematic title */}
           <div
             ref={titleRef}
             className="history-title-viewport w-full overflow-hidden"
@@ -187,19 +179,14 @@ function HistoryCard({
             </div>
           </div>
 
-          <div className="mt-2 flex items-center justify-between gap-3">
+          <div className="mt-2">
             <span className="text-[10px] font-medium uppercase tracking-[0.17em] text-white/60 sm:text-xs">
               Watched {watchedDate}
-            </span>
-
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/65">
-              {media.completed ? "Completed" : "In progress"}
             </span>
           </div>
         </div>
       </Link>
 
-      {/* Remove */}
       <button
         type="button"
         aria-label={`Remove ${media.title} from history`}
@@ -232,11 +219,21 @@ const HistoryList: React.FC = () => {
       refresh,
     );
 
+    window.addEventListener(
+      "ryuflix-tv-continuation-updated",
+      refresh,
+    );
+
     window.addEventListener("storage", refresh);
 
     return () => {
       window.removeEventListener(
         "ryuflix-history-updated",
+        refresh,
+      );
+
+      window.removeEventListener(
+        "ryuflix-tv-continuation-updated",
         refresh,
       );
 
