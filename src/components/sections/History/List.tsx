@@ -10,7 +10,7 @@ import {
   removeWatchHistory,
 } from "@/utils/localStorage";
 import { Trash } from "@/utils/icons";
-import { Button, Image } from "@heroui/react";
+import { Button } from "@heroui/react";
 import Link from "next/link";
 import {
   useCallback,
@@ -29,11 +29,6 @@ function getHistoryCardKey(item: LocalWatchHistory) {
     : `movie-${item.media_id}`;
 }
 
-/**
- * The history is episode-based internally.
- * The UI is series-based: only the newest episode
- * watched for each series is displayed.
- */
 function groupHistoryByTitle(
   history: LocalWatchHistory[],
 ): LocalWatchHistory[] {
@@ -62,9 +57,7 @@ function groupHistoryByTitle(
 function formatWatchedDate(date: string) {
   const parsed = new Date(date);
 
-  if (Number.isNaN(parsed.getTime())) {
-    return "";
-  }
+  if (Number.isNaN(parsed.getTime())) return "";
 
   return parsed.toLocaleDateString(undefined, {
     month: "short",
@@ -98,7 +91,7 @@ function HistoryCard({
   const watchedDate = formatWatchedDate(media.updated_at);
 
   const episodeLabel =
-    isTv && media.season && media.episode
+    isTv && media.season != null && media.episode != null
       ? `SEASON ${media.season} · EPISODE ${media.episode}`
       : "";
 
@@ -124,6 +117,12 @@ function HistoryCard({
     const observer = new ResizeObserver(measure);
     observer.observe(element);
 
+    const text = element.querySelector(
+      ".history-title-text",
+    );
+
+    if (text) observer.observe(text);
+
     return () => observer.disconnect();
   }, [media.title]);
 
@@ -134,21 +133,23 @@ function HistoryCard({
         className="relative block aspect-video overflow-hidden"
         aria-label={`Continue ${media.title}`}
       >
-        <Image
-          src={image}
-          alt={media.title}
-          radius="none"
-          className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
-          classNames={{
-            wrapper: "absolute inset-0 !h-full !w-full",
-          }}
-        />
+        {/* Image layer */}
+        {image ? (
+          <img
+            src={image}
+            alt={media.title}
+            loading="lazy"
+            className="history-card-image absolute inset-0 z-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
+          />
+        ) : (
+          <div className="absolute inset-0 z-0 bg-neutral-900" />
+        )}
 
-        {/* Subtle image treatment */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
+        {/* Bottom image fade */}
+        <div className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
 
-        <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
-          {/* Type and episode context */}
+        {/* Content layer */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] p-4 sm:p-5">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="rounded-full border border-white/20 bg-black/25 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.2em] text-white/75 backdrop-blur-md">
               {isTv ? "TV Series" : "Movie"}
@@ -161,19 +162,18 @@ function HistoryCard({
             )}
           </div>
 
-          {/* Cinematic title */}
+          {/* Druk Wide cinematic title */}
           <div
             ref={titleRef}
             className="history-title-viewport w-full overflow-hidden"
           >
             <div
-              className={[
-                "history-title-track",
-                shouldScroll ? "is-scrolling" : "",
-              ].join(" ")}
+              className={`history-title-track ${
+                shouldScroll ? "is-scrolling" : ""
+              }`}
             >
               <span className="history-title-text">
-                {media.title.toUpperCase()}
+                {(media.title || "Untitled").toUpperCase()}
               </span>
 
               {shouldScroll && (
@@ -181,13 +181,12 @@ function HistoryCard({
                   className="history-title-text"
                   aria-hidden="true"
                 >
-                  {media.title.toUpperCase()}
+                  {(media.title || "Untitled").toUpperCase()}
                 </span>
               )}
             </div>
           </div>
 
-          {/* Watched context */}
           <div className="mt-2 flex items-center justify-between gap-3">
             <span className="text-[10px] font-medium uppercase tracking-[0.17em] text-white/60 sm:text-xs">
               Watched {watchedDate}
@@ -256,7 +255,6 @@ const HistoryList: React.FC = () => {
 
   const handleRemove = (media: LocalWatchHistory) => {
     if (media.type === "tv") {
-      // Removing a series removes all its episode entries.
       const seriesEntries = history.filter(
         (item) =>
           item.type === "tv" &&
@@ -275,14 +273,7 @@ const HistoryList: React.FC = () => {
       return;
     }
 
-    removeWatchHistory(
-      media.media_id,
-      media.type,
-    );
-  };
-
-  const handleClear = () => {
-    clearWatchHistory();
+    removeWatchHistory(media.media_id, media.type);
   };
 
   return (
@@ -322,7 +313,7 @@ const HistoryList: React.FC = () => {
                 color="danger"
                 variant="shadow"
                 startContent={<Trash />}
-                onPress={handleClear}
+                onPress={clearWatchHistory}
               >
                 Clear History
               </Button>
@@ -349,9 +340,21 @@ const HistoryList: React.FC = () => {
         )}
       </div>
 
-      <style jsx>{`
+      <BackToTopButton />
+
+      <style jsx global>{`
+        @font-face {
+          font-family: "RyuDrukWide";
+          src: url("/DrukWideBold.ttf") format("truetype");
+          font-style: normal;
+          font-weight: 700 900;
+          font-display: swap;
+        }
+
         .history-title-viewport {
           position: relative;
+          width: 100%;
+          overflow: hidden;
           white-space: nowrap;
         }
 
@@ -363,24 +366,21 @@ const HistoryList: React.FC = () => {
         }
 
         .history-title-text {
+          display: block;
           flex: none;
-          color: rgba(255, 255, 255, 0.88);
-          font-family: "Druk Wide", Impact, "Arial Black",
-            sans-serif;
+          color: rgba(255, 255, 255, 0.86);
+          font-family: "RyuDrukWide", Impact, sans-serif;
           font-size: clamp(15px, 2vw, 21px);
           font-weight: 900;
-          letter-spacing: 0.105em;
-          line-height: 1.2;
+          letter-spacing: 0.055em;
+          line-height: 1.25;
           text-transform: uppercase;
+          text-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
         }
 
         .history-title-track.is-scrolling {
           animation: history-title-marquee 13s linear infinite;
-        }
-
-        .history-title-viewport:hover
-          .history-title-track.is-scrolling {
-          animation-play-state: paused;
+          will-change: transform;
         }
 
         @keyframes history-title-marquee {
@@ -401,8 +401,6 @@ const HistoryList: React.FC = () => {
           }
         }
       `}</style>
-
-      <BackToTopButton />
     </>
   );
 };
