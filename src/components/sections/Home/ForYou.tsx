@@ -75,6 +75,9 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
   >([]);
 
   const [loading, setLoading] = useState(true);
+  const [loadedType, setLoadedType] =
+    useState<ContentType | null>(null);
+
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -122,6 +125,7 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
           );
 
         setItems(visibleRecommendations.slice(0, 12));
+        setLoadedType(type);
       } catch {
         if (
           cancelled ||
@@ -131,6 +135,7 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
         }
 
         setItems([]);
+        setLoadedType(type);
       } finally {
         if (
           !cancelled &&
@@ -196,6 +201,12 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
     };
   }, [type]);
 
+  // Never show the previous media type while the new one loads.
+  const showingCurrentType = loadedType === type;
+
+  const showSkeleton =
+    !showingCurrentType || loading;
+
   return (
     <section className="relative py-5 md:py-7 lg:py-9">
       <div className="mb-4">
@@ -205,11 +216,11 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
       </div>
 
       <div className="overflow-hidden">
-        {loading && items.length === 0 ? (
+        {showSkeleton ? (
           <div className="flex gap-3 overflow-hidden pb-3 md:gap-4 lg:gap-5">
             {Array.from({ length: 4 }).map((_, index) => (
               <Skeleton
-                key={index}
+                key={`${type}-${index}`}
                 className="aspect-[16/10] w-[185px] shrink-0 rounded-xl sm:w-[210px] lg:w-[270px] xl:w-[310px] 2xl:w-[350px]"
               />
             ))}
@@ -227,7 +238,7 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
                 className="embla__slide flex min-h-fit max-w-fit flex-col items-stretch px-1 py-2"
               >
                 <CinematicMediaCard
-                  media={item as never}
+                  media={item}
                 />
 
                 <RecommendationFeedback
