@@ -10,10 +10,9 @@ import {
 import {
   getBehavioralSignal,
 } from "@/utils/personalization/behavioral-memory";
-import {
-  getGorseInspiredRecommendations,
-  type RecommendationItem,
-} from "@/utils/personalization/gorse-inspired-engine";
+import { 
+  getGorseInspiredRecommendations } from "@/utils/personalization/gorse-inspired-engine";
+import type { RecommendationItem } from "@/utils/personalization/recommendation-engine";
 import type { TasteProfile } from "@/utils/personalization/taste-engine";
 
 const BASE_URL = "https://api.themoviedb.org/3";
