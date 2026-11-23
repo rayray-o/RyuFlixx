@@ -1,3 +1,4 @@
+
 import type { ContentType } from "@/types";
 import type { TasteProfile } from "@/utils/personalization/taste-engine";
 
@@ -157,7 +158,6 @@ function buildInverseDocumentFrequency(
   const idf = new Map<string, number>();
 
   for (const [key, frequency] of documentFrequency) {
-    // Same inverse-document-frequency structure used by Gorse.
     idf.set(
       key,
       Math.log(1 + totalDocuments / Math.max(1, frequency)),
@@ -190,7 +190,6 @@ function buildWeightedVector(
     const inverseFrequency =
       idf.get(key) ?? Math.log(1 + Math.max(1, idf.size));
 
-    // Gorse weights sparse features by sqrt(IDF).
     weighted.set(
       key,
       value * Math.sqrt(Math.max(0, inverseFrequency)),
@@ -275,8 +274,6 @@ function addImportedTaste(
       const inverseFrequency =
         idf.get(key) ?? Math.log(1 + Math.max(1, idf.size));
 
-      // tanh prevents a few imported ratings from overwhelming
-      // the rest of the user's viewing behaviour.
       const signal = Math.tanh(score / 6);
 
       vector.set(
@@ -324,19 +321,64 @@ function cosineSimilarity(
   return Math.max(-1, Math.min(1, dot / denominator));
 }
 
+function buildSeedVectors(
+  seeds: FeatureVectorSeed[],
+  idf: Map<string, number>,
+) {
+  return seeds.map((seed) => ({
+    vector: buildWeightedVector(seed.item, idf),
+    weight: Math.max(0.2, Math.min(2, seed.weight / 7)),
+  }));
+}
+
+function buildAggregateVector(
+  seeds: ReturnType<typeof buildSeedVectors>,
+): SparseVector {
+  const vector: SparseVector = new Map();
+
+  for (const seed of seeds) {
+    addToVector(vector, seed.vector, seed.weight);
+  }
+
+  return pruneVector(vector);
+}
+
+function getStrongestSeedSimilarity(
+  candidateVector: SparseVector,
+  seeds: ReturnType<typeof buildSeedVectors>,
+): number {
+  let strongest = 0;
+
+  for (const seed of seeds) {
+    const similarity = cosineSimilarity(
+      seed.vector,
+      candidateVector,
+    );
+
+    strongest = Math.max(
+      strongest,
+      similarity * Math.min(1, seed.weight),
+    );
+  }
+
+  return strongest;
+}
+
 /**
- * Scores candidates using:
- * - A weighted user feature vector built from watched titles.
- * - Optional imported taste preferences.
- * - Item-to-item similarity against individual watched titles.
+ * Scores candidates using positive and negative preference profiles.
  *
- * IDF is estimated from the enriched candidate/seed catalogue
- * available to this browser session, rather than the entire TMDB catalogue.
+ * Positive seeds increase similarity.
+ * Explicitly disliked seeds reduce similarity.
+ * Imported taste remains supported.
+ *
+ * Negative examples are passed separately so they cannot accidentally
+ * become positive preference evidence.
  */
 export function getFeatureSimilarityScores(
   candidates: FeatureVectorItem[],
   seeds: FeatureVectorSeed[],
   tasteProfile: TasteProfile | null,
+  negativeSeeds: FeatureVectorSeed[] = [],
 ): Map<string, number> {
   const scores = new Map<string, number>();
 
@@ -347,52 +389,70 @@ export function getFeatureSimilarityScores(
   const corpus = [
     ...candidates,
     ...seeds.map((seed) => seed.item),
+    ...negativeSeeds.map((seed) => seed.item),
   ];
 
   const idf = buildInverseDocumentFrequency(corpus);
 
-  const seedVectors = seeds.map((seed) => ({
-    vector: buildWeightedVector(seed.item, idf),
-    weight: Math.max(0.2, Math.min(2, seed.weight / 7)),
-  }));
+  const positiveSeedVectors = buildSeedVectors(seeds, idf);
+  const negativeSeedVectors = buildSeedVectors(negativeSeeds, idf);
 
-  const userVector: SparseVector = new Map();
+  const positiveUserVector =
+    buildAggregateVector(positiveSeedVectors);
 
-  for (const seed of seedVectors) {
-    addToVector(userVector, seed.vector, seed.weight);
-  }
+  const negativeUserVector =
+    buildAggregateVector(negativeSeedVectors);
 
   if (tasteProfile) {
-    addImportedTaste(userVector, tasteProfile, idf);
+    addImportedTaste(positiveUserVector, tasteProfile, idf);
   }
 
-  const finalUserVector = pruneVector(userVector);
+  const finalPositiveVector = pruneVector(positiveUserVector);
+  const finalNegativeVector = pruneVector(negativeUserVector);
 
   for (const candidate of candidates) {
     const candidateVector = buildWeightedVector(candidate, idf);
 
-    const userSimilarity = cosineSimilarity(
-      finalUserVector,
+    const positiveUserSimilarity = cosineSimilarity(
+      finalPositiveVector,
       candidateVector,
     );
 
-    let strongestSeedSimilarity = 0;
-
-    for (const seed of seedVectors) {
-      const similarity = cosineSimilarity(
-        seed.vector,
+    const strongestPositiveSimilarity =
+      getStrongestSeedSimilarity(
         candidateVector,
+        positiveSeedVectors,
       );
 
-      strongestSeedSimilarity = Math.max(
-        strongestSeedSimilarity,
-        similarity * Math.min(1, seed.weight),
-      );
-    }
+    const positiveScore =
+      positiveUserSimilarity * 0.7 +
+      strongestPositiveSimilarity * 0.3;
 
+    const negativeUserSimilarity = Math.max(
+      0,
+      cosineSimilarity(
+        finalNegativeVector,
+        candidateVector,
+      ),
+    );
+
+    const strongestNegativeSimilarity = Math.max(
+      0,
+      getStrongestSeedSimilarity(
+        candidateVector,
+        negativeSeedVectors,
+      ),
+    );
+
+    const negativeScore =
+      negativeUserSimilarity * 0.7 +
+      strongestNegativeSimilarity * 0.3;
+
+    // Negative evidence is deliberately weaker than equally strong
+    // positive evidence, but repeated explicit dislikes accumulate.
     const combined =
-      userSimilarity * 0.7 +
-      strongestSeedSimilarity * 0.3;
+      positiveScore -
+      negativeScore * 0.85;
 
     scores.set(
       `${candidate.mediaType}:${candidate.id}`,
@@ -401,4 +461,4 @@ export function getFeatureSimilarityScores(
   }
 
   return scores;
-       }
+}
