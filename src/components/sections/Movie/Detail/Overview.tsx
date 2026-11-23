@@ -8,6 +8,7 @@ import {
   mutateMovieTitle,
 } from "@/utils/movies";
 import BookmarkButton from "@/components/ui/button/BookmarkButton";
+import DetailFeedback from "@/components/ui/button/DetailFeedback";
 import { MovieDetails } from "tmdb-ts/dist/types/movies";
 import Rating from "../../../ui/other/Rating";
 import ShareButton from "@/components/ui/button/ShareButton";
@@ -131,6 +132,12 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
 
                 <Genres genres={movie.genres} />
               </div>
+
+              {/* Recommendation feedback */}
+              <DetailFeedback
+                id={movie.id}
+                mediaType="movie"
+              />
 
               {/* Actions */}
               <div
