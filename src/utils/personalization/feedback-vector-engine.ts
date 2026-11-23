@@ -10,6 +10,10 @@ import {
   getBehavioralMemory,
   type BehavioralEvent,
 } from "@/utils/personalization/behavioral-memory";
+import {
+  getAllExplicitFeedback,
+  type ExplicitFeedbackValue,
+} from "@/utils/personalization/explicit-feedback-engine";
 
 export interface FeedbackVector {
   id: number;
@@ -27,6 +31,7 @@ export interface FeedbackVector {
   completedEpisodeCount: number;
   rewatches: number;
   abandons: number;
+  explicitFeedback: ExplicitFeedbackValue | null;
   evidence: string[];
 }
 
@@ -37,6 +42,7 @@ type FeedbackAccumulator = {
   progress: number;
   completed: boolean;
   watchlisted: boolean;
+  explicitFeedback: ExplicitFeedbackValue | null;
 
   opens: number;
   starts: number;
@@ -63,7 +69,10 @@ function clamp(
 
 function validTimestamp(value: string): number {
   const timestamp = new Date(value).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
+
+  return Number.isFinite(timestamp)
+    ? timestamp
+    : 0;
 }
 
 function latestTimestamp(values: string[]): string {
@@ -85,7 +94,9 @@ function latestTimestamp(values: string[]): string {
 function recencyWeight(timestamp: string): number {
   const time = validTimestamp(timestamp);
 
-  if (!time) return 0.1;
+  if (!time) {
+    return 0.1;
+  }
 
   const ageDays = Math.max(
     0,
@@ -116,6 +127,7 @@ function createAccumulator(
     progress: 0,
     completed: false,
     watchlisted: false,
+    explicitFeedback: null,
 
     opens: 0,
     starts: 0,
@@ -162,13 +174,25 @@ function addBehavioralEvent(
   addTimestamp(target, event.timestamp);
 
   if (event.mediaType === "tv") {
-    const key = episodeKey(event.season, event.episode);
+    const key = episodeKey(
+      event.season,
+      event.episode,
+    );
 
-    addEpisodeProgress(target, key, event.progress);
+    addEpisodeProgress(
+      target,
+      key,
+      event.progress,
+    );
 
     if (event.event === "completed") {
       target.completedEpisodes.add(key);
-      addEpisodeProgress(target, key, 1);
+
+      addEpisodeProgress(
+        target,
+        key,
+        1,
+      );
     }
   } else {
     target.progress = Math.max(
@@ -232,7 +256,7 @@ function getAggregateProgress(
     total += progress;
   }
 
-  // Average across distinct episodes, not individual progress events.
+  // Average across distinct episodes, not individual events.
   return clamp(
     total / item.episodeProgress.size,
     0,
@@ -245,10 +269,9 @@ function buildVector(
 ): FeedbackVector {
   const timestamp = latestTimestamp(item.timestamps);
   const recency = recencyWeight(timestamp);
-
   const progress = getAggregateProgress(item);
 
-  // A TV episode is not equivalent to completing a whole show.
+  // A TV episode is not equivalent to completing an entire show.
   const completed =
     item.mediaType === "movie" && item.completed;
 
@@ -260,7 +283,7 @@ function buildVector(
       ? item.episodeProgress.size
       : 0;
 
-  // Diminishing returns prevent repetitive events from dominating.
+  // Diminishing returns prevent repeated events dominating.
   const openSignal =
     Math.log1p(Math.min(item.opens, 5)) * 0.035;
 
@@ -280,7 +303,8 @@ function buildVector(
   const rewatchSignal =
     Math.log1p(Math.min(item.rewatches, 4)) * 0.16;
 
-  const watchlistSignal = item.watchlisted ? 0.2 : 0;
+  const watchlistSignal =
+    item.watchlisted ? 0.2 : 0;
 
   const sustainedSignal =
     Math.pow(progress, 1.35) * 0.42;
@@ -295,7 +319,7 @@ function buildVector(
     sustainedSignal;
 
   // Abandonment is weak negative evidence only when playback
-  // barely began. Stopping halfway through is not a dislike.
+  // barely began. It is never treated as an explicit dislike.
   const earlyAbandonment =
     item.abandons > 0 && progress < 0.12;
 
@@ -307,8 +331,17 @@ function buildVector(
       )
     : 0;
 
-  const positive = clamp(rawPositive * recency, 0, 1);
-  const negative = clamp(rawNegative * recency, 0, 1);
+  let positive = clamp(
+    rawPositive * recency,
+    0,
+    1,
+  );
+
+  let negative = clamp(
+    rawNegative * recency,
+    0,
+    1,
+  );
 
   const evidence: string[] = [];
 
@@ -316,9 +349,11 @@ function buildVector(
   if (item.starts > 0) evidence.push("started");
   if (progress >= 0.12) evidence.push("sustained-viewing");
   if (completed) evidence.push("completed");
+
   if (completedEpisodeCount > 0) {
     evidence.push("episode-completion");
   }
+
   if (item.rewatches > 0) evidence.push("rewatched");
   if (item.watchlisted) evidence.push("watchlisted");
   if (earlyAbandonment) evidence.push("early-abandonment");
@@ -331,7 +366,7 @@ function buildVector(
     Math.min(item.rewatches, 2) +
     (item.watchlisted ? 1 : 0);
 
-  const confidence = clamp(
+  let confidence = clamp(
     (1 - Math.exp(-activityCount * 0.32)) *
       (0.55 + recency * 0.45),
     0,
@@ -353,7 +388,6 @@ function buildVector(
   } else if (progress >= 0.12) {
     label = 0.59;
   } else if (earlyAbandonment) {
-    // Weak negative, not an explicit dislike.
     label = 0.36;
   } else if (item.watchlisted) {
     label = 0.68;
@@ -361,20 +395,12 @@ function buildVector(
     label = 0.5;
   }
 
-  const playbackWeight =
-    progress > 0
-      ? 0.45 + progress * 0.9
-      : 0;
-
-  const interactionWeight =
-    Math.min(item.starts, 3) * 0.12 +
-    Math.min(item.opens, 3) * 0.04 +
-    Math.min(item.rewatches, 3) * 0.2;
-
-  const weight = clamp(
+  let weight = clamp(
     (
-      playbackWeight +
-      interactionWeight +
+      (progress > 0 ? 0.45 + progress * 0.9 : 0) +
+      Math.min(item.starts, 3) * 0.12 +
+      Math.min(item.opens, 3) * 0.04 +
+      Math.min(item.rewatches, 3) * 0.2 +
       (completed ? 0.65 : 0) +
       (item.mediaType === "tv"
         ? Math.min(completedEpisodeCount, 3) * 0.12
@@ -385,6 +411,73 @@ function buildVector(
     0.15,
     2.5,
   );
+
+  // Explicit opinions override inferred viewing signals.
+  // They remain strong but decay gradually with time.
+  switch (item.explicitFeedback) {
+    case "like":
+      positive = Math.max(
+        positive,
+        0.95 * recency,
+      );
+      negative = Math.min(
+        negative,
+        0.05,
+      );
+      confidence = Math.max(
+        confidence,
+        0.98 * recency,
+      );
+      label = 0.99;
+      weight = Math.max(
+        weight,
+        2.5 * recency,
+      );
+      evidence.push("explicit-like");
+      break;
+
+    case "dislike":
+      negative = Math.max(
+        negative,
+        0.98 * recency,
+      );
+      positive = Math.min(
+        positive,
+        0.05,
+      );
+      confidence = Math.max(
+        confidence,
+        0.98 * recency,
+      );
+      label = 0.01;
+      weight = Math.max(
+        weight,
+        2.5 * recency,
+      );
+      evidence.push("explicit-dislike");
+      break;
+
+    case "not_interested":
+      negative = Math.max(
+        negative,
+        1 * recency,
+      );
+      positive = Math.min(
+        positive,
+        0.02,
+      );
+      confidence = Math.max(
+        confidence,
+        0.99 * recency,
+      );
+      label = 0.005;
+      weight = Math.max(
+        weight,
+        2.5 * recency,
+      );
+      evidence.push("explicit-not-interested");
+      break;
+  }
 
   return {
     id: item.id,
@@ -409,18 +502,20 @@ function buildVector(
     rewatches: item.rewatches,
     abandons: item.abandons,
 
-    evidence,
+    explicitFeedback: item.explicitFeedback,
+
+    evidence: [...new Set(evidence)],
   };
 }
 
 /**
  * Builds normalized feedback vectors from the active profile's
- * watch history, behavioral events and current watchlist.
+ * watch history, behavioral events, watchlist and explicit opinions.
  *
- * Unseen or ignored titles are never generated as negative examples.
- * Watchlist removal is not interpreted as dislike.
+ * Unseen titles are never generated as negative examples.
+ * Removing a title from the watchlist is not interpreted as dislike.
  * TV episodes are consolidated without treating one episode
- * completion as completion of the entire show.
+ * as completion of the entire show.
  */
 export function getFeedbackVectors(
   mediaType?: ContentType,
@@ -434,7 +529,9 @@ export function getFeedbackVectors(
     const key = `${type}:${id}`;
     const existing = items.get(key);
 
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
 
     const created = createAccumulator(id, type);
     items.set(key, created);
@@ -455,28 +552,54 @@ export function getFeedbackVectors(
       continue;
     }
 
-    const target = getOrCreate(entry.media_id, entry.type);
+    const target = getOrCreate(
+      entry.media_id,
+      entry.type,
+    );
 
     const progress = entry.completed
       ? 1
       : entry.duration > 0
-        ? clamp(entry.last_position / entry.duration, 0, 1)
+        ? clamp(
+            entry.last_position / entry.duration,
+            0,
+            1,
+          )
         : 0;
 
-    addTimestamp(target, entry.updated_at);
+    addTimestamp(
+      target,
+      entry.updated_at,
+    );
 
     if (entry.type === "movie") {
-      target.progress = Math.max(target.progress, progress);
+      target.progress = Math.max(
+        target.progress,
+        progress,
+      );
+
       target.completed =
         target.completed || entry.completed;
     } else {
-      const key = episodeKey(entry.season, entry.episode);
+      const key = episodeKey(
+        entry.season,
+        entry.episode,
+      );
 
-      addEpisodeProgress(target, key, progress);
+      addEpisodeProgress(
+        target,
+        key,
+        progress,
+      );
 
       if (entry.completed) {
         target.completedEpisodes.add(key);
-        addEpisodeProgress(target, key, 1);
+
+        addEpisodeProgress(
+          target,
+          key,
+          1,
+        );
       }
     }
   }
@@ -498,7 +621,10 @@ export function getFeedbackVectors(
     }
 
     addBehavioralEvent(
-      getOrCreate(event.mediaId, event.mediaType),
+      getOrCreate(
+        event.mediaId,
+        event.mediaType,
+      ),
       event,
     );
   }
@@ -516,10 +642,43 @@ export function getFeedbackVectors(
       continue;
     }
 
-    const target = getOrCreate(entry.id, entry.type);
+    const target = getOrCreate(
+      entry.id,
+      entry.type,
+    );
 
     target.watchlisted = true;
-    addTimestamp(target, entry.saved_date);
+
+    addTimestamp(
+      target,
+      entry.saved_date,
+    );
+  }
+
+  for (const feedback of getAllExplicitFeedback()) {
+    if (
+      !feedback ||
+      (feedback.mediaType !== "movie" &&
+        feedback.mediaType !== "tv")
+    ) {
+      continue;
+    }
+
+    if (mediaType && feedback.mediaType !== mediaType) {
+      continue;
+    }
+
+    const target = getOrCreate(
+      feedback.id,
+      feedback.mediaType,
+    );
+
+    target.explicitFeedback = feedback.value;
+
+    addTimestamp(
+      target,
+      feedback.updatedAt,
+    );
   }
 
   return [...items.values()]
@@ -528,7 +687,8 @@ export function getFeedbackVectors(
       (vector) =>
         vector.positive > 0 ||
         vector.negative > 0 ||
-        vector.watchlisted,
+        vector.watchlisted ||
+        vector.explicitFeedback !== null,
     )
     .sort(
       (a, b) =>
