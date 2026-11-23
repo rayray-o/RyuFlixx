@@ -1,8 +1,10 @@
+
 "use client";
 
 import { Image, Chip, Button } from "@heroui/react";
 import { getImageUrl, mutateTvShowTitle } from "@/utils/movies";
 import BookmarkButton from "@/components/ui/button/BookmarkButton";
+import DetailFeedback from "@/components/ui/button/DetailFeedback";
 import ShareButton from "@/components/ui/button/ShareButton";
 import { AppendToResponse } from "tmdb-ts/dist/types/options";
 import { useDocumentTitle } from "@mantine/hooks";
@@ -139,6 +141,12 @@ export const TvShowOverviewSection: React.FC<TvShowOverviewSectionProps> = ({
 
                 <Genres genres={tv.genres} type="tv" />
               </div>
+
+              {/* Recommendation feedback */}
+              <DetailFeedback
+                id={tv.id}
+                mediaType="tv"
+              />
 
               <div
                 id="action"
