@@ -14,44 +14,19 @@ import {
 export interface FeedbackVector {
   id: number;
   mediaType: ContentType;
-
-  /** Normalized positive evidence, from 0 to 1. */
   positive: number;
-
-  /** Normalized negative evidence, from 0 to 1. */
   negative: number;
-
-  /** Overall confidence that this feedback represents real interest. */
   confidence: number;
-
-  /** Engagement estimate used as the learned model's target. */
   label: number;
-
-  /** Training importance, capped to prevent repeated activity dominating. */
   weight: number;
-
-  /** Most recent known activity for this title. */
   timestamp: string;
-
-  /** Highest known playback completion ratio. */
   progress: number;
-
-  /** Whether playback reached completion. */
   completed: boolean;
-
-  /** Whether the title is currently saved to the watchlist. */
   watchlisted: boolean;
-
-  /** Number of distinct TV episodes represented by this show. */
   episodeCount: number;
-
-  /** Number of recorded rewatches. */
+  completedEpisodeCount: number;
   rewatches: number;
-
-  /** Number of recorded early abandonments. */
   abandons: number;
-
-  /** Evidence categories contributing to this vector. */
   evidence: string[];
 }
 
@@ -70,7 +45,8 @@ type FeedbackAccumulator = {
   rewatches: number;
   abandons: number;
 
-  episodeKeys: Set<string>;
+  episodeProgress: Map<string, number>;
+  completedEpisodes: Set<string>;
   timestamps: string[];
 };
 
@@ -87,19 +63,23 @@ function clamp(
 
 function validTimestamp(value: string): number {
   const timestamp = new Date(value).getTime();
-
-  return Number.isFinite(timestamp)
-    ? timestamp
-    : 0;
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function latestTimestamp(values: string[]): string {
-  return values
-    .filter(Boolean)
-    .sort(
-      (a, b) =>
-        validTimestamp(b) - validTimestamp(a),
-    )[0] ?? new Date(0).toISOString();
+  let latest = "";
+  let latestTime = 0;
+
+  for (const value of values) {
+    const time = validTimestamp(value);
+
+    if (time > latestTime) {
+      latest = value;
+      latestTime = time;
+    }
+  }
+
+  return latest || new Date(0).toISOString();
 }
 
 function recencyWeight(timestamp: string): number {
@@ -112,16 +92,17 @@ function recencyWeight(timestamp: string): number {
     (Date.now() - time) / 86_400_000,
   );
 
-  // Smoothly reduces the influence of old activity.
-  // Recent activity matters more, but old preferences
-  // do not suddenly disappear.
   return Math.max(
     0.08,
-    Math.pow(
-      0.5,
-      ageDays / RECENCY_HALF_LIFE_DAYS,
-    ),
+    Math.pow(0.5, ageDays / RECENCY_HALF_LIFE_DAYS),
   );
+}
+
+function episodeKey(
+  season?: number,
+  episode?: number,
+): string {
+  return `${season ?? 0}:${episode ?? 0}`;
 }
 
 function createAccumulator(
@@ -143,16 +124,10 @@ function createAccumulator(
     rewatches: 0,
     abandons: 0,
 
-    episodeKeys: new Set(),
+    episodeProgress: new Map(),
+    completedEpisodes: new Set(),
     timestamps: [],
   };
-}
-
-function getKey(
-  id: number,
-  mediaType: ContentType,
-): string {
-  return `${mediaType}:${id}`;
 }
 
 function addTimestamp(
@@ -164,6 +139,22 @@ function addTimestamp(
   }
 }
 
+function addEpisodeProgress(
+  target: FeedbackAccumulator,
+  key: string,
+  progress: number,
+): void {
+  const safeProgress = clamp(progress, 0, 1);
+
+  target.episodeProgress.set(
+    key,
+    Math.max(
+      target.episodeProgress.get(key) ?? 0,
+      safeProgress,
+    ),
+  );
+}
+
 function addBehavioralEvent(
   target: FeedbackAccumulator,
   event: BehavioralEvent,
@@ -171,15 +162,25 @@ function addBehavioralEvent(
   addTimestamp(target, event.timestamp);
 
   if (event.mediaType === "tv") {
-    target.episodeKeys.add(
-      `${event.season ?? 0}:${event.episode ?? 0}`,
-    );
-  }
+    const key = episodeKey(event.season, event.episode);
 
-  target.progress = Math.max(
-    target.progress,
-    clamp(event.progress, 0, 1),
-  );
+    addEpisodeProgress(target, key, event.progress);
+
+    if (event.event === "completed") {
+      target.completedEpisodes.add(key);
+      addEpisodeProgress(target, key, 1);
+    }
+  } else {
+    target.progress = Math.max(
+      target.progress,
+      clamp(event.progress, 0, 1),
+    );
+
+    if (event.event === "completed") {
+      target.completed = true;
+      target.progress = 1;
+    }
+  }
 
   switch (event.event) {
     case "opened":
@@ -196,8 +197,6 @@ function addBehavioralEvent(
 
     case "completed":
       target.completions += 1;
-      target.completed = true;
-      target.progress = 1;
       break;
 
     case "rewatched":
@@ -210,10 +209,35 @@ function addBehavioralEvent(
 
     case "paused":
     case "seeked":
-      // These are useful behavioral events, but
-      // neither one independently proves interest.
       break;
   }
+}
+
+function getAggregateProgress(
+  item: FeedbackAccumulator,
+): number {
+  if (item.mediaType === "movie") {
+    return item.completed
+      ? 1
+      : clamp(item.progress, 0, 1);
+  }
+
+  if (item.episodeProgress.size === 0) {
+    return 0;
+  }
+
+  let total = 0;
+
+  for (const progress of item.episodeProgress.values()) {
+    total += progress;
+  }
+
+  // Average across distinct episodes, not individual progress events.
+  return clamp(
+    total / item.episodeProgress.size,
+    0,
+    1,
+  );
 }
 
 function buildVector(
@@ -222,35 +246,41 @@ function buildVector(
   const timestamp = latestTimestamp(item.timestamps);
   const recency = recencyWeight(timestamp);
 
-  const progress = item.completed
-    ? 1
-    : clamp(item.progress, 0, 1);
+  const progress = getAggregateProgress(item);
 
-  // Repeated events have diminishing returns.
-  // This prevents a player emitting frequent progress
-  // updates from overwhelming other evidence.
-  const openSignal = Math.log1p(
-    Math.min(item.opens, 5),
-  ) * 0.035;
+  // A TV episode is not equivalent to completing a whole show.
+  const completed =
+    item.mediaType === "movie" && item.completed;
 
-  const startSignal = Math.log1p(
-    Math.min(item.starts, 4),
-  ) * 0.07;
+  const completedEpisodeCount =
+    item.completedEpisodes.size;
 
-  const progressSignal = Math.log1p(
-    Math.min(item.progressEvents, 5),
-  ) * 0.035;
+  const episodeCount =
+    item.mediaType === "tv"
+      ? item.episodeProgress.size
+      : 0;
 
-  const completionSignal = item.completed
-    ? 0.48
-    : Math.min(item.completions, 2) * 0.2;
+  // Diminishing returns prevent repetitive events from dominating.
+  const openSignal =
+    Math.log1p(Math.min(item.opens, 5)) * 0.035;
+
+  const startSignal =
+    Math.log1p(Math.min(item.starts, 4)) * 0.07;
+
+  const progressSignal =
+    Math.log1p(Math.min(item.progressEvents, 5)) * 0.035;
+
+  const completionSignal =
+    item.mediaType === "movie"
+      ? completed
+        ? 0.48
+        : Math.min(item.completions, 2) * 0.2
+      : Math.min(completedEpisodeCount, 3) * 0.12;
 
   const rewatchSignal =
     Math.log1p(Math.min(item.rewatches, 4)) * 0.16;
 
-  const watchlistSignal = item.watchlisted
-    ? 0.2
-    : 0;
+  const watchlistSignal = item.watchlisted ? 0.2 : 0;
 
   const sustainedSignal =
     Math.pow(progress, 1.35) * 0.42;
@@ -264,9 +294,8 @@ function buildVector(
     watchlistSignal +
     sustainedSignal;
 
-  // Abandonment only matters when playback barely began.
-  // A user stopping halfway through is not automatically
-  // evidence that they disliked the title.
+  // Abandonment is weak negative evidence only when playback
+  // barely began. Stopping halfway through is not a dislike.
   const earlyAbandonment =
     item.abandons > 0 && progress < 0.12;
 
@@ -274,30 +303,22 @@ function buildVector(
     ? Math.min(
         0.24,
         0.09 +
-          Math.log1p(
-            Math.min(item.abandons, 3),
-          ) * 0.055,
+          Math.log1p(Math.min(item.abandons, 3)) * 0.055,
       )
     : 0;
 
-  const positive = clamp(
-    rawPositive * recency,
-    0,
-    1,
-  );
-
-  const negative = clamp(
-    rawNegative * recency,
-    0,
-    1,
-  );
+  const positive = clamp(rawPositive * recency, 0, 1);
+  const negative = clamp(rawNegative * recency, 0, 1);
 
   const evidence: string[] = [];
 
   if (item.opens > 0) evidence.push("opened");
   if (item.starts > 0) evidence.push("started");
   if (progress >= 0.12) evidence.push("sustained-viewing");
-  if (item.completed) evidence.push("completed");
+  if (completed) evidence.push("completed");
+  if (completedEpisodeCount > 0) {
+    evidence.push("episode-completion");
+  }
   if (item.rewatches > 0) evidence.push("rewatched");
   if (item.watchlisted) evidence.push("watchlisted");
   if (earlyAbandonment) evidence.push("early-abandonment");
@@ -319,7 +340,7 @@ function buildVector(
 
   let label: number;
 
-  if (item.completed) {
+  if (completed) {
     label = 0.98;
   } else if (item.rewatches > 0) {
     label = 0.96;
@@ -332,17 +353,14 @@ function buildVector(
   } else if (progress >= 0.12) {
     label = 0.59;
   } else if (earlyAbandonment) {
-    // Weak negative evidence, deliberately not a hard dislike.
+    // Weak negative, not an explicit dislike.
     label = 0.36;
   } else if (item.watchlisted) {
-    // Saving something expresses intent, not guaranteed enjoyment.
     label = 0.68;
   } else {
     label = 0.5;
   }
 
-  // Watchlist-only feedback should have lower training
-  // importance than actual playback behavior.
   const playbackWeight =
     progress > 0
       ? 0.45 + progress * 0.9
@@ -357,7 +375,10 @@ function buildVector(
     (
       playbackWeight +
       interactionWeight +
-      (item.completed ? 0.65 : 0) +
+      (completed ? 0.65 : 0) +
+      (item.mediaType === "tv"
+        ? Math.min(completedEpisodeCount, 3) * 0.12
+        : 0) +
       (item.watchlisted ? 0.3 : 0) +
       (earlyAbandonment ? 0.12 : 0)
     ) * (0.55 + recency * 0.45),
@@ -379,10 +400,12 @@ function buildVector(
     timestamp,
     progress,
 
-    completed: item.completed,
-    watchlisted: item.watchlisted,
+    completed,
+    watchlisted,
 
-    episodeCount: item.episodeKeys.size,
+    episodeCount,
+    completedEpisodeCount,
+
     rewatches: item.rewatches,
     abandons: item.abandons,
 
@@ -391,16 +414,13 @@ function buildVector(
 }
 
 /**
- * Builds normalized, profile-specific feedback vectors.
+ * Builds normalized feedback vectors from the active profile's
+ * watch history, behavioral events and current watchlist.
  *
- * The underlying watch history, watchlist and behavioral memory
- * are already isolated by RyuFlixx's active-profile storage.
- *
- * Important:
- * - Unseen titles are never generated as negative examples.
- * - Watchlist removal is not interpreted as dislike.
- * - TV episodes are consolidated into one show-level vector.
- * - Repeated events are capped and have diminishing returns.
+ * Unseen or ignored titles are never generated as negative examples.
+ * Watchlist removal is not interpreted as dislike.
+ * TV episodes are consolidated without treating one episode
+ * completion as completion of the entire show.
  */
 export function getFeedbackVectors(
   mediaType?: ContentType,
@@ -411,7 +431,7 @@ export function getFeedbackVectors(
     id: number,
     type: ContentType,
   ): FeedbackAccumulator => {
-    const key = getKey(id, type);
+    const key = `${type}:${id}`;
     const existing = items.get(key);
 
     if (existing) return existing;
@@ -422,7 +442,6 @@ export function getFeedbackVectors(
     return created;
   };
 
-  // Playback history supplies the strongest evidence.
   for (const entry of getWatchHistory()) {
     if (
       !entry ||
@@ -436,40 +455,32 @@ export function getFeedbackVectors(
       continue;
     }
 
-    const target = getOrCreate(
-      entry.media_id,
-      entry.type,
-    );
+    const target = getOrCreate(entry.media_id, entry.type);
 
     const progress = entry.completed
       ? 1
       : entry.duration > 0
-        ? clamp(
-            entry.last_position / entry.duration,
-            0,
-            1,
-          )
+        ? clamp(entry.last_position / entry.duration, 0, 1)
         : 0;
-
-    target.progress = Math.max(
-      target.progress,
-      progress,
-    );
-
-    target.completed =
-      target.completed || entry.completed;
 
     addTimestamp(target, entry.updated_at);
 
-    if (entry.type === "tv") {
-      target.episodeKeys.add(
-        `${entry.season ?? 0}:${entry.episode ?? 0}`,
-      );
+    if (entry.type === "movie") {
+      target.progress = Math.max(target.progress, progress);
+      target.completed =
+        target.completed || entry.completed;
+    } else {
+      const key = episodeKey(entry.season, entry.episode);
+
+      addEpisodeProgress(target, key, progress);
+
+      if (entry.completed) {
+        target.completedEpisodes.add(key);
+        addEpisodeProgress(target, key, 1);
+      }
     }
   }
 
-  // Behavioral events add richer context, but are aggregated
-  // with caps later so noisy progress reporting cannot dominate.
   const memory = getBehavioralMemory();
 
   for (const event of memory.events) {
@@ -486,16 +497,12 @@ export function getFeedbackVectors(
       continue;
     }
 
-    const target = getOrCreate(
-      event.mediaId,
-      event.mediaType,
+    addBehavioralEvent(
+      getOrCreate(event.mediaId, event.mediaType),
+      event,
     );
-
-    addBehavioralEvent(target, event);
   }
 
-  // A current watchlist save is a modest positive-intent signal.
-  // Removal is intentionally not treated as negative feedback.
   for (const entry of getLocalWatchlist()) {
     if (
       !entry ||
@@ -509,10 +516,7 @@ export function getFeedbackVectors(
       continue;
     }
 
-    const target = getOrCreate(
-      entry.id,
-      entry.type,
-    );
+    const target = getOrCreate(entry.id, entry.type);
 
     target.watchlisted = true;
     addTimestamp(target, entry.saved_date);
@@ -520,15 +524,12 @@ export function getFeedbackVectors(
 
   return [...items.values()]
     .map(buildVector)
-    .filter((vector) => {
-      // A vector must contain real interaction evidence.
-      // Merely existing in TMDB or being recommended is not enough.
-      return (
+    .filter(
+      (vector) =>
         vector.positive > 0 ||
         vector.negative > 0 ||
-        vector.watchlisted
-      );
-    })
+        vector.watchlisted,
+    )
     .sort(
       (a, b) =>
         validTimestamp(b.timestamp) -
@@ -537,10 +538,6 @@ export function getFeedbackVectors(
     .slice(0, MAX_FEEDBACK_ITEMS);
 }
 
-/**
- * Returns one title's normalized feedback, if the active profile
- * has any recorded interaction with it.
- */
 export function getItemFeedbackVector(
   id: number,
   mediaType: ContentType,
