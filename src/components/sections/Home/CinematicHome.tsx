@@ -1,16 +1,15 @@
-
 "use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TouchEvent, MouseEvent } from "react";
-import { useInViewport } from "@mantine/hooks";
 import { useQuery } from "@tanstack/react-query";
 import type { Movie, TV } from "tmdb-ts/dist/types";
 
 import { siteConfig } from "@/config/site";
 import useDiscoverFilters from "@/hooks/useDiscoverFilters";
 import ForYou from "@/components/sections/Home/ForYou";
+import GeneratedRows from "@/components/sections/Home/GeneratedRows";
 import {
   clearTvContinuation,
   getTvContinuation,
@@ -279,139 +278,6 @@ function ResumeTile({
   );
 }
 
-function MediaTile({
-  media,
-  onFocus,
-}: {
-  media: Media;
-  onFocus: () => void;
-}) {
-  const title = mediaTitle(media);
-  const content = mediaContent(media);
-
-  return (
-    <Link
-      href={mediaLink(media)}
-      onMouseEnter={onFocus}
-      onFocus={onFocus}
-      className={cn(
-        "group block shrink-0",
-        "w-[185px] sm:w-[210px]",
-        "lg:w-[270px] xl:w-[310px] 2xl:w-[350px]",
-      )}
-    >
-      <div
-        className={cn(
-          "relative aspect-[16/10] overflow-hidden rounded-xl",
-          "border border-white/[0.07] bg-white/[0.025]",
-          "transition duration-500 ease-out",
-          "group-hover:-translate-y-1 group-hover:scale-[1.015] group-hover:border-white/20",
-        )}
-      >
-        <img
-          src={
-            tmdbBackdrop(media.backdrop_path) ||
-            tmdbPoster(media.poster_path)
-          }
-          alt={title}
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-          loading="lazy"
-        />
-
-        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
-
-        <div className="absolute inset-x-3 bottom-3 md:inset-x-4 md:bottom-4">
-          <div className="flex items-end justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white md:text-base lg:text-lg">
-                {title}
-              </p>
-
-              <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/60 md:text-xs">
-                {content === "movie" ? "Movie" : "Series"}
-                {mediaYear(media) && ` · ${mediaYear(media)}`}
-              </p>
-            </div>
-
-            <span className="shrink-0 text-[11px] font-semibold text-white/80 md:text-sm">
-              {media.vote_average?.toFixed(1) ?? "—"}
-            </span>
-          </div>
-        </div>
-      </div>
-    </Link>
-  );
-}
-
-function Rail({
-  name,
-  query,
-  content,
-  onFocus,
-}: {
-  name: string;
-  query: () => Promise<{ results: Media[] }>;
-  content: Content;
-  onFocus: (candidate: Candidate) => void;
-}) {
-  const { ref, inViewport } = useInViewport();
-
-  const key = `${content}-${name}`;
-
-  const { data, isPending } = useQuery({
-    queryKey: ["cinematic-home", key],
-    queryFn: query,
-    enabled: inViewport,
-    staleTime: 1000 * 60 * 10,
-    gcTime: 1000 * 60 * 30,
-  });
-
-  return (
-    <section
-      ref={ref}
-      className="relative py-5 md:py-7 lg:py-9"
-    >
-      <div className="mb-4 flex items-end justify-between gap-4 px-5 md:px-10 lg:px-14 2xl:px-20">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight text-white md:text-xl lg:text-2xl">
-            {name.replace(/ Movies| TV Shows/g, "")}
-          </h2>
-        </div>
-
-        <span className="hidden text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40 md:block lg:text-xs">
-          See all
-        </span>
-      </div>
-
-      <div className="overflow-hidden pl-5 md:pl-10 lg:pl-14 2xl:pl-20">
-        <div
-          data-rail
-          className="flex gap-3 overflow-x-auto overscroll-x-contain pr-5 pb-3 scrollbar-none md:gap-4 md:pr-10 lg:gap-5 lg:pr-14 2xl:gap-6 2xl:pr-20"
-        >
-          {isPending && !data
-            ? Array.from({ length: 6 }).map((_, index) => (
-                <div
-                  key={index}
-                  className={cn(
-                    "aspect-[16/10] shrink-0 animate-pulse rounded-xl bg-white/[0.05]",
-                    "w-[185px] sm:w-[210px]",
-                    "lg:w-[270px] xl:w-[310px] 2xl:w-[350px]",
-                  )}
-                />
-              ))
-            : data?.results?.map((media) => (
-                <MediaTile
-                  key={media.id}
-                  media={media}
-                  onFocus={() => onFocus(fromMedia(media))}
-                />
-              ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export default function CinematicHome() {
   const { content, setContent } = useDiscoverFilters();
 
@@ -432,7 +298,6 @@ export default function CinematicHome() {
   const rafTwoRef = useRef<number | null>(null);
   const heroTimer = useRef<number | null>(null);
 
-  // Mobile hero swipe state
   const heroTouchStart = useRef<{
     x: number;
     y: number;
@@ -486,8 +351,6 @@ export default function CinematicHome() {
     return () => media.removeEventListener?.("change", update);
   }, []);
 
-  // Deduplicate Continue Watching by media ID.
-  // History is sorted newest first, so the first entry is the newest episode.
   const currentHistory = useMemo(() => {
     const filtered = history.filter(
       (item) =>
@@ -551,8 +414,6 @@ export default function CinematicHome() {
     );
   }, [heroCandidates]);
 
-  // Swipe navigation uses the existing selected state,
-  // so the normal backdrop transition runs unchanged.
   const moveHero = (direction: 1 | -1) => {
     if (heroCandidates.length < 2) return;
 
@@ -584,7 +445,6 @@ export default function CinematicHome() {
   ) => {
     suppressHeroClick.current = false;
 
-    // Stop autoplay immediately when the user touches the hero.
     if (heroTimer.current !== null) {
       window.clearInterval(heroTimer.current);
       heroTimer.current = null;
@@ -608,7 +468,6 @@ export default function CinematicHome() {
     const start = heroTouchStart.current;
     heroTouchStart.current = null;
 
-    // Restart autoplay with a fresh countdown after the interaction.
     setIsHeroInteracting(false);
 
     if (!start || !isMobile) return;
@@ -623,7 +482,6 @@ export default function CinematicHome() {
     const horizontalDistance = Math.abs(deltaX);
     const verticalDistance = Math.abs(deltaY);
 
-    // Ignore taps, vertical scrolling, and small movements.
     if (
       horizontalDistance < 48 ||
       verticalDistance > 75 ||
@@ -633,8 +491,6 @@ export default function CinematicHome() {
     }
 
     suppressHeroClick.current = true;
-
-    // Left swipe = next. Right swipe = previous.
     moveHero(deltaX < 0 ? 1 : -1);
   };
 
@@ -815,8 +671,6 @@ export default function CinematicHome() {
     return () => controller.abort();
   }, [selected?.id, selected?.content]);
 
-  // Mobile autoplay. Pauses during touch interaction and restarts
-  // with a full 7.5-second countdown when the interaction ends.
   useEffect(() => {
     if (
       !isMobile ||
@@ -875,11 +729,6 @@ export default function CinematicHome() {
     },
     [],
   );
-
-  const movies = siteConfig.queryLists.movies;
-  const tvShows = siteConfig.queryLists.tvShows;
-
-  const lists = content === "movie" ? movies : tvShows;
 
   const hero = selected;
 
@@ -1166,27 +1015,12 @@ export default function CinematicHome() {
             <ForYou type={content} />
           </div>
 
+          {/* Personalized, dynamically generated homepage shelves */}
           <div className="pb-24 lg:pb-28 2xl:pb-32">
-            {lists.map((list) => (
-              <Rail
-                key={list.name}
-                name={list.name}
-                query={
-                  list.query as () => Promise<{
-                    results: Media[];
-                  }>
-                }
-                content={content}
-                onFocus={(candidate) => {
-                  if (!isMobile) {
-                    setSelected(candidate);
-                  }
-                }}
-              />
-            ))}
+            <GeneratedRows type={content} />
           </div>
         </div>
       </div>
     </div>
   );
-}
+      }
