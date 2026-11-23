@@ -1,28 +1,46 @@
+
 "use client";
 
 import Link from "next/link";
 import type { Movie, TV } from "tmdb-ts/dist/types";
+import type { RecommendationItem } from "@/utils/personalization/recommendation-engine";
 import { mutateMovieTitle, mutateTvShowTitle } from "@/utils/movies";
 import { cn } from "@/utils/helpers";
 
+type CinematicMedia = Movie | TV | RecommendationItem;
+
 type CinematicMediaCardProps = {
-  media: Movie | TV;
+  media: CinematicMedia;
 };
 
 export default function CinematicMediaCard({
   media,
 }: CinematicMediaCardProps) {
-  const isMovie = "title" in media;
+  const content =
+    "mediaType" in media
+      ? media.mediaType
+      : "title" in media
+        ? "movie"
+        : "tv";
 
-  const title = isMovie
-    ? mutateMovieTitle(media as Movie)
-    : mutateTvShowTitle(media as TV);
+  const isMovie = content === "movie";
 
-  const content = isMovie ? "movie" : "tv";
+  const title =
+    "mediaType" in media
+      ? media.title || media.name || "Untitled"
+      : isMovie
+        ? mutateMovieTitle(media as Movie)
+        : mutateTvShowTitle(media as TV);
 
   const year = isMovie
-    ? (media as Movie).release_date?.slice(0, 4)
-    : (media as TV).first_air_date?.slice(0, 4);
+    ? ("release_date" in media
+        ? media.release_date
+        : undefined
+      )?.slice(0, 4)
+    : ("first_air_date" in media
+        ? media.first_air_date
+        : undefined
+      )?.slice(0, 4);
 
   const image =
     media.backdrop_path || media.poster_path;
@@ -73,7 +91,7 @@ export default function CinematicMediaCard({
               </p>
 
               <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/60 md:text-xs">
-                {content === "movie" ? "Movie" : "Series"}
+                {isMovie ? "Movie" : "Series"}
                 {year && ` · ${year}`}
               </p>
             </div>
