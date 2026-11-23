@@ -1,3 +1,4 @@
+
 "use client";
 
 import CinematicMediaCard from "@/components/sections/Home/CinematicMediaCard";
@@ -23,6 +24,9 @@ const GeneratedRows: React.FC<GeneratedRowsProps> = ({
 }) => {
   const [rows, setRows] = useState<HomepageRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadedType, setLoadedType] =
+    useState<ContentType | null>(null);
+
   const requestId = useRef(0);
 
   useEffect(() => {
@@ -45,6 +49,7 @@ const GeneratedRows: React.FC<GeneratedRowsProps> = ({
         }
 
         setRows(generated);
+        setLoadedType(type);
       } catch {
         if (
           cancelled ||
@@ -54,6 +59,7 @@ const GeneratedRows: React.FC<GeneratedRowsProps> = ({
         }
 
         setRows([]);
+        setLoadedType(type);
       } finally {
         if (
           !cancelled &&
@@ -124,12 +130,18 @@ const GeneratedRows: React.FC<GeneratedRowsProps> = ({
     };
   }, [type]);
 
-  if (loading && rows.length === 0) {
+  // The old type's rows must never remain visible after switching.
+  const showingCurrentType = loadedType === type;
+
+  const showSkeleton =
+    !showingCurrentType || loading;
+
+  if (showSkeleton) {
     return (
       <>
         {[0, 1, 2].map((section) => (
           <section
-            key={section}
+            key={`${type}-${section}`}
             className="relative py-5 md:py-7 lg:py-9"
           >
             <div className="mb-4 px-5 md:px-10 lg:px-14 2xl:px-20">
@@ -179,7 +191,7 @@ const GeneratedRows: React.FC<GeneratedRowsProps> = ({
                   className="embla__slide flex min-h-fit max-w-fit items-center px-1 py-2"
                 >
                   <CinematicMediaCard
-                    media={item as never}
+                    media={item}
                   />
                 </div>
               ))}
