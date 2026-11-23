@@ -40,6 +40,13 @@ const TvShowBackdropSection: React.FC<{
 
   if (!mounted || !backdropImage) return null;
 
+  const backdropMask = {
+    maskImage:
+      "linear-gradient(to bottom, black 0%, black 52%, transparent 100%)",
+    WebkitMaskImage:
+      "linear-gradient(to bottom, black 0%, black 52%, transparent 100%)",
+  };
+
   return createPortal(
     <section
       id="ryuflix-tv-backdrop"
@@ -59,9 +66,13 @@ const TvShowBackdropSection: React.FC<{
         isolation: "isolate",
       }}
     >
+      {/* Backdrop layers fade through transparency, not a color gradient */}
       <div
         className="absolute inset-0 overflow-hidden"
-        style={{ opacity: backdropOpacity }}
+        style={{
+          ...backdropMask,
+          opacity: backdropOpacity,
+        }}
       >
         <img
           src={backdropImage}
@@ -74,17 +85,13 @@ const TvShowBackdropSection: React.FC<{
             transformOrigin: "center center",
           }}
         />
+
+        <div className="absolute inset-0 bg-black/15" />
+
+        <div className="absolute inset-x-0 top-0 h-32 bg-linear-to-b from-background via-background/35 to-transparent" />
+
+        <div className="absolute inset-y-0 left-0 w-1/2 bg-linear-to-r from-background/55 via-transparent to-transparent" />
       </div>
-
-      <div className="absolute inset-0 bg-black/15" />
-
-      <div className="absolute inset-x-0 top-0 h-32 bg-linear-to-b from-background via-background/35 to-transparent" />
-
-      <div className="absolute inset-y-0 left-0 w-1/2 bg-linear-to-r from-background/55 via-transparent to-transparent" />
-
-      <div className="absolute inset-x-0 bottom-0 h-[65%] bg-linear-to-t from-background via-background/75 via-35% to-transparent" />
-
-      <div className="absolute inset-x-0 bottom-0 h-[45%] bg-linear-to-t from-background to-transparent" />
 
       {titleImage && (
         <div
