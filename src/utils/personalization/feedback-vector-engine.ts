@@ -494,7 +494,7 @@ function buildVector(
     progress,
 
     completed,
-    watchlisted,
+    watchlisted: item.watchlisted,
 
     episodeCount,
     completedEpisodeCount,
