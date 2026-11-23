@@ -6,7 +6,6 @@ import SectionTitle from "@/components/ui/other/SectionTitle";
 import {
   clearWatchHistory,
   getWatchHistory,
-  getTvContinuation,
   LocalWatchHistory,
   removeWatchHistory,
 } from "@/utils/localStorage";
@@ -81,17 +80,21 @@ function HistoryCard({
 
   const isTv = media.type === "tv";
 
-  // Use the same authoritative continuation source as Continue Watching.
-  const continuation = isTv
-    ? getTvContinuation(media.media_id)
-    : null;
+  // The grouped History record is the source of truth.
+  // It represents the most recently updated episode for this series.
+  const hasEpisodeInfo =
+    isTv &&
+    typeof media.season === "number" &&
+    typeof media.episode === "number";
 
-  const season = continuation?.season ?? media.season;
-  const episode = continuation?.episode ?? media.episode;
+  const episodeLabel = hasEpisodeInfo
+    ? `Season ${media.season} • Episode ${media.episode}`
+    : "";
 
+  // Open the media detail page, never the player directly.
   const href = isTv
-    ? `/tv/${media.media_id}/${season ?? 1}/${episode ?? 1}/player`
-    : `/movie/${media.media_id}/player`;
+    ? `/tv/${media.media_id}`
+    : `/movie/${media.media_id}`;
 
   const image = getImageUrl(
     media.backdrop_path || media.poster_path || "",
@@ -135,11 +138,7 @@ function HistoryCard({
       <Link
         href={href}
         className="relative block aspect-video overflow-hidden"
-        aria-label={
-          isTv
-            ? `Continue ${media.title}`
-            : `Watch ${media.title}`
-        }
+        aria-label={`View details for ${media.title}`}
       >
         {image ? (
           <img
@@ -178,6 +177,14 @@ function HistoryCard({
               )}
             </div>
           </div>
+
+          {hasEpisodeInfo && (
+            <div className="mt-2">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/80 sm:text-xs">
+                {episodeLabel}
+              </span>
+            </div>
+          )}
 
           <div className="mt-2">
             <span className="text-[10px] font-medium uppercase tracking-[0.17em] text-white/60 sm:text-xs">
