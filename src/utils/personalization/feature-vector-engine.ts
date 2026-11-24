@@ -587,7 +587,7 @@ export function getFeatureSimilarityScores(
       negativeScore * 0.85;
 
     scores.set(
-      \`\${candidate.mediaType}:\${candidate.id}\`,
+      `${candidate.mediaType}:${candidate.id}`,
       Math.max(-1, Math.min(1, combined)),
     );
   }
