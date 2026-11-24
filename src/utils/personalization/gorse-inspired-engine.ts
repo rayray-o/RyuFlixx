@@ -1210,7 +1210,7 @@ async function buildPersonalizedSourceRequests(
           buildDiscoverPath(mediaType, {
             with_genres: String(target.id),
             sort_by: "vote_average.desc",
-            vote_count.gte:
+            "vote_count.gte":
               mediaType === "movie" ? "100" : "50",
             page: "1",
           }),
