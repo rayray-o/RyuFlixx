@@ -30,7 +30,7 @@ type TrainingPair = {
 };
 
 type FactorizationModel = {
-  version: 2;
+  version: 3;
   fingerprint: string;
   bias: number;
   linear: Record<string, number>;
@@ -41,7 +41,7 @@ type FactorizationModel = {
   trainedAt: string;
 };
 
-const STORAGE_KEY = "ryuflix_learned_fm_v2";
+const STORAGE_KEY = "ryuflix_learned_fm_v3";
 
 const FACTOR_COUNT = 12;
 const EPOCHS = 45;
@@ -255,7 +255,7 @@ function createModel(
   }
 
   return {
-    version: 2,
+    version: 3,
     fingerprint,
     bias: 0,
     linear,
@@ -403,6 +403,54 @@ function getScoreGradients(
   return gradients;
 }
 
+/**
+ * Finds a small stride that visits every negative sample
+ * before repeating an offset.
+ */
+function greatestCommonDivisor(
+  left: number,
+  right: number,
+): number {
+  let a = Math.abs(left);
+  let b = Math.abs(right);
+
+  while (b !== 0) {
+    const remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+
+  return a;
+}
+
+function getCoprimeStride(size: number): number {
+  if (size <= 1) return 1;
+
+  let stride = Math.min(17, size - 1);
+
+  while (greatestCommonDivisor(stride, size) !== 1) {
+    stride += 1;
+
+    if (stride >= size) {
+      stride = 1;
+    }
+  }
+
+  return stride;
+}
+
+/**
+ * Builds a bounded, balanced set of pairwise comparisons.
+ *
+ * The previous implementation generated pairs in row-major
+ * order and sliced the first 2,048. With larger histories,
+ * this could repeatedly train against only a small section
+ * of the negative examples.
+ *
+ * This version rotates through the negative class while
+ * ensuring every positive example participates in each
+ * sampling round.
+ */
 function buildPairs(
   samples: TrainingSample[],
 ): TrainingPair[] {
@@ -422,9 +470,34 @@ function buildPairs(
   }
 
   const pairs: TrainingPair[] = [];
+  const stride = getCoprimeStride(negatives.length);
 
-  for (const positive of positives) {
-    for (const negative of negatives) {
+  const rounds = Math.ceil(
+    MAX_PAIRS / positives.length,
+  );
+
+  for (
+    let round = 0;
+    round < rounds && pairs.length < MAX_PAIRS;
+    round++
+  ) {
+    const offset =
+      (round * stride) % negatives.length;
+
+    for (
+      let positiveIndex = 0;
+      positiveIndex < positives.length &&
+      pairs.length < MAX_PAIRS;
+      positiveIndex++
+    ) {
+      const negativeIndex =
+        (positiveIndex + offset) % negatives.length;
+
+      const positive = positives[positiveIndex];
+      const negative = negatives[negativeIndex];
+
+      if (!positive || !negative) continue;
+
       const weight = Math.sqrt(
         positive.weight * negative.weight,
       );
@@ -437,7 +510,7 @@ function buildPairs(
     }
   }
 
-  return pairs.slice(0, MAX_PAIRS);
+  return pairs;
 }
 
 function updatePair(
@@ -866,7 +939,7 @@ function readStoredModel(): FactorizationModel | null {
     const parsed = JSON.parse(raw) as FactorizationModel;
 
     if (
-      parsed.version !== 2 ||
+      parsed.version !== 3 ||
       typeof parsed.fingerprint !== "string" ||
       typeof parsed.bias !== "number" ||
       !parsed.linear ||
