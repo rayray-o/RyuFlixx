@@ -364,6 +364,122 @@ function getStrongestSeedSimilarity(
   return strongest;
 }
 
+type InterestCluster = {
+  vector: SparseVector;
+  seeds: ReturnType<typeof buildSeedVectors>;
+  mass: number;
+};
+
+/**
+ * Scores a candidate against independent groups of positive examples.
+ * This prevents unrelated interests from cancelling each other out in
+ * one large averaged preference vector.
+ */
+function getMultiInterestPositiveScore(
+  candidateVector: SparseVector,
+  seeds: ReturnType<typeof buildSeedVectors>,
+): number | null {
+  if (seeds.length === 0) {
+    return null;
+  }
+
+  const clusters: InterestCluster[] = [];
+  const MAX_CLUSTERS = 5;
+  const SIMILARITY_THRESHOLD = 0.24;
+
+  const ordered = [...seeds].sort(
+    (a, b) => b.weight - a.weight,
+  );
+
+  for (const seed of ordered) {
+    let bestIndex = -1;
+    let bestSimilarity = -1;
+
+    for (let index = 0; index < clusters.length; index++) {
+      const similarity = cosineSimilarity(
+        seed.vector,
+        clusters[index].vector,
+      );
+
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        bestIndex = index;
+      }
+    }
+
+    if (
+      bestIndex >= 0 &&
+      (
+        bestSimilarity >= SIMILARITY_THRESHOLD ||
+        clusters.length >= MAX_CLUSTERS
+      )
+    ) {
+      const cluster = clusters[bestIndex];
+      addToVector(cluster.vector, seed.vector, seed.weight);
+      cluster.seeds.push(seed);
+      cluster.mass += seed.weight;
+    } else {
+      clusters.push({
+        vector: new Map(seed.vector),
+        seeds: [seed],
+        mass: seed.weight,
+      });
+    }
+  }
+
+  const clusterWeights = clusters.map((cluster) =>
+    Math.sqrt(Math.max(0.1, cluster.mass)),
+  );
+  const totalWeight = clusterWeights.reduce(
+    (sum, weight) => sum + weight,
+    0,
+  );
+
+  let strongestCluster = 0;
+  let weightedClusterScore = 0;
+
+  for (let index = 0; index < clusters.length; index++) {
+    const cluster = clusters[index];
+
+    const centroidSimilarity = Math.max(
+      0,
+      cosineSimilarity(cluster.vector, candidateVector),
+    );
+
+    const strongestSeed = Math.max(
+      0,
+      getStrongestSeedSimilarity(
+        candidateVector,
+        cluster.seeds,
+      ),
+    );
+
+    const clusterScore = Math.max(
+      0,
+      Math.min(
+        1,
+        centroidSimilarity * 0.72 +
+          strongestSeed * 0.28,
+      ),
+    );
+
+    strongestCluster = Math.max(
+      strongestCluster,
+      clusterScore,
+    );
+
+    weightedClusterScore +=
+      clusterScore * clusterWeights[index];
+  }
+
+  const balancedScore =
+    totalWeight > 0
+      ? weightedClusterScore / totalWeight
+      : strongestCluster;
+
+  return strongestCluster * 0.68 + balancedScore * 0.32;
+}
+
 /**
  * Scores candidates using positive and negative preference profiles.
  *
@@ -424,9 +540,25 @@ export function getFeatureSimilarityScores(
         positiveSeedVectors,
       );
 
-    const positiveScore =
+    const blendedPositiveScore =
       positiveUserSimilarity * 0.7 +
       strongestPositiveSimilarity * 0.3;
+
+    const multiInterestScore =
+      getMultiInterestPositiveScore(
+        candidateVector,
+        positiveSeedVectors,
+      );
+
+    /*
+     * Keep imported taste and the broad profile vector useful,
+     * but give independent interest clusters more influence.
+     */
+    const positiveScore =
+      multiInterestScore === null
+        ? blendedPositiveScore
+        : blendedPositiveScore * 0.42 +
+          multiInterestScore * 0.58;
 
     const negativeUserSimilarity = Math.max(
       0,
@@ -455,7 +587,7 @@ export function getFeatureSimilarityScores(
       negativeScore * 0.85;
 
     scores.set(
-      `${candidate.mediaType}:${candidate.id}`,
+      \`\${candidate.mediaType}:\${candidate.id}\`,
       Math.max(-1, Math.min(1, combined)),
     );
   }
