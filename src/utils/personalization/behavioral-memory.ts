@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { ContentType } from "@/types";
@@ -5,9 +6,10 @@ import {
   getWatchHistory,
   type LocalWatchHistory,
 } from "@/utils/localStorage";
+import { getProfileStorageKey } from "@/utils/profiles";
 
 const BEHAVIOR_STORAGE_KEY =
-  "ryuflix_behavioral_memory_v1";
+  "ryuflix_behavioral_memory_v2";
 
 const MAX_EVENTS = 500;
 
@@ -23,25 +25,18 @@ export type BehavioralEventType =
 
 export interface BehavioralEvent {
   id: string;
-
   mediaId: number;
   mediaType: ContentType;
-
   season?: number;
   episode?: number;
-
   event: BehavioralEventType;
-
   progress: number;
-
   timestamp: string;
 }
 
 export interface BehavioralMemory {
   version: 1;
-
   events: BehavioralEvent[];
-
   media: Record<
     string,
     {
@@ -52,29 +47,15 @@ export interface BehavioralMemory {
       completions: number;
       abandons: number;
       rewatches: number;
-
       totalProgress: number;
       lastProgress: number;
-
       lastWatchedAt: string;
     }
   >;
-
   preferences: {
-    mediaTypes: Record<
-      ContentType,
-      number
-    >;
-
-    completionByMediaType: Record<
-      ContentType,
-      number
-    >;
-
-    progressByMediaType: Record<
-      ContentType,
-      number
-    >;
+    mediaTypes: Record<ContentType, number>;
+    completionByMediaType: Record<ContentType, number>;
+    progressByMediaType: Record<ContentType, number>;
   };
 }
 
@@ -82,25 +63,24 @@ function isBrowser(): boolean {
   return typeof window !== "undefined";
 }
 
+function storageKey(): string {
+  return getProfileStorageKey(BEHAVIOR_STORAGE_KEY);
+}
+
 function createEmptyMemory(): BehavioralMemory {
   return {
     version: 1,
-
     events: [],
-
     media: {},
-
     preferences: {
       mediaTypes: {
         movie: 0,
         tv: 0,
       },
-
       completionByMediaType: {
         movie: 0,
         tv: 0,
       },
-
       progressByMediaType: {
         movie: 0,
         tv: 0,
@@ -130,11 +110,13 @@ function safelyParseMemory(
       return createEmptyMemory();
     }
 
+    const empty = createEmptyMemory();
+
     return {
-      ...createEmptyMemory(),
+      ...empty,
       ...parsed,
       preferences: {
-        ...createEmptyMemory().preferences,
+        ...empty.preferences,
         ...(parsed.preferences ?? {}),
       },
     };
@@ -148,11 +130,13 @@ function readMemory(): BehavioralMemory {
     return createEmptyMemory();
   }
 
-  return safelyParseMemory(
-    window.localStorage.getItem(
-      BEHAVIOR_STORAGE_KEY,
-    ),
-  );
+  try {
+    return safelyParseMemory(
+      window.localStorage.getItem(storageKey()),
+    );
+  } catch {
+    return createEmptyMemory();
+  }
 }
 
 function saveMemory(
@@ -163,16 +147,14 @@ function saveMemory(
   }
 
   try {
-    memory.events = memory.events.slice(
-      -MAX_EVENTS,
-    );
+    memory.events = memory.events.slice(-MAX_EVENTS);
 
     window.localStorage.setItem(
-      BEHAVIOR_STORAGE_KEY,
+      storageKey(),
       JSON.stringify(memory),
     );
   } catch {
-    /* Behavioral learning is optional. */
+    // Behavioral learning is optional.
   }
 }
 
@@ -219,10 +201,7 @@ function clamp(
   min: number,
   max: number,
 ): number {
-  return Math.min(
-    max,
-    Math.max(min, value),
-  );
+  return Math.min(max, Math.max(min, value));
 }
 
 function progressFromHistory(
@@ -260,8 +239,7 @@ function recencyWeight(
     Date.now() - time,
   );
 
-  const days =
-    age / (1000 * 60 * 60 * 24);
+  const days = age / 86_400_000;
 
   return Math.max(
     0.15,
@@ -295,9 +273,7 @@ function addEvent(
     lastWatchedAt: event.timestamp,
   };
 
-  const weight = recencyWeight(
-    event.timestamp,
-  );
+  const weight = recencyWeight(event.timestamp);
 
   if (event.event === "opened") {
     existing.opens += weight;
@@ -346,9 +322,8 @@ function addEvent(
     event.event === "progress" ||
     event.event === "completed"
   ) {
-    memory.preferences.mediaTypes[
-      event.mediaType
-    ] += weight;
+    memory.preferences.mediaTypes[event.mediaType] +=
+      weight;
   }
 
   if (event.event === "completed") {
@@ -363,8 +338,7 @@ function addEvent(
   ) {
     memory.preferences.progressByMediaType[
       event.mediaType
-    ] +=
-      event.progress * weight;
+    ] += event.progress * weight;
   }
 }
 
@@ -374,11 +348,8 @@ function buildEventsFromHistory(
   const events: BehavioralEvent[] = [];
 
   for (const item of history) {
-    const progress =
-      progressFromHistory(item);
-
-    const timestamp =
-      item.updated_at;
+    const progress = progressFromHistory(item);
+    const timestamp = item.updated_at;
 
     if (
       !timestamp ||
@@ -467,42 +438,22 @@ function buildEventsFromHistory(
 
 export function getBehavioralMemory(): BehavioralMemory {
   const stored = readMemory();
+  const history = getWatchHistory();
+  const rebuilt = createEmptyMemory();
 
-  const history =
-    getWatchHistory();
-
-  const rebuilt =
-    createEmptyMemory();
-
-  const historyEvents =
-    buildEventsFromHistory(
-      history,
-    );
+  const historyEvents = buildEventsFromHistory(history);
 
   for (const event of historyEvents) {
-    addEvent(
-      rebuilt,
-      event,
-    );
+    addEvent(rebuilt, event);
   }
 
-  const historyEventIds =
-    new Set(
-      historyEvents.map(
-        (event) => event.id,
-      ),
-    );
+  const historyEventIds = new Set(
+    historyEvents.map((event) => event.id),
+  );
 
   for (const event of stored.events) {
-    if (
-      !historyEventIds.has(
-        event.id,
-      )
-    ) {
-      addEvent(
-        rebuilt,
-        event,
-      );
+    if (!historyEventIds.has(event.id)) {
+      addEvent(rebuilt, event);
     }
   }
 
@@ -512,21 +463,16 @@ export function getBehavioralMemory(): BehavioralMemory {
 }
 
 export function recordBehavioralEvent(
-  event: Omit<
-    BehavioralEvent,
-    "id"
-  >,
+  event: Omit<BehavioralEvent, "id">,
 ): void {
   if (!isBrowser()) {
     return;
   }
 
-  const memory =
-    readMemory();
+  const memory = readMemory();
 
   const timestamp =
-    event.timestamp ||
-    new Date().toISOString();
+    event.timestamp || new Date().toISOString();
 
   const completeEvent: BehavioralEvent = {
     ...event,
@@ -543,19 +489,13 @@ export function recordBehavioralEvent(
 
   if (
     memory.events.some(
-      (existing) =>
-        existing.id ===
-        completeEvent.id,
+      (existing) => existing.id === completeEvent.id,
     )
   ) {
     return;
   }
 
-  addEvent(
-    memory,
-    completeEvent,
-  );
-
+  addEvent(memory, completeEvent);
   saveMemory(memory);
 }
 
@@ -565,8 +505,7 @@ export function getMediaBehavior(
   season?: number,
   episode?: number,
 ) {
-  const memory =
-    getBehavioralMemory();
+  const memory = getBehavioralMemory();
 
   return (
     memory.media[
@@ -584,11 +523,10 @@ export function getBehavioralSignal(
   mediaId: number,
   mediaType: ContentType,
 ): number {
-  const behavior =
-    getMediaBehavior(
-      mediaId,
-      mediaType,
-    );
+  const behavior = getMediaBehavior(
+    mediaId,
+    mediaType,
+  );
 
   if (!behavior) {
     return 0;
@@ -601,68 +539,49 @@ export function getBehavioralSignal(
     behavior.rewatches * 3.5 +
     behavior.totalProgress * 0.45;
 
-  const negative =
-    behavior.abandons * 2.2;
+  const negative = behavior.abandons * 2.2;
 
   return positive - negative;
 }
 
 export function getBehavioralSummary() {
-  const memory =
-    getBehavioralMemory();
+  const memory = getBehavioralMemory();
 
   const movieActivity =
-    memory.preferences
-      .mediaTypes.movie;
+    memory.preferences.mediaTypes.movie;
 
   const tvActivity =
-    memory.preferences
-      .mediaTypes.tv;
+    memory.preferences.mediaTypes.tv;
 
   const movieCompletion =
-    memory.preferences
-      .completionByMediaType.movie;
+    memory.preferences.completionByMediaType.movie;
 
   const tvCompletion =
-    memory.preferences
-      .completionByMediaType.tv;
+    memory.preferences.completionByMediaType.tv;
 
   const movieProgress =
-    memory.preferences
-      .progressByMediaType.movie;
+    memory.preferences.progressByMediaType.movie;
 
   const tvProgress =
-    memory.preferences
-      .progressByMediaType.tv;
+    memory.preferences.progressByMediaType.tv;
 
   const preferredMediaType =
-    movieActivity >
-    tvActivity * 1.2
+    movieActivity > tvActivity * 1.2
       ? "movie"
-      : tvActivity >
-          movieActivity * 1.2
+      : tvActivity > movieActivity * 1.2
         ? "tv"
         : "balanced";
 
   return {
     preferredMediaType,
-
     movieActivity,
     tvActivity,
-
     movieCompletion,
     tvCompletion,
-
     movieProgress,
     tvProgress,
-
-    totalEvents:
-      memory.events.length,
-
-    trackedMedia:
-      Object.keys(
-        memory.media,
-      ).length,
+    totalEvents: memory.events.length,
+    trackedMedia: Object.keys(memory.media).length,
   };
 }
 
@@ -671,7 +590,9 @@ export function clearBehavioralMemory(): void {
     return;
   }
 
-  window.localStorage.removeItem(
-    BEHAVIOR_STORAGE_KEY,
-  );
-      }
+  try {
+    window.localStorage.removeItem(storageKey());
+  } catch {
+    // Ignore unavailable browser storage.
+  }
+}
