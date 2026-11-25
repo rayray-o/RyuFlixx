@@ -101,6 +101,7 @@ type CandidateRecord = {
 
 type RankedCandidate = RecommendationItem & {
   _score: number;
+  _clusterSources: string[];
 };
 
 type PreliminaryCandidate = {
@@ -915,10 +916,12 @@ function getGenreAffinityScore(
 function diversify(
   candidates: RankedCandidate[],
   limit: number,
+  clusterStrengths: Map<string, number>,
 ): RecommendationItem[] {
   const remaining = [...candidates];
   const selected: RankedCandidate[] = [];
   const genreCounts = new Map<number, number>();
+  const clusterCounts = new Map<string, number>();
 
   while (
     selected.length < limit &&
@@ -945,6 +948,36 @@ function diversify(
         }
       }
 
+      /*
+       * Give underrepresented interest clusters a modest,
+       * temporary ranking advantage. This is a soft coverage
+       * preference, not a quota: strong candidates can still
+       * win on relevance, and weak clusters cannot force items
+       * into the final list.
+       */
+      let clusterCoverageBonus = 0;
+
+      for (const source of candidate._clusterSources) {
+        const count = clusterCounts.get(source) ?? 0;
+        const strength = clusterStrengths.get(source) ?? 0.5;
+
+        const sourceBonus =
+          count === 0
+            ? 5.5 + strength * 3.5
+            : count === 1
+              ? 2 + strength * 1.5
+              : count === 2
+                ? 0.25
+                : -1.5;
+
+        clusterCoverageBonus = Math.max(
+          clusterCoverageBonus,
+          sourceBonus,
+        );
+      }
+
+      adjustedScore += clusterCoverageBonus;
+
       if (adjustedScore > bestScore) {
         bestScore = adjustedScore;
         bestIndex = index;
@@ -965,10 +998,21 @@ function diversify(
         (genreCounts.get(genreId) ?? 0) + 1,
       );
     }
+
+    for (const source of chosen._clusterSources) {
+      clusterCounts.set(
+        source,
+        (clusterCounts.get(source) ?? 0) + 1,
+      );
+    }
   }
 
   return selected.map(
-    ({ _score: _ignored, ...item }) => item,
+    ({
+      _score: _ignored,
+      _clusterSources: _ignoredClusterSources,
+      ...item
+    }) => item,
   );
 }
 
@@ -1937,7 +1981,7 @@ export async function getGorseInspiredRecommendations(
       : preliminary;
 
   const ranked: RankedCandidate[] = rankingPool.map(
-    ({ item, score }) => {
+    ({ item, score, clusterSources }) => {
       const key = `${item.mediaType}:${item.id}`;
 
       const isEnriched =
@@ -1964,15 +2008,24 @@ export async function getGorseInspiredRecommendations(
           similarity * 20 +
           learnedBoost -
           enrichmentPenalty,
+        _clusterSources: clusterSources,
       };
     },
   );
 
   ranked.sort((a, b) => b._score - a._score);
 
+  const clusterStrengths = new Map(
+    interestTargets.map((target) => [
+      `interest-cluster-${target.id}`,
+      clamp(target.strength, 0, 1),
+    ]),
+  );
+
   const recommendations = diversify(
     ranked,
     safeLimit,
+    clusterStrengths,
   );
 
   if (recommendations.length > 0) {
