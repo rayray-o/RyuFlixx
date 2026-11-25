@@ -39,6 +39,7 @@ const MAX_DETAIL_CACHE_ENTRIES = 400;
 
 const MAX_ENRICHED_CANDIDATES = 48;
 const MAX_HISTORY_SEEDS = 5;
+const MAX_FEATURE_POSITIVE_SEEDS = 24;
 const MAX_NEGATIVE_SEEDS = 10;
 const MAX_TRAINING_TITLES = 40;
 
@@ -656,6 +657,56 @@ function getTrainingSignals(): TrainingSignal[] {
         new Date(a.timestamp).getTime(),
     )
     .slice(0, MAX_TRAINING_TITLES);
+}
+
+/**
+ * Selects strong positive examples for content similarity.
+ * Older signals retain some influence instead of disappearing.
+ */
+function getPositiveFeatureTrainingSignals(
+  trainingSignals: TrainingSignal[],
+): TrainingSignal[] {
+  const now = Date.now();
+
+  return trainingSignals
+    .filter(
+      (signal) =>
+        signal.label >= 0.58 &&
+        signal.weight >= 0.2,
+    )
+    .map((signal) => {
+      const timestamp = new Date(signal.timestamp).getTime();
+
+      const ageDays = Number.isFinite(timestamp)
+        ? Math.max(0, (now - timestamp) / 86400000)
+        : 365;
+
+      const recency = Math.max(
+        0.35,
+        Math.pow(0.5, ageDays / 120),
+      );
+
+      const strength =
+        signal.weight *
+        (0.65 + recency * 0.35) *
+        (0.5 + signal.label * 0.5);
+
+      return {
+        signal,
+        strength,
+        recency,
+      };
+    })
+    .sort((a, b) => b.strength - a.strength)
+    .slice(0, MAX_FEATURE_POSITIVE_SEEDS)
+    .map(({ signal, recency }) => ({
+      ...signal,
+      weight: clamp(
+        signal.weight * (0.65 + recency * 0.35),
+        0.2,
+        2.5,
+      ),
+    }));
 }
 
 /**
@@ -1503,16 +1554,25 @@ export async function getGorseInspiredRecommendations(
     });
   }
 
+  const validTrainingDetails = trainingDetails
+    .map((item, index) => ({
+      item,
+      signal: trainingSignals[index],
+    }))
+    .filter(
+      (
+        entry,
+      ): entry is {
+        item: DetailedFeatureItem;
+        signal: TrainingSignal;
+      } => entry.item !== null,
+    );
+
   const personalizedRequests =
     await buildPersonalizedSourceRequests(
       mediaType,
-      trainingDetails.filter(
-        (item): item is DetailedFeatureItem =>
-          item !== null,
-      ),
-      trainingSignals.filter(
-        (_, index) => trainingDetails[index] !== null,
-      ),
+      validTrainingDetails.map((entry) => entry.item),
+      validTrainingDetails.map((entry) => entry.signal),
       tasteProfile,
     );
 
@@ -1562,13 +1622,8 @@ export async function getGorseInspiredRecommendations(
   const genrePreferenceMap =
     await getGenrePreferenceMap(
       mediaType,
-      trainingDetails.filter(
-        (item): item is DetailedFeatureItem =>
-          item !== null,
-      ),
-      trainingSignals.filter(
-        (_, index) => trainingDetails[index] !== null,
-      ),
+      validTrainingDetails.map((entry) => entry.item),
+      validTrainingDetails.map((entry) => entry.signal),
       tasteProfile,
     );
 
@@ -1651,14 +1706,57 @@ export async function getGorseInspiredRecommendations(
     ),
   );
 
+  /*
+   * Keep the strongest dedicated history seeds, then add
+   * positive training examples from the active profile.
+   * Training metadata has already been fetched above.
+   */
   const enrichedSeeds: FeatureVectorSeed[] = [];
+  const positiveFeatureSignals =
+    getPositiveFeatureTrainingSignals(trainingSignals);
+  const positiveFeatureKeys = new Set<string>();
 
   seedDetails.forEach((item, index) => {
     if (!item) return;
 
+    const key = `${item.mediaType}:${item.id}`;
+
+    if (positiveFeatureKeys.has(key)) return;
+
+    positiveFeatureKeys.add(key);
+
     enrichedSeeds.push({
       item,
       weight: seeds[index]?.score ?? 1,
+    });
+  });
+
+  positiveFeatureSignals.forEach((signal) => {
+    if (enrichedSeeds.length >= MAX_FEATURE_POSITIVE_SEEDS) {
+      return;
+    }
+
+    const detailIndex = trainingSignals.findIndex(
+      (candidate) =>
+        candidate.id === signal.id &&
+        candidate.mediaType === signal.mediaType,
+    );
+
+    if (detailIndex < 0) return;
+
+    const item = trainingDetails[detailIndex];
+
+    if (!item) return;
+
+    const key = `${item.mediaType}:${item.id}`;
+
+    if (positiveFeatureKeys.has(key)) return;
+
+    positiveFeatureKeys.add(key);
+
+    enrichedSeeds.push({
+      item,
+      weight: clamp(signal.weight * 4, 1, 10),
     });
   });
 
