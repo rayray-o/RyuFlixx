@@ -2,11 +2,13 @@
 import type { ContentType } from "@/types";
 import type { RecommendationItem } from "@/utils/personalization/recommendation-engine";
 import type {
-  GenreEntry,
-} from "@/utils/personalization/gorse-inspired-engine";
-import type {
   InterestDiscoveryTarget,
 } from "@/utils/personalization/interest-cluster-discovery";
+
+type GenreEntry = {
+  id: number;
+  name: string;
+};
 
 export type InterestClusterSourceRequest = {
   name: string;
@@ -47,11 +49,11 @@ function clamp(
 }
 
 /**
- * Turns independent interest clusters into bounded TMDB
- * discovery requests.
+ * Converts independent interest clusters into bounded
+ * TMDB discovery requests.
  *
- * Each cluster gets its own query. This prevents a smaller
- * interest from being swallowed by the user's dominant taste.
+ * Each cluster gets its own query so smaller interests
+ * aren't swallowed by the user's dominant taste.
  */
 export async function buildInterestClusterSourceRequests(
   targets: InterestDiscoveryTarget[],
@@ -95,7 +97,6 @@ export async function buildInterestClusterSourceRequests(
             typeof id === "number",
         );
 
-      // Resolve at most two keywords per cluster.
       const keywordIds = (
         await Promise.all(
           target.keywords
@@ -120,9 +121,10 @@ export async function buildInterestClusterSourceRequests(
   for (const cluster of resolved) {
     const { target, genreIds, keywordIds } = cluster;
 
-    // Do not create a broad query if none of the metadata
-    // could be resolved to a TMDB identifier.
-    if (genreIds.length === 0 && keywordIds.length === 0) {
+    if (
+      genreIds.length === 0 &&
+      keywordIds.length === 0
+    ) {
       continue;
     }
 
