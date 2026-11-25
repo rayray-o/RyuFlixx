@@ -27,6 +27,13 @@ import {
   type RecommendationItem,
 } from "@/utils/personalization/recommendation-engine";
 import type { TasteProfile } from "@/utils/personalization/taste-engine";
+import {
+  buildInterestDiscoveryTargets,
+  type InterestDiscoverySeed,
+} from "@/utils/personalization/interest-cluster-discovery";
+import {
+  buildInterestClusterSourceRequests,
+} from "@/utils/personalization/interest-cluster-retrieval";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const REQUEST_TIMEOUT = 6500;
@@ -100,6 +107,7 @@ type PreliminaryCandidate = {
   item: RecommendationItem;
   score: number;
   explorationScore: number;
+  clusterSources: string[];
 };
 
 type SourceRequest = {
@@ -1394,12 +1402,58 @@ function selectCandidatesForEnrichment(
     primaryCount,
   );
 
+  /*
+   * Reserve representation for independent interest clusters.
+   * Without this, a dominant taste can occupy the entire
+   * enrichment pool before smaller interests are evaluated.
+   */
+  const clusterRepresentatives = new Map<
+    string,
+    PreliminaryCandidate
+  >();
+
+  for (const candidate of sortedPersonalized) {
+    for (const clusterSource of candidate.clusterSources) {
+      if (!clusterRepresentatives.has(clusterSource)) {
+        clusterRepresentatives.set(
+          clusterSource,
+          candidate,
+        );
+      }
+    }
+  }
+
   const selectedKeys = new Set(
     primary.map(
       (candidate) =>
         `${candidate.item.mediaType}:${candidate.item.id}`,
     ),
   );
+
+  const representatives = [...clusterRepresentatives.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+
+  for (const representative of representatives) {
+    const key = `${representative.item.mediaType}:${representative.item.id}`;
+
+    if (selectedKeys.has(key)) {
+      continue;
+    }
+
+    if (primary.length >= primaryCount) {
+      const removed = primary.pop();
+
+      if (removed) {
+        selectedKeys.delete(
+          `${removed.item.mediaType}:${removed.item.id}`,
+        );
+      }
+    }
+
+    primary.push(representative);
+    selectedKeys.add(key);
+  }
 
   const exploration = sortedPersonalized
     .filter(
@@ -1576,7 +1630,73 @@ export async function getGorseInspiredRecommendations(
       tasteProfile,
     );
 
-  requests.push(...personalizedRequests);
+  /*
+   * Build independent interest clusters from positive evidence.
+   * History seeds and positive feedback examples both contribute,
+   * while duplicate titles are collapsed before clustering.
+   */
+  const clusterSeedMap = new Map<
+    string,
+    InterestDiscoverySeed
+  >();
+
+  seedDetails.forEach((item, index) => {
+    if (!item) return;
+
+    const key = `${item.mediaType}:${item.id}`;
+
+    clusterSeedMap.set(key, {
+      item,
+      weight: seeds[index]?.score ?? 1,
+    });
+  });
+
+  validTrainingDetails.forEach(({ item, signal }) => {
+    if (
+      signal.label < 0.58 ||
+      signal.weight < 0.2
+    ) {
+      return;
+    }
+
+    const key = `${item.mediaType}:${item.id}`;
+    const existing = clusterSeedMap.get(key);
+
+    clusterSeedMap.set(key, {
+      item,
+      weight: Math.max(
+        existing?.weight ?? 0,
+        clamp(signal.weight * 4, 0.5, 10),
+      ),
+    });
+  });
+
+  const interestTargets = buildInterestDiscoveryTargets(
+    [...clusterSeedMap.values()],
+    mediaType,
+  );
+
+  const clusterGenreCatalog =
+    interestTargets.length > 0
+      ? await fetchGenreCatalog(mediaType)
+      : [];
+
+  const interestClusterRequests =
+    await buildInterestClusterSourceRequests(
+      interestTargets,
+      mediaType,
+      {
+        fetchCollection,
+        buildDiscoverPath,
+        genreCatalog: clusterGenreCatalog,
+        searchKeywordId,
+      },
+    );
+
+  requests.push(
+    ...personalizedRequests,
+    ...interestClusterRequests,
+  );
 
   const sourceResults = await Promise.all(
     requests.map(async (request) => {
@@ -1675,6 +1795,10 @@ export async function getGorseInspiredRecommendations(
       item,
       score: personalizedScore,
       explorationScore,
+      clusterSources: [...candidate.sources].filter(
+        (source) =>
+          source.startsWith("interest-cluster-"),
+      ),
     });
   }
 
