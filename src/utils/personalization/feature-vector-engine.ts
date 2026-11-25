@@ -325,10 +325,16 @@ function buildSeedVectors(
   seeds: FeatureVectorSeed[],
   idf: Map<string, number>,
 ) {
-  return seeds.map((seed) => ({
-    vector: buildWeightedVector(seed.item, idf),
-    weight: Math.max(0.2, Math.min(2, seed.weight / 7)),
-  }));
+  return seeds
+    .filter(
+      (seed) =>
+        Number.isFinite(seed.weight) &&
+        seed.weight > 0,
+    )
+    .map((seed) => ({
+      vector: buildWeightedVector(seed.item, idf),
+      weight: Math.max(0.2, Math.min(2, seed.weight / 7)),
+    }));
 }
 
 function buildAggregateVector(
@@ -371,20 +377,18 @@ type InterestCluster = {
 };
 
 /**
- * Scores a candidate against independent groups of positive examples.
- * This prevents unrelated interests from cancelling each other out in
- * one large averaged preference vector.
+ * Builds independent interest clusters.
+ *
+ * Important: once the cluster limit is reached, unrelated seeds
+ * are no longer forcibly merged into an existing cluster.
+ * All seeds still contribute to strongest-seed matching.
  */
-function getMultiInterestPositiveScore(
-  candidateVector: SparseVector,
+function buildInterestClusters(
   seeds: ReturnType<typeof buildSeedVectors>,
-): number | null {
-  if (seeds.length === 0) {
-    return null;
-  }
-
+): InterestCluster[] {
   const clusters: InterestCluster[] = [];
-  const MAX_CLUSTERS = 5;
+
+  const MAX_CLUSTERS = 8;
   const SIMILARITY_THRESHOLD = 0.24;
 
   const ordered = [...seeds].sort(
@@ -409,27 +413,58 @@ function getMultiInterestPositiveScore(
 
     if (
       bestIndex >= 0 &&
-      (
-        bestSimilarity >= SIMILARITY_THRESHOLD ||
-        clusters.length >= MAX_CLUSTERS
-      )
+      bestSimilarity >= SIMILARITY_THRESHOLD
     ) {
       const cluster = clusters[bestIndex];
-      addToVector(cluster.vector, seed.vector, seed.weight);
+
+      addToVector(
+        cluster.vector,
+        seed.vector,
+        seed.weight,
+      );
+
       cluster.seeds.push(seed);
       cluster.mass += seed.weight;
-    } else {
-      clusters.push({
-        vector: new Map(seed.vector),
-        seeds: [seed],
-        mass: seed.weight,
-      });
+
+      continue;
     }
+
+    // Do not contaminate existing clusters just to fit the limit.
+    if (clusters.length >= MAX_CLUSTERS) {
+      continue;
+    }
+
+    clusters.push({
+      vector: new Map(seed.vector),
+      seeds: [seed],
+      mass: seed.weight,
+    });
+  }
+
+  return clusters;
+}
+
+/**
+ * Scores a candidate against independent groups of positive examples.
+ */
+function getMultiInterestPositiveScore(
+  candidateVector: SparseVector,
+  seeds: ReturnType<typeof buildSeedVectors>,
+): number | null {
+  if (seeds.length === 0) {
+    return null;
+  }
+
+  const clusters = buildInterestClusters(seeds);
+
+  if (clusters.length === 0) {
+    return null;
   }
 
   const clusterWeights = clusters.map((cluster) =>
     Math.sqrt(Math.max(0.1, cluster.mass)),
   );
+
   const totalWeight = clusterWeights.reduce(
     (sum, weight) => sum + weight,
     0,
@@ -486,9 +521,6 @@ function getMultiInterestPositiveScore(
  * Positive seeds increase similarity.
  * Explicitly disliked seeds reduce similarity.
  * Imported taste remains supported.
- *
- * Negative examples are passed separately so they cannot accidentally
- * become positive preference evidence.
  */
 export function getFeatureSimilarityScores(
   candidates: FeatureVectorItem[],
@@ -550,10 +582,6 @@ export function getFeatureSimilarityScores(
         positiveSeedVectors,
       );
 
-    /*
-     * Keep imported taste and the broad profile vector useful,
-     * but give independent interest clusters more influence.
-     */
     const positiveScore =
       multiInterestScore === null
         ? blendedPositiveScore
@@ -580,8 +608,6 @@ export function getFeatureSimilarityScores(
       negativeUserSimilarity * 0.7 +
       strongestNegativeSimilarity * 0.3;
 
-    // Negative evidence is deliberately weaker than equally strong
-    // positive evidence, but repeated explicit dislikes accumulate.
     const combined =
       positiveScore -
       negativeScore * 0.85;
