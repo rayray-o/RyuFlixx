@@ -176,6 +176,9 @@ const genreCache = new Map<
   ContentType,
   CachedGenres
 >();
+export function clearGorseInspiredRecommendationCache(): void {
+  recommendationCache.clear();
+}
 
 function number(value: unknown): number {
   return typeof value === "number" &&
