@@ -2,7 +2,7 @@
 "use client";
 
 import { tmdb } from "@/api/tmdb";
-import { cn, formatDate, isEmpty } from "@/utils/helpers";
+import { cn, isEmpty } from "@/utils/helpers";
 import { PlayOutline } from "@/utils/icons";
 import {
   getLoadingLabel,
@@ -12,7 +12,7 @@ import {
 import { Spinner } from "@heroui/react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { Episode } from "tmdb-ts/dist/types/tv-episode";
 
 interface TvShowEpisodesSelectionProps {
@@ -32,19 +32,53 @@ interface EpisodeCardProps {
   withAnimation?: boolean;
 }
 
-function isEpisodeUnavailable(episode: Episode): boolean {
-  if (!episode.air_date) return true;
+function parseEpisodeAirDate(value?: string | null): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
 
-  const releaseDate = new Date(`${episode.air_date}T00:00:00`);
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
 
-  return releaseDate > new Date();
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  date.setHours(0, 0, 0, 0);
+  return date;
 }
 
-/**
- * Use HTTPS for TMDB stills.
- * The old image helper returned HTTP URLs, which can be blocked
- * as mixed content when RyuFlixx is opened over HTTPS.
- */
+function isEpisodeUnavailable(episode: Episode): boolean {
+  const releaseDate = parseEpisodeAirDate(episode.air_date);
+
+  if (!releaseDate) return true;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return releaseDate.getTime() > today.getTime();
+}
+
+function getEpisodeDateLabel(episode: Episode): string {
+  const releaseDate = parseEpisodeAirDate(episode.air_date);
+
+  if (!releaseDate) return "Release date TBA";
+
+  const formatted = releaseDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  return isEpisodeUnavailable(episode)
+    ? `Releases ${formatted}`
+    : `Aired ${formatted}`;
+}
+
 function getEpisodeImage(path: string | null): string | null {
   if (!path) return null;
 
@@ -53,8 +87,10 @@ function getEpisodeImage(path: string | null): string | null {
 
 function EpisodeArtwork({
   episode,
+  unavailable,
 }: {
   episode: Episode;
+  unavailable: boolean;
 }) {
   const image = getEpisodeImage(episode.still_path);
 
@@ -89,11 +125,13 @@ function EpisodeArtwork({
         {movieDurationString(episode.runtime)}
       </span>
 
-      <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-        <span className="flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white shadow-xl backdrop-blur-md">
-          <PlayOutline className="h-5 w-5" />
-        </span>
-      </div>
+      {!unavailable && (
+        <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white shadow-xl backdrop-blur-md">
+            <PlayOutline className="h-5 w-5" />
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -118,6 +156,31 @@ const TvShowEpisodesSelection: React.FC<
     retry: 1,
   });
 
+  const [releaseClock, setReleaseClock] = useState(0);
+
+  useEffect(() => {
+    const upcomingDates = data?.episodes
+      .map((episode) => parseEpisodeAirDate(episode.air_date))
+      .filter(
+        (date): date is Date =>
+          date !== null && date.getTime() > Date.now(),
+      )
+      .sort((a, b) => a.getTime() - b.getTime());
+
+    const nextRelease = upcomingDates?.[0];
+
+    if (!nextRelease) return;
+
+    const delay = nextRelease.getTime() - Date.now();
+
+    const timer = window.setTimeout(
+      () => setReleaseClock((value) => value + 1),
+      Math.min(delay + 100, 2147480000),
+    );
+
+    return () => window.clearTimeout(timer);
+  }, [data?.episodes, releaseClock]);
+
   const episodes = useMemo(() => {
     if (!data?.episodes) return [];
 
@@ -140,7 +203,7 @@ const TvShowEpisodesSelection: React.FC<
     }
 
     return filtered;
-  }, [data?.episodes, searchQuery, sortedByName]);
+  }, [data?.episodes, searchQuery, sortedByName, releaseClock]);
 
   if (isPending) {
     return (
@@ -216,7 +279,10 @@ export const EpisodeListCard: React.FC<EpisodeCardProps> = memo(
     const content = (
       <>
         <div className="relative min-w-0 overflow-hidden">
-          <EpisodeArtwork episode={episode} />
+          <EpisodeArtwork
+            episode={episode}
+            unavailable={unavailable}
+          />
         </div>
 
         <div className="flex min-w-0 flex-col justify-center gap-2 p-3 sm:gap-2.5 sm:p-5">
@@ -228,7 +294,7 @@ export const EpisodeListCard: React.FC<EpisodeCardProps> = memo(
           </p>
 
           <p className="text-[11px] font-medium tracking-wide text-white/40 sm:text-xs">
-            {formatDate(episode.air_date, "en-US")}
+            {getEpisodeDateLabel(episode)}
           </p>
 
           <p
@@ -250,7 +316,7 @@ export const EpisodeListCard: React.FC<EpisodeCardProps> = memo(
     const className = cn(
       "group grid min-w-0 grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] overflow-hidden rounded-2xl border border-white/[0.09] bg-[#1b1b1f] transition-[border-color,background-color,transform] duration-200",
       unavailable
-        ? "cursor-not-allowed opacity-55"
+        ? "cursor-default"
         : "cursor-pointer hover:border-white/20 hover:bg-[#222226] active:scale-[0.995]",
     );
 
@@ -286,7 +352,10 @@ const EpisodeGridCard: React.FC<EpisodeCardProps> = memo(
 
     const content = (
       <>
-        <EpisodeArtwork episode={episode} />
+        <EpisodeArtwork
+          episode={episode}
+          unavailable={unavailable}
+        />
 
         <div className="flex min-w-0 flex-col gap-2 p-3 sm:p-4">
           <p className="line-clamp-2 text-sm font-semibold leading-snug text-white transition-colors group-hover:text-warning sm:text-base">
@@ -294,7 +363,7 @@ const EpisodeGridCard: React.FC<EpisodeCardProps> = memo(
           </p>
 
           <p className="text-[11px] text-white/40 sm:text-xs">
-            {formatDate(episode.air_date, "en-US")}
+            {getEpisodeDateLabel(episode)}
           </p>
 
           <p className="line-clamp-3 text-xs leading-relaxed text-white/50 sm:text-sm">
@@ -313,7 +382,7 @@ const EpisodeGridCard: React.FC<EpisodeCardProps> = memo(
     const className = cn(
       "group min-w-0 overflow-hidden rounded-2xl border border-white/[0.09] bg-[#1b1b1f] transition-[border-color,background-color,transform] duration-200",
       unavailable
-        ? "cursor-not-allowed opacity-55"
+        ? "cursor-default"
         : "cursor-pointer hover:border-white/20 hover:bg-[#222226] active:scale-[0.995]",
     );
 
