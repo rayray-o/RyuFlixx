@@ -41,6 +41,9 @@ import {
 import {
   applyTemporalInterestWeights,
 } from "@/utils/personalization/temporal-interest-engine";
+import {
+  buildEmergingInterestTargets,
+} from "@/utils/personalization/emerging-interest-engine";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const REQUEST_TIMEOUT = 6500;
@@ -1738,10 +1741,27 @@ export async function getGorseInspiredRecommendations(
     });
   });
 
-  const interestTargets = buildInterestDiscoveryTargets(
+  const interestTargets = [
+  ...buildInterestDiscoveryTargets(
     [...clusterSeedMap.values()],
     mediaType,
-  );
+  ),
+
+  ...buildEmergingInterestTargets(
+    validTrainingDetails
+      .filter(
+        ({ signal }) =>
+          signal.label >= 0.58 &&
+          signal.weight >= 0.2,
+      )
+      .map(({ item, signal }) => ({
+        item,
+        weight: signal.weight,
+        timestamp: signal.timestamp,
+      })),
+    mediaType,
+  ),
+];
 
   const clusterGenreCatalog =
     interestTargets.length > 0
