@@ -19,6 +19,10 @@ import {
   type FeatureVectorSeed,
 } from "@/utils/personalization/feature-vector-engine";
 import {
+  getSynopsisSimilarityScores,
+  type SynopsisSeed,
+} from "@/utils/personalization/synopsis-feature-engine";
+import {
   getLearnedRankingScores,
   type LearnedTrainingExample,
 } from "@/utils/personalization/learned-ranking-engine";
@@ -132,7 +136,9 @@ type CachedGenres = {
   genres: GenreEntry[];
 };
 
-type DetailedFeatureItem = FeatureVectorItem;
+type DetailedFeatureItem = FeatureVectorItem & {
+  overview?: string;
+};
 
 type FeaturePreference = {
   name: string;
@@ -419,6 +425,7 @@ function buildDetailedFeatureItem(
     languages,
     countries: getCountryValues(raw, mediaType),
     releaseDate: releaseDate || undefined,
+    overview: string(raw.overview) || undefined,
   };
 }
 
@@ -1961,6 +1968,35 @@ export async function getGorseInspiredRecommendations(
     enrichedNegativeSeeds,
   );
 
+  const positiveSynopsisSeeds: SynopsisSeed[] = enrichedSeeds
+    .filter((seed) => Boolean(seed.item.overview?.trim()))
+    .map((seed) => ({
+      item: {
+        id: seed.item.id,
+        mediaType: seed.item.mediaType,
+        overview: seed.item.overview,
+      },
+      weight: seed.weight,
+    }));
+
+  const negativeSynopsisSeeds: SynopsisSeed[] =
+    enrichedNegativeSeeds
+      .filter((seed) => Boolean(seed.item.overview?.trim()))
+      .map((seed) => ({
+        item: {
+          id: seed.item.id,
+          mediaType: seed.item.mediaType,
+          overview: seed.item.overview,
+        },
+        weight: seed.weight,
+      }));
+
+  const synopsisSimilarity = getSynopsisSimilarityScores(
+    enrichedCandidates,
+    positiveSynopsisSeeds,
+    negativeSynopsisSeeds,
+  );
+
   const learnedScores = getLearnedRankingScores(
     enrichedCandidates,
     trainingExamples,
@@ -1990,6 +2026,9 @@ export async function getGorseInspiredRecommendations(
       const similarity =
         contentSimilarity.get(key) ?? 0;
 
+      const synopsisScore =
+        synopsisSimilarity.get(key) ?? 0;
+
       const learnedProbability =
         learnedScores.get(key);
 
@@ -2006,6 +2045,7 @@ export async function getGorseInspiredRecommendations(
         _score:
           score +
           similarity * 20 +
+          synopsisScore * 22 +
           learnedBoost -
           enrichmentPenalty,
         _clusterSources: clusterSources,
