@@ -25,6 +25,12 @@ const MAX_FEATURES = 1024;
 const MAX_INTEREST_CLUSTERS = 8;
 const CLUSTER_SIMILARITY_THRESHOLD = 0.24;
 
+// Seed weights arrive from feedback strength, confidence and recency.
+// Log scaling preserves meaningful differences without letting one
+// unusually strong title dominate the entire taste profile.
+const MIN_SEED_INFLUENCE = 0.12;
+const MAX_SEED_INFLUENCE = 1.4;
+
 const FEATURE_WEIGHTS = {
   genre: 1.7,
   keyword: 2.5,
@@ -93,35 +99,19 @@ function extractFeatures(
   const features: SparseVector = new Map();
 
   for (const genre of item.genres) {
-    addFeature(
-      features,
-      "genre",
-      genre,
-      FEATURE_WEIGHTS.genre,
-    );
+    addFeature(features, "genre", genre, FEATURE_WEIGHTS.genre);
   }
 
   for (const keyword of item.keywords) {
-    addFeature(
-      features,
-      "keyword",
-      keyword,
-      FEATURE_WEIGHTS.keyword,
-    );
+    addFeature(features, "keyword", keyword, FEATURE_WEIGHTS.keyword);
   }
 
   for (const director of item.directors) {
-    addFeature(
-      features,
-      "director",
-      director,
-      FEATURE_WEIGHTS.director,
-    );
+    addFeature(features, "director", director, FEATURE_WEIGHTS.director);
   }
 
   item.cast.slice(0, 12).forEach((actor, index) => {
-    const positionWeight =
-      1 / (1 + index * 0.12);
+    const positionWeight = 1 / (1 + index * 0.12);
 
     addFeature(
       features,
@@ -132,32 +122,17 @@ function extractFeatures(
   });
 
   for (const language of item.languages) {
-    addFeature(
-      features,
-      "language",
-      language,
-      FEATURE_WEIGHTS.language,
-    );
+    addFeature(features, "language", language, FEATURE_WEIGHTS.language);
   }
 
   for (const country of item.countries) {
-    addFeature(
-      features,
-      "country",
-      country,
-      FEATURE_WEIGHTS.country,
-    );
+    addFeature(features, "country", country, FEATURE_WEIGHTS.country);
   }
 
   const era = getEra(item.releaseDate);
 
   if (era) {
-    addFeature(
-      features,
-      "era",
-      era,
-      FEATURE_WEIGHTS.era,
-    );
+    addFeature(features, "era", era, FEATURE_WEIGHTS.era);
   }
 
   addFeature(
@@ -174,16 +149,10 @@ function buildInverseDocumentFrequency(
   items: FeatureVectorItem[],
 ): Map<string, number> {
   const documentFrequency = new Map<string, number>();
-  const uniqueItems = new Map<
-    string,
-    FeatureVectorItem
-  >();
+  const uniqueItems = new Map<string, FeatureVectorItem>();
 
   for (const item of items) {
-    uniqueItems.set(
-      `${item.mediaType}:${item.id}`,
-      item,
-    );
+    uniqueItems.set(`${item.mediaType}:${item.id}`, item);
   }
 
   const documents = [...uniqueItems.values()];
@@ -199,40 +168,27 @@ function buildInverseDocumentFrequency(
     }
   }
 
-  const totalDocuments = Math.max(
-    1,
-    documents.length,
-  );
-
+  const totalDocuments = Math.max(1, documents.length);
   const idf = new Map<string, number>();
 
   for (const [key, frequency] of documentFrequency) {
     idf.set(
       key,
-      Math.log(
-        1 +
-          totalDocuments /
-            Math.max(1, frequency),
-      ),
+      Math.log(1 + totalDocuments / Math.max(1, frequency)),
     );
   }
 
   return idf;
 }
 
-function pruneVector(
-  vector: SparseVector,
-): SparseVector {
+function pruneVector(vector: SparseVector): SparseVector {
   if (vector.size <= MAX_FEATURES) {
     return vector;
   }
 
   return new Map(
     [...vector.entries()]
-      .sort(
-        (a, b) =>
-          Math.abs(b[1]) - Math.abs(a[1]),
-      )
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
       .slice(0, MAX_FEATURES),
   );
 }
@@ -246,15 +202,11 @@ function buildWeightedVector(
 
   for (const [key, value] of raw) {
     const inverseFrequency =
-      idf.get(key) ??
-      Math.log(1 + Math.max(1, idf.size));
+      idf.get(key) ?? Math.log(1 + Math.max(1, idf.size));
 
     weighted.set(
       key,
-      value *
-        Math.sqrt(
-          Math.max(0, inverseFrequency),
-        ),
+      value * Math.sqrt(Math.max(0, inverseFrequency)),
     );
   }
 
@@ -269,8 +221,7 @@ function addToVector(
   for (const [key, value] of source) {
     target.set(
       key,
-      (target.get(key) ?? 0) +
-        value * weight,
+      (target.get(key) ?? 0) + value * weight,
     );
   }
 }
@@ -324,13 +275,8 @@ function addImportedTaste(
   ];
 
   for (const mapping of mappings) {
-    for (const [name, score] of Object.entries(
-      mapping.values,
-    )) {
-      if (
-        !Number.isFinite(score) ||
-        score === 0
-      ) {
+    for (const [name, score] of Object.entries(mapping.values)) {
+      if (!Number.isFinite(score) || score === 0) {
         continue;
       }
 
@@ -338,12 +284,9 @@ function addImportedTaste(
 
       if (!normalized) continue;
 
-      const key =
-        `${mapping.category}:${normalized}`;
-
+      const key = `${mapping.category}:${normalized}`;
       const inverseFrequency =
-        idf.get(key) ??
-        Math.log(1 + Math.max(1, idf.size));
+        idf.get(key) ?? Math.log(1 + Math.max(1, idf.size));
 
       const signal = Math.tanh(score / 6);
 
@@ -352,9 +295,7 @@ function addImportedTaste(
         (vector.get(key) ?? 0) +
           signal *
             mapping.weight *
-            Math.sqrt(
-              Math.max(0, inverseFrequency),
-            ),
+            Math.sqrt(Math.max(0, inverseFrequency)),
       );
     }
   }
@@ -364,10 +305,7 @@ function cosineSimilarity(
   left: SparseVector,
   right: SparseVector,
 ): number {
-  if (
-    left.size === 0 ||
-    right.size === 0
-  ) {
+  if (left.size === 0 || right.size === 0) {
     return 0;
   }
 
@@ -384,21 +322,37 @@ function cosineSimilarity(
   }
 
   for (const [key, value] of left) {
-    dot +=
-      value * (right.get(key) ?? 0);
+    dot += value * (right.get(key) ?? 0);
   }
 
   const denominator =
-    Math.sqrt(leftMagnitude) *
-    Math.sqrt(rightMagnitude);
+    Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude);
 
   if (denominator <= 0) {
     return 0;
   }
 
-  return Math.max(
-    -1,
-    Math.min(1, dot / denominator),
+  return Math.max(-1, Math.min(1, dot / denominator));
+}
+
+/**
+ * Converts upstream feedback weights into a bounded influence value.
+ *
+ * Logarithmic scaling makes differences between weak and strong
+ * signals meaningful while reducing the effect of extreme values.
+ */
+function getSeedInfluence(weight: number): number {
+  if (!Number.isFinite(weight) || weight <= 0) {
+    return 0;
+  }
+
+  const normalized = Math.log1p(
+    Math.min(12, Math.max(0, weight)),
+  ) / Math.log1p(12);
+
+  return (
+    MIN_SEED_INFLUENCE +
+    normalized * (MAX_SEED_INFLUENCE - MIN_SEED_INFLUENCE)
   );
 }
 
@@ -413,14 +367,8 @@ function buildSeedVectors(
         seed.weight > 0,
     )
     .map((seed) => ({
-      vector: buildWeightedVector(
-        seed.item,
-        idf,
-      ),
-      weight: Math.max(
-        0.2,
-        Math.min(2, seed.weight / 7),
-      ),
+      vector: buildWeightedVector(seed.item, idf),
+      weight: getSeedInfluence(seed.weight),
     }));
 }
 
@@ -430,11 +378,7 @@ function buildAggregateVector(
   const vector: SparseVector = new Map();
 
   for (const seed of seeds) {
-    addToVector(
-      vector,
-      seed.vector,
-      seed.weight,
-    );
+    addToVector(vector, seed.vector, seed.weight);
   }
 
   return pruneVector(vector);
@@ -468,10 +412,9 @@ type InterestCluster = {
 };
 
 /**
- * Groups related positive examples into bounded clusters.
- *
- * Seeds that cannot fit into a new cluster are not discarded:
- * they remain available to the global strongest-seed matcher.
+ * Groups related positive examples into bounded interest clusters.
+ * All seeds remain available to the global strongest-seed matcher,
+ * even when the maximum number of clusters has been reached.
  */
 function buildInterestClusters(
   seeds: ReturnType<typeof buildSeedVectors>,
@@ -486,11 +429,7 @@ function buildInterestClusters(
     let bestIndex = -1;
     let bestSimilarity = -1;
 
-    for (
-      let index = 0;
-      index < clusters.length;
-      index++
-    ) {
+    for (let index = 0; index < clusters.length; index++) {
       const similarity = cosineSimilarity(
         seed.vector,
         clusters[index].vector,
@@ -504,26 +443,18 @@ function buildInterestClusters(
 
     if (
       bestIndex >= 0 &&
-      bestSimilarity >=
-        CLUSTER_SIMILARITY_THRESHOLD
+      bestSimilarity >= CLUSTER_SIMILARITY_THRESHOLD
     ) {
       const cluster = clusters[bestIndex];
 
-      addToVector(
-        cluster.vector,
-        seed.vector,
-        seed.weight,
-      );
-
+      addToVector(cluster.vector, seed.vector, seed.weight);
       cluster.seeds.push(seed);
       cluster.mass += seed.weight;
 
       continue;
     }
 
-    if (
-      clusters.length >= MAX_INTEREST_CLUSTERS
-    ) {
+    if (clusters.length >= MAX_INTEREST_CLUSTERS) {
       continue;
     }
 
@@ -540,8 +471,9 @@ function buildInterestClusters(
 /**
  * Scores a candidate against independent interest groups.
  *
- * The global strongest-seed score includes EVERY positive seed,
- * including seeds that did not fit into the bounded cluster set.
+ * Cluster influence grows with supporting evidence, but uses
+ * sub-linear scaling so a dominant interest cannot erase smaller
+ * interests. A strongest-seed path also protects niche interests.
  */
 function getMultiInterestPositiveScore(
   candidateVector: SparseVector,
@@ -554,15 +486,13 @@ function getMultiInterestPositiveScore(
   const clusters = buildInterestClusters(seeds);
 
   if (clusters.length === 0) {
-    return getStrongestSeedSimilarity(
-      candidateVector,
-      seeds,
-    );
+    return getStrongestSeedSimilarity(candidateVector, seeds);
   }
 
-  const clusterWeights = clusters.map(
-    (cluster) =>
-      Math.sqrt(Math.max(0.1, cluster.mass)),
+  // Sub-linear mass scaling: stronger clusters matter more,
+  // but repeated evidence has diminishing returns.
+  const clusterWeights = clusters.map((cluster) =>
+    Math.pow(Math.max(0.1, cluster.mass), 0.72),
   );
 
   const totalWeight = clusterWeights.reduce(
@@ -573,26 +503,18 @@ function getMultiInterestPositiveScore(
   let strongestCluster = 0;
   let weightedClusterScore = 0;
 
-  for (
-    let index = 0;
-    index < clusters.length;
-    index++
-  ) {
+  for (let index = 0; index < clusters.length; index++) {
     const cluster = clusters[index];
 
     const centroidSimilarity = Math.max(
       0,
-      cosineSimilarity(
-        cluster.vector,
-        candidateVector,
-      ),
+      cosineSimilarity(cluster.vector, candidateVector),
     );
 
-    const strongestClusterSeed =
-      getStrongestSeedSimilarity(
-        candidateVector,
-        cluster.seeds,
-      );
+    const strongestClusterSeed = getStrongestSeedSimilarity(
+      candidateVector,
+      cluster.seeds,
+    );
 
     const clusterScore = Math.max(
       0,
@@ -617,12 +539,12 @@ function getMultiInterestPositiveScore(
       ? weightedClusterScore / totalWeight
       : strongestCluster;
 
-  // Crucial: retain the strongest match across ALL seeds.
-  const globalStrongestSeed =
-    getStrongestSeedSimilarity(
-      candidateVector,
-      seeds,
-    );
+  // Keep every positive seed eligible, including seeds that
+  // could not form a separate cluster due to the cluster limit.
+  const globalStrongestSeed = getStrongestSeedSimilarity(
+    candidateVector,
+    seeds,
+  );
 
   const clusterScore =
     strongestCluster * 0.68 +
@@ -656,19 +578,13 @@ export function getFeatureSimilarityScores(
   const corpus = [
     ...candidates,
     ...seeds.map((seed) => seed.item),
-    ...negativeSeeds.map(
-      (seed) => seed.item,
-    ),
+    ...negativeSeeds.map((seed) => seed.item),
   ];
 
-  const idf =
-    buildInverseDocumentFrequency(corpus);
+  const idf = buildInverseDocumentFrequency(corpus);
 
-  const positiveSeedVectors =
-    buildSeedVectors(seeds, idf);
-
-  const negativeSeedVectors =
-    buildSeedVectors(negativeSeeds, idf);
+  const positiveSeedVectors = buildSeedVectors(seeds, idf);
+  const negativeSeedVectors = buildSeedVectors(negativeSeeds, idf);
 
   const positiveUserVector =
     buildAggregateVector(positiveSeedVectors);
@@ -677,28 +593,19 @@ export function getFeatureSimilarityScores(
     buildAggregateVector(negativeSeedVectors);
 
   if (tasteProfile) {
-    addImportedTaste(
-      positiveUserVector,
-      tasteProfile,
-      idf,
-    );
+    addImportedTaste(positiveUserVector, tasteProfile, idf);
   }
 
-  const finalPositiveVector =
-    pruneVector(positiveUserVector);
-
-  const finalNegativeVector =
-    pruneVector(negativeUserVector);
+  const finalPositiveVector = pruneVector(positiveUserVector);
+  const finalNegativeVector = pruneVector(negativeUserVector);
 
   for (const candidate of candidates) {
-    const candidateVector =
-      buildWeightedVector(candidate, idf);
+    const candidateVector = buildWeightedVector(candidate, idf);
 
-    const positiveUserSimilarity =
-      cosineSimilarity(
-        finalPositiveVector,
-        candidateVector,
-      );
+    const positiveUserSimilarity = cosineSimilarity(
+      finalPositiveVector,
+      candidateVector,
+    );
 
     const strongestPositiveSimilarity =
       getStrongestSeedSimilarity(
@@ -710,11 +617,10 @@ export function getFeatureSimilarityScores(
       positiveUserSimilarity * 0.7 +
       strongestPositiveSimilarity * 0.3;
 
-    const multiInterestScore =
-      getMultiInterestPositiveScore(
-        candidateVector,
-        positiveSeedVectors,
-      );
+    const multiInterestScore = getMultiInterestPositiveScore(
+      candidateVector,
+      positiveSeedVectors,
+    );
 
     const positiveScore =
       multiInterestScore === null
@@ -722,38 +628,28 @@ export function getFeatureSimilarityScores(
         : blendedPositiveScore * 0.42 +
           multiInterestScore * 0.58;
 
-    const negativeUserSimilarity =
-      Math.max(
-        0,
-        cosineSimilarity(
-          finalNegativeVector,
-          candidateVector,
-        ),
-      );
+    const negativeUserSimilarity = Math.max(
+      0,
+      cosineSimilarity(finalNegativeVector, candidateVector),
+    );
 
-    const strongestNegativeSimilarity =
-      Math.max(
-        0,
-        getStrongestSeedSimilarity(
-          candidateVector,
-          negativeSeedVectors,
-        ),
-      );
+    const strongestNegativeSimilarity = Math.max(
+      0,
+      getStrongestSeedSimilarity(
+        candidateVector,
+        negativeSeedVectors,
+      ),
+    );
 
     const negativeScore =
       negativeUserSimilarity * 0.7 +
       strongestNegativeSimilarity * 0.3;
 
-    const combined =
-      positiveScore -
-      negativeScore * 0.85;
+    const combined = positiveScore - negativeScore * 0.85;
 
     scores.set(
       `${candidate.mediaType}:${candidate.id}`,
-      Math.max(
-        -1,
-        Math.min(1, combined),
-      ),
+      Math.max(-1, Math.min(1, combined)),
     );
   }
 
