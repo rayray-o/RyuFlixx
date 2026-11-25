@@ -140,6 +140,10 @@ type DetailedFeatureItem = FeatureVectorItem & {
   overview?: string;
 };
 
+type DetailedFeatureSeed = Omit<FeatureVectorSeed, "item"> & {
+  item: DetailedFeatureItem;
+};
+
 type FeaturePreference = {
   name: string;
   score: number;
@@ -1886,7 +1890,7 @@ export async function getGorseInspiredRecommendations(
    * positive training examples from the active profile.
    * Training metadata has already been fetched above.
    */
-  const enrichedSeeds: FeatureVectorSeed[] = [];
+  const enrichedSeeds: DetailedFeatureSeed[] = [];
   const positiveFeatureSignals =
     getPositiveFeatureTrainingSignals(trainingSignals);
   const positiveFeatureKeys = new Set<string>();
@@ -1935,7 +1939,7 @@ export async function getGorseInspiredRecommendations(
     });
   });
 
-  const enrichedNegativeSeeds: FeatureVectorSeed[] = [];
+  const enrichedNegativeSeeds: DetailedFeatureSeed[] = [];
 
   negativeSeedDetails.forEach((item, index) => {
     if (!item) return;
