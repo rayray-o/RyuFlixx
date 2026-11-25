@@ -155,6 +155,11 @@ type FeaturePreference = {
   score: number;
 };
 
+type AdaptiveExplorationProfile = {
+  enrichmentExplorationShare: number;
+  rankingBlend: number;
+};
+
 const recommendationCache = new Map<
   string,
   CachedRecommendations
@@ -306,7 +311,6 @@ async function tmdb<T>(
         signal: controller.signal,
         headers: {
           Authorization: `Bearer ${env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN}`,
-          accept: "application/json",
         },
       },
     );
@@ -323,569 +327,132 @@ async function tmdb<T>(
   }
 }
 
-async function fetchCollection(
-  path: string,
-  mediaType: ContentType,
-): Promise<RecommendationItem[]> {
-  const response = await tmdb<DiscoverResponse>(path);
+function pruneRecommendationCache(): void {
+  const now = Date.now();
 
-  if (!response?.results) {
-    return [];
+  for (const [key, entry] of recommendationCache) {
+    if (entry.expiresAt <= now) {
+      recommendationCache.delete(key);
+    }
   }
 
-  return response.results
-    .map((item) => normalizeItem(item, mediaType))
-    .filter(
-      (item): item is RecommendationItem =>
-        item !== null,
-    );
-}
+  while (
+    recommendationCache.size > MAX_CACHE_ENTRIES
+  ) {
+    const oldestKey =
+      recommendationCache.keys().next().value;
 
-function buildDiscoverPath(
-  mediaType: ContentType,
-  parameters: Record<string, string>,
-): string {
-  const query = new URLSearchParams(parameters);
+    if (!oldestKey) break;
 
-  return `/discover/${mediaType}?${query.toString()}`;
-}
-
-function getNamedValues(
-  value: unknown,
-  property = "name",
-): string[] {
-  return asObjects(value)
-    .map((item) => string(item[property]).trim())
-    .filter(Boolean);
-}
-
-function getKeywordValues(
-  value: unknown,
-): string[] {
-  const object = asObject(value);
-
-  if (!object) {
-    return [];
+    recommendationCache.delete(oldestKey);
   }
-
-  return getNamedValues(
-    object.keywords ?? object.results,
-  );
-}
-
-function getCountryValues(
-  raw: Record<string, unknown>,
-  mediaType: ContentType,
-): string[] {
-  if (mediaType === "tv") {
-    return Array.isArray(raw.origin_country)
-      ? raw.origin_country.filter(
-          (value): value is string =>
-            typeof value === "string" &&
-            value.length > 0,
-        )
-      : [];
-  }
-
-  return getNamedValues(raw.production_countries);
-}
-
-function buildDetailedFeatureItem(
-  raw: Record<string, unknown>,
-  mediaType: ContentType,
-  id: number,
-): DetailedFeatureItem {
-  const credits = asObject(raw.credits);
-  const cast = asObjects(credits?.cast);
-  const crew = asObjects(credits?.crew);
-
-  const directors = crew
-    .filter(
-      (person) =>
-        string(person.job).toLowerCase() === "director",
-    )
-    .map((person) => string(person.name))
-    .filter(Boolean);
-
-  if (mediaType === "tv") {
-    directors.push(
-      ...getNamedValues(raw.created_by),
-    );
-  }
-
-  const languages = asObjects(raw.spoken_languages)
-    .map((language) => string(language.iso_639_1))
-    .filter(Boolean);
-
-  const releaseDate =
-    mediaType === "movie"
-      ? string(raw.release_date)
-      : string(raw.first_air_date);
-
-  return {
-    id,
-    mediaType,
-    genres: getNamedValues(raw.genres),
-    keywords: getKeywordValues(raw.keywords),
-    directors: [...new Set(directors)],
-    cast: cast
-      .slice(0, 12)
-      .map((person) => string(person.name))
-      .filter(Boolean),
-    languages,
-    countries: getCountryValues(raw, mediaType),
-    releaseDate: releaseDate || undefined,
-    overview: string(raw.overview) || undefined,
-  };
 }
 
 function pruneDetailCache(): void {
   const now = Date.now();
 
-  for (const [key, value] of detailCache) {
-    if (value.expiresAt <= now) {
+  for (const [key, entry] of detailCache) {
+    if (entry.expiresAt <= now) {
       detailCache.delete(key);
     }
   }
 
-  while (detailCache.size > MAX_DETAIL_CACHE_ENTRIES) {
-    const oldestKey = detailCache.keys().next().value;
+  while (
+    detailCache.size > MAX_DETAIL_CACHE_ENTRIES
+  ) {
+    const oldestKey =
+      detailCache.keys().next().value;
 
-    if (!oldestKey) {
-      break;
-    }
+    if (!oldestKey) break;
 
     detailCache.delete(oldestKey);
   }
 }
 
-async function fetchDetailedItem(
-  id: number,
-  mediaType: ContentType,
-): Promise<DetailedFeatureItem | null> {
-  const key = `${mediaType}:${id}`;
+function pruneGenreCache(): void {
+  const now = Date.now();
 
-  pruneDetailCache();
-
-  const cached = detailCache.get(key);
-
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.item;
-  }
-
-  const existingRequest = detailInFlight.get(key);
-
-  if (existingRequest) {
-    return existingRequest;
-  }
-
-  const request = (async () => {
-    const response = await tmdb<Record<string, unknown>>(
-      `/${mediaType}/${id}?append_to_response=credits,keywords`,
-    );
-
-    if (!response) {
-      return null;
-    }
-
-    const item = buildDetailedFeatureItem(
-      response,
-      mediaType,
-      id,
-    );
-
-    detailCache.set(key, {
-      expiresAt: Date.now() + DETAIL_CACHE_TTL,
-      item,
-    });
-
-    pruneDetailCache();
-
-    return item;
-  })();
-
-  detailInFlight.set(key, request);
-
-  try {
-    return await request;
-  } finally {
-    if (detailInFlight.get(key) === request) {
-      detailInFlight.delete(key);
+  for (const [key, entry] of genreCache) {
+    if (entry.expiresAt <= now) {
+      genreCache.delete(key);
     }
   }
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
+function tasteFingerprint(
+  tasteProfile: TasteProfile | null,
+): string {
+  if (!tasteProfile) {
+    return "no-profile";
+  }
 
-  const workerCount = Math.min(
-    Math.max(1, concurrency),
-    items.length,
-  );
+  const preferences = tasteProfile.preferences;
 
-  const workers = Array.from(
-    { length: workerCount },
-    async () => {
-      while (true) {
-        const index = nextIndex++;
-
-        if (index >= items.length) {
-          return;
-        }
-
-        results[index] = await mapper(
-          items[index],
-          index,
-        );
-      }
-    },
-  );
-
-  await Promise.all(workers);
-
-  return results;
+  return [
+    preferences.genres
+      .map((item) => `${item.name}:${item.score}`)
+      .sort()
+      .join(","),
+    preferences.keywords
+      .map((item) => `${item.name}:${item.score}`)
+      .sort()
+      .join(","),
+    preferences.languages
+      .map((item) => `${item.name}:${item.score}`)
+      .sort()
+      .join(","),
+    preferences.countries
+      .map((item) => `${item.name}:${item.score}`)
+      .sort()
+      .join(","),
+  ].join("|");
 }
 
-function getHistorySeeds(
-  mediaType: ContentType,
-): HistorySeed[] {
-  const signals = getFeedbackVectors(mediaType)
-    .filter((vector) => {
-      if (vector.confidence < 0.12) {
-        return false;
-      }
+function activityFingerprint(): string {
+  const vectors = getFeedbackVectors();
 
-      if (vector.positive <= vector.negative) {
-        return false;
-      }
-
-      if (
-        vector.explicitFeedback === "dislike" ||
-        vector.explicitFeedback === "not_interested"
-      ) {
-        return false;
-      }
-
-      return (
-        vector.positive >= 0.12 ||
-        vector.watchlisted
-      );
-    })
-    .map((vector) => ({
-      id: vector.id,
-      score: clamp(
-        1.5 +
-          vector.positive * 8 +
-          vector.confidence * 2 -
-          vector.negative * 5,
-        1,
-        12,
-      ),
-      updatedAt: vector.timestamp,
-    }))
-    .sort((a, b) => {
-      if (b.score !== a.score) {
-        return b.score - a.score;
-      }
-
-      return (
-        new Date(b.updatedAt).getTime() -
-        new Date(a.updatedAt).getTime()
-      );
-    })
-    .slice(0, MAX_HISTORY_SEEDS);
-
-  return applyTemporalInterestWeights(
-    signals.map((signal) => ({
-      timestamp: signal.updatedAt,
-      weight: signal.score,
-      signal,
-    })),
-  ).map(({ signal, weight }) => ({
-    ...signal,
-    score: clamp(weight, 0.5, 12),
-  }));
-}
-
-/**
- * Only explicit dislikes become negative content seeds.
- * Abandoning a title is not enough to label its metadata undesirable.
- */
-function getNegativeHistorySeeds(
-  mediaType: ContentType,
-): HistorySeed[] {
-  const signals = getFeedbackVectors(mediaType)
-    .filter(
+  return vectors
+    .map(
       (vector) =>
-        vector.explicitFeedback === "dislike" &&
-        vector.confidence >= 0.2,
+        `${vector.mediaType}:${vector.id}:${vector.label.toFixed(3)}:${vector.weight.toFixed(3)}:${vector.timestamp}`,
     )
-    .map((vector) => ({
-      id: vector.id,
-      score: clamp(
-        2 +
-          vector.negative * 8 +
-          vector.confidence * 2,
-        1,
-        12,
-      ),
-      updatedAt: vector.timestamp,
-    }))
-    .sort((a, b) => {
-      if (b.score !== a.score) {
-        return b.score - a.score;
-      }
-
-      return (
-        new Date(b.updatedAt).getTime() -
-        new Date(a.updatedAt).getTime()
-      );
-    })
-    .slice(0, MAX_NEGATIVE_SEEDS);
-
-  return applyTemporalInterestWeights(
-    signals.map((signal) => ({
-      timestamp: signal.updatedAt,
-      weight: signal.score,
-      signal,
-    })),
-  ).map(({ signal, weight }) => ({
-    ...signal,
-    score: clamp(weight, 0.75, 12),
-  }));
+    .sort()
+    .join("|");
 }
 
-function getTrainingSignals(): TrainingSignal[] {
-  const signals = getFeedbackVectors()
-    .filter((vector) => {
-      if (vector.confidence < 0.16) {
-        return false;
-      }
-
-      if (Math.abs(vector.label - 0.5) < 0.01) {
-        return false;
-      }
-
-      return (
-        vector.positive > 0 ||
-        vector.negative > 0 ||
-        vector.watchlisted
-      );
-    })
-    .map((vector) => {
-      const isWeakNegative =
-        vector.negative > 0 &&
-        vector.progress < 0.12 &&
-        vector.abandons > 0;
-
-      return {
-        id: vector.id,
-        mediaType: vector.mediaType,
-        label: isWeakNegative
-          ? 0.2
-          : vector.label,
-        weight: isWeakNegative
-          ? clamp(vector.weight * 0.35, 0.1, 0.35)
-          : clamp(
-              vector.weight * vector.confidence,
-              0.1,
-              2.5,
-            ),
-        timestamp: vector.timestamp,
-      };
-    })
-    .sort(
-      (a, b) =>
-        new Date(b.timestamp).getTime() -
-        new Date(a.timestamp).getTime(),
-    )
-    .slice(0, MAX_TRAINING_TITLES);
-
-  return applyTemporalInterestWeights(
-    signals.map((signal) => ({
-      ...signal,
-      weight: signal.weight,
-    })),
-  ).map(({ shortTermInfluence: _shortTermInfluence,
-           longTermInfluence: _longTermInfluence,
-           recencyInfluence: _recencyInfluence,
-           ...signal }) => signal);
-}
-
-/**
- * Selects strong positive examples for content similarity.
- * Older signals retain some influence instead of disappearing.
- */
-function getPositiveFeatureTrainingSignals(
-  trainingSignals: TrainingSignal[],
-): TrainingSignal[] {
-  return trainingSignals
-    .filter(
-      (signal) =>
-        signal.label >= 0.58 &&
-        signal.weight >= 0.2,
-    )
-    .map((signal) => ({
-      signal,
-      strength:
-        signal.weight *
-        (0.5 + signal.label * 0.5),
-    }))
-    .sort((a, b) => b.strength - a.strength)
-    .slice(0, MAX_FEATURE_POSITIVE_SEEDS)
-    .map(({ signal }) => ({
-      ...signal,
-      weight: clamp(signal.weight, 0.2, 2.5),
-    }));
-}
-
-/**
- * Exclude watched titles, watchlisted titles and titles
- * explicitly marked "Not interested".
- */
 function getExcludedIds(): Set<string> {
   const excluded = new Set<string>();
 
-  for (const entry of getWatchHistory()) {
+  for (const entry of getAllExplicitFeedbackSafe()) {
     if (
-      entry &&
-      (entry.type === "movie" || entry.type === "tv") &&
-      Number.isFinite(entry.media_id)
+      entry.value === "dislike" ||
+      entry.value === "not_interested"
     ) {
-      excluded.add(
-        `${entry.type}:${entry.media_id}`,
-      );
-    }
-  }
-
-  for (const entry of getLocalWatchlist()) {
-    if (
-      entry &&
-      (entry.type === "movie" || entry.type === "tv") &&
-      Number.isFinite(entry.id)
-    ) {
-      excluded.add(
-        `${entry.type}:${entry.id}`,
-      );
-    }
-  }
-
-  for (const vector of getFeedbackVectors()) {
-    if (vector.explicitFeedback === "not_interested") {
-      excluded.add(
-        `${vector.mediaType}:${vector.id}`,
-      );
+      excluded.add(`${entry.mediaType}:${entry.id}`);
     }
   }
 
   return excluded;
 }
 
-function tasteFingerprint(
-  profile: TasteProfile | null,
-): string {
-  if (!profile) {
-    return "no-imported-taste";
+function getAllExplicitFeedbackSafe(): Array<{
+  id: number;
+  mediaType: ContentType;
+  value: string;
+}> {
+  try {
+    const { getAllExplicitFeedback } = requireExplicitFeedback();
+    return getAllExplicitFeedback();
+  } catch {
+    return [];
   }
-
-  return JSON.stringify({
-    confidence: profile.confidence,
-    genres: profile.topGenres,
-    keywords: profile.topKeywords,
-    directors: profile.topDirectors,
-    actors: profile.topActors,
-    preferredMediaType:
-      profile.summary?.preferredMediaType,
-    preferredEra: profile.summary?.preferredEra,
-  });
 }
 
-function activityFingerprint(): string {
-  const history = getWatchHistory()
-    .slice(0, 20)
-    .map((entry) => [
-      entry.type,
-      entry.media_id,
-      entry.updated_at,
-      entry.completed ? 1 : 0,
-      entry.last_position,
-    ].join(":"));
-
-  const watchlist = getLocalWatchlist()
-    .map((entry) => `${entry.type}:${entry.id}`)
-    .sort();
-
-  const feedback = getFeedbackVectors()
-    .map((vector) => [
-      vector.mediaType,
-      vector.id,
-      vector.label,
-      vector.weight,
-      vector.confidence,
-      vector.timestamp,
-      vector.explicitFeedback ?? "",
-      vector.evidence.join(","),
-    ].join(":"));
-
-  return JSON.stringify({
-    history,
-    watchlist,
-    feedback,
-  });
+function requireExplicitFeedback(): typeof import("@/utils/personalization/explicit-feedback-engine") {
+  return explicitFeedbackModule;
 }
 
-function addCandidate(
-  candidates: Map<string, CandidateRecord>,
-  item: RecommendationItem,
-  source: string,
-  weight: number,
-): void {
-  const key = `${item.mediaType}:${item.id}`;
-  const existing = candidates.get(key);
-
-  if (!existing) {
-    candidates.set(key, {
-      item,
-      sourceScore: weight,
-      sources: new Set([source]),
-    });
-
-    return;
-  }
-
-  if (!existing.sources.has(source)) {
-    existing.sources.add(source);
-    existing.sourceScore += weight;
-  }
-
-  existing.item = {
-    ...existing.item,
-    ...item,
-    title: existing.item.title ?? item.title,
-    name: existing.item.name ?? item.name,
-    poster_path:
-      existing.item.poster_path ?? item.poster_path,
-    backdrop_path:
-      existing.item.backdrop_path ?? item.backdrop_path,
-    overview:
-      existing.item.overview ?? item.overview,
-    release_date:
-      existing.item.release_date ?? item.release_date,
-    first_air_date:
-      existing.item.first_air_date ?? item.first_air_date,
-    original_language:
-      existing.item.original_language ?? item.original_language,
-    genre_ids:
-      existing.item.genre_ids?.length
-        ? existing.item.genre_ids
-        : item.genre_ids,
-  };
-}
+import * as explicitFeedbackModule from "@/utils/personalization/explicit-feedback-engine";
 
 function qualityScore(
   item: RecommendationItem,
@@ -896,7 +463,7 @@ function qualityScore(
     10,
   );
 
-  const voteCount = Math.max(
+  const votes = Math.max(
     0,
     number(item.vote_count),
   );
@@ -906,256 +473,69 @@ function qualityScore(
     number(item.popularity),
   );
 
-  return (
-    rating * 1.3 +
-    Math.log10(voteCount + 1) * 1.25 +
-    Math.log10(popularity + 1) * 1.1
-  );
+  const ratingConfidence =
+    votes / (votes + 250);
+
+  const weightedRating =
+    rating * ratingConfidence +
+    6.2 * (1 - ratingConfidence);
+
+  const popularityScore =
+    Math.log1p(popularity) * 1.4;
+
+  return weightedRating * 2.2 + popularityScore;
 }
 
-function getGenreAffinityScore(
+function addCandidate(
+  candidates: Map<string, CandidateRecord>,
   item: RecommendationItem,
-  preferences: Map<number, number>,
-): number {
-  const genreIds = item.genre_ids ?? [];
+  source: string,
+  weight: number,
+): void {
+  const key = `${item.mediaType}:${item.id}`;
 
-  if (
-    genreIds.length === 0 ||
-    preferences.size === 0
-  ) {
-    return 0;
+  const existing = candidates.get(key);
+
+  if (existing) {
+    existing.sourceScore += weight;
+    existing.sources.add(source);
+    return;
   }
 
-  let score = 0;
-
-  for (const genreId of genreIds) {
-    score += preferences.get(genreId) ?? 0;
-  }
-
-  return clamp(
-    score / Math.sqrt(genreIds.length),
-    -1,
-    1,
-  );
-}
-
-function diversify(
-  candidates: RankedCandidate[],
-  limit: number,
-  clusterStrengths: Map<string, number>,
-): RecommendationItem[] {
-  const remaining = [...candidates];
-  const selected: RankedCandidate[] = [];
-  const genreCounts = new Map<number, number>();
-  const clusterCounts = new Map<string, number>();
-
-  while (
-    selected.length < limit &&
-    remaining.length > 0
-  ) {
-    let bestIndex = 0;
-    let bestScore = -Infinity;
-
-    for (
-      let index = 0;
-      index < remaining.length;
-      index++
-    ) {
-      const candidate = remaining[index];
-      let adjustedScore = candidate._score;
-
-      for (const genreId of candidate.genre_ids ?? []) {
-        const count = genreCounts.get(genreId) ?? 0;
-
-        if (count >= 3) {
-          adjustedScore -= 9;
-        } else if (count >= 2) {
-          adjustedScore -= 3;
-        }
-      }
-
-      /*
-       * Give underrepresented interest clusters a modest,
-       * temporary ranking advantage. This is a soft coverage
-       * preference, not a quota: strong candidates can still
-       * win on relevance, and weak clusters cannot force items
-       * into the final list.
-       */
-      let clusterCoverageBonus = 0;
-
-      for (const source of candidate._clusterSources) {
-        const count = clusterCounts.get(source) ?? 0;
-        const strength = clusterStrengths.get(source) ?? 0.5;
-
-        const sourceBonus =
-          count === 0
-            ? 5.5 + strength * 3.5
-            : count === 1
-              ? 2 + strength * 1.5
-              : count === 2
-                ? 0.25
-                : -1.5;
-
-        clusterCoverageBonus = Math.max(
-          clusterCoverageBonus,
-          sourceBonus,
-        );
-      }
-
-      adjustedScore += clusterCoverageBonus;
-
-      if (adjustedScore > bestScore) {
-        bestScore = adjustedScore;
-        bestIndex = index;
-      }
-    }
-
-    const chosen = remaining.splice(bestIndex, 1)[0];
-
-    if (!chosen) {
-      break;
-    }
-
-    selected.push(chosen);
-
-    for (const genreId of chosen.genre_ids ?? []) {
-      genreCounts.set(
-        genreId,
-        (genreCounts.get(genreId) ?? 0) + 1,
-      );
-    }
-
-    for (const source of chosen._clusterSources) {
-      clusterCounts.set(
-        source,
-        (clusterCounts.get(source) ?? 0) + 1,
-      );
-    }
-  }
-
-  return selected.map(
-    ({
-      _score: _ignored,
-      _clusterSources: _ignoredClusterSources,
-      ...item
-    }) => item,
-  );
-}
-
-function pruneRecommendationCache(): void {
-  const now = Date.now();
-
-  for (const [key, value] of recommendationCache) {
-    if (value.expiresAt <= now) {
-      recommendationCache.delete(key);
-    }
-  }
-
-  while (recommendationCache.size > MAX_CACHE_ENTRIES) {
-    const oldestKey = recommendationCache.keys().next().value;
-
-    if (!oldestKey) {
-      break;
-    }
-
-    recommendationCache.delete(oldestKey);
-  }
-}
-
-/* =========================================================
-   PERSONALIZED FEATURE PREFERENCES
-   ========================================================= */
-
-function getFeaturePreferenceTargets(
-  featureType: "genre" | "keyword",
-  trainingDetails: DetailedFeatureItem[],
-  trainingSignals: TrainingSignal[],
-  tasteSignals: Record<string, number> | undefined,
-): FeaturePreference[] {
-  const scores = new Map<
-    string,
-    {
-      name: string;
-      score: number;
-    }
-  >();
-
-  const add = (
-    name: string,
-    amount: number,
-  ) => {
-    const normalized = normalizeFeatureName(name);
-
-    if (
-      !normalized ||
-      !Number.isFinite(amount) ||
-      amount === 0
-    ) {
-      return;
-    }
-
-    const existing = scores.get(normalized);
-
-    scores.set(normalized, {
-      name: existing?.name ?? name,
-      score: (existing?.score ?? 0) + amount,
-    });
-  };
-
-  trainingDetails.forEach((item, index) => {
-    const signal = trainingSignals[index];
-
-    if (!signal) return;
-
-    const values =
-      featureType === "genre"
-        ? item.genres
-        : item.keywords;
-
-    const centeredLabel = clamp(
-      (signal.label - 0.5) * 2,
-      -1,
-      1,
-    );
-
-    const amount =
-      centeredLabel * signal.weight;
-
-    for (const value of values) {
-      add(value, amount);
-    }
+  candidates.set(key, {
+    item,
+    sourceScore: weight,
+    sources: new Set([source]),
   });
+}
 
-  if (tasteSignals) {
-    for (const [name, score] of Object.entries(tasteSignals)) {
-      if (!Number.isFinite(score)) continue;
+async function fetchCollection(
+  path: string,
+  mediaType: ContentType,
+): Promise<RecommendationItem[]> {
+  const response = await tmdb<DiscoverResponse>(path);
 
-      add(
-        name,
-        Math.tanh(score / 6) * 1.4,
-      );
-    }
-  }
-
-  return [...scores.values()]
-    .filter((entry) => entry.score > 0.15)
-    .sort((a, b) => b.score - a.score);
+  return asObjects(response?.results)
+    .map((item) => normalizeItem(item, mediaType))
+    .filter(
+      (item): item is RecommendationItem =>
+        item !== null,
+    );
 }
 
 async function fetchGenreCatalog(
   mediaType: ContentType,
 ): Promise<GenreEntry[]> {
+  pruneGenreCache();
+
   const cached = genreCache.get(mediaType);
 
-  if (
-    cached &&
-    cached.expiresAt > Date.now()
-  ) {
+  if (cached && cached.expiresAt > Date.now()) {
     return cached.genres;
   }
 
   const response = await tmdb<GenreResponse>(
-    `/genre/${mediaType}/list?language=en-US`,
+    `/genre/${mediaType}/list`,
   );
 
   const genres = (response?.genres ?? [])
@@ -1172,28 +552,318 @@ async function fetchGenreCatalog(
       name: genre.name,
     }));
 
-  if (genres.length > 0) {
-    genreCache.set(mediaType, {
-      expiresAt: Date.now() + GENRE_CACHE_TTL,
-      genres,
-    });
-  }
+  genreCache.set(mediaType, {
+    expiresAt: Date.now() + GENRE_CACHE_TTL,
+    genres,
+  });
 
   return genres;
 }
 
+function buildDiscoverPath(
+  mediaType: ContentType,
+  parameters: Record<string, string>,
+): string {
+  const query = new URLSearchParams({
+    include_adult: "false",
+    include_video: "false",
+    language: "en-US",
+    page: "1",
+    ...parameters,
+  });
+
+  return `/discover/${mediaType}?${query.toString()}`;
+}
+
+async function fetchDetailedItem(
+  id: number,
+  mediaType: ContentType,
+): Promise<DetailedFeatureItem | null> {
+  pruneDetailCache();
+
+  const key = `${mediaType}:${id}`;
+  const cached = detailCache.get(key);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.item;
+  }
+
+  const pending = detailInFlight.get(key);
+
+  if (pending) {
+    return pending;
+  }
+
+  const request = (async () => {
+    const raw = await tmdb<Record<string, unknown>>(
+      `/${mediaType}/${id}?append_to_response=keywords,credits`,
+    );
+
+    if (!raw) return null;
+
+    const normalized = normalizeItem(raw, mediaType);
+
+    if (!normalized) return null;
+
+    const genreNames = asObjects(raw.genres)
+      .map((genre) => string(genre.name))
+      .filter(Boolean);
+
+    const keywordRoot = asObject(raw.keywords);
+    const keywordItems = mediaType === "movie"
+      ? asObjects(keywordRoot?.keywords)
+      : asObjects(keywordRoot?.results);
+
+    const keywordNames = keywordItems
+      .map((keyword) => string(keyword.name))
+      .filter(Boolean);
+
+    const credits = asObject(raw.credits);
+    const cast = asObjects(credits?.cast)
+      .slice(0, 20)
+      .map((person) => string(person.name))
+      .filter(Boolean);
+
+    const crew = asObjects(credits?.crew);
+
+    const directors = crew
+      .filter(
+        (person) =>
+          string(person.job).toLowerCase() === "director",
+      )
+      .slice(0, 5)
+      .map((person) => string(person.name))
+      .filter(Boolean);
+
+    const languages = [
+      string(raw.original_language),
+    ].filter(Boolean);
+
+    const countries = asObjects(raw.production_countries)
+      .map((country) => string(country.name))
+      .filter(Boolean);
+
+    const item: DetailedFeatureItem = {
+      ...normalized,
+      genres: genreNames,
+      keywords: keywordNames,
+      cast,
+      directors,
+      languages,
+      countries,
+      releaseDate:
+        string(raw.release_date) ||
+        string(raw.first_air_date),
+      overview: string(raw.overview),
+    };
+
+    detailCache.set(key, {
+      expiresAt: Date.now() + DETAIL_CACHE_TTL,
+      item,
+    });
+
+    return item;
+  })();
+
+  detailInFlight.set(key, request);
+
+  try {
+    return await request;
+  } finally {
+    detailInFlight.delete(key);
+  }
+}
+
+function getHistorySeeds(
+  mediaType: ContentType,
+): HistorySeed[] {
+  const history = getWatchHistory()
+    .filter(
+      (entry) =>
+        entry.type === mediaType &&
+        Number.isFinite(entry.media_id),
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.updated_at).getTime() -
+        new Date(a.updated_at).getTime(),
+    );
+
+  const result = new Map<number, HistorySeed>();
+
+  for (const entry of history) {
+    const progress = entry.completed
+      ? 1
+      : entry.duration > 0
+        ? clamp(
+            entry.last_position / entry.duration,
+            0,
+            1,
+          )
+        : 0;
+
+    const score =
+      progress * 0.75 +
+      (entry.completed ? 0.35 : 0);
+
+    const existing = result.get(entry.media_id);
+
+    if (!existing || score > existing.score) {
+      result.set(entry.media_id, {
+        id: entry.media_id,
+        score,
+        updatedAt: entry.updated_at,
+      });
+    }
+  }
+
+  return [...result.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_HISTORY_SEEDS);
+}
+
+function getNegativeHistorySeeds(
+  mediaType: ContentType,
+): HistorySeed[] {
+  return getFeedbackVectors(mediaType)
+    .filter(
+      (vector) =>
+        vector.negative >= 0.2 ||
+        vector.explicitFeedback === "dislike" ||
+        vector.explicitFeedback === "not_interested",
+    )
+    .map((vector) => ({
+      id: vector.id,
+      score: vector.negative,
+      updatedAt: vector.timestamp,
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_NEGATIVE_SEEDS);
+}
+
+function getTrainingSignals(): TrainingSignal[] {
+  return getFeedbackVectors()
+    .map((vector) => ({
+      id: vector.id,
+      mediaType: vector.mediaType,
+      label: vector.label,
+      weight: vector.weight,
+      timestamp: vector.timestamp,
+    }))
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, MAX_TRAINING_TITLES);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+
+  const workers = Array.from(
+    {
+      length: Math.min(
+        Math.max(1, concurrency),
+        items.length,
+      ),
+    },
+    async () => {
+      while (true) {
+        const index = cursor++;
+
+        if (index >= items.length) {
+          return;
+        }
+
+        results[index] = await mapper(items[index]);
+      }
+    },
+  );
+
+  await Promise.all(workers);
+
+  return results;
+}
+
+function getFeaturePreferenceTargets(
+  category: "genre" | "keyword",
+  items: DetailedFeatureItem[],
+  signals: TrainingSignal[],
+  imported: Array<{
+    name: string;
+    score: number;
+  }> = [],
+): FeaturePreference[] {
+  const scores = new Map<string, number>();
+
+  const signalById = new Map(
+    signals.map((signal) => [
+      signal.id,
+      signal,
+    ]),
+  );
+
+  for (const item of items) {
+    const signal = signalById.get(item.id);
+
+    if (!signal) continue;
+
+    const values =
+      category === "genre"
+        ? item.genres
+        : item.keywords;
+
+    const influence =
+      signal.label >= 0.55
+        ? signal.weight * signal.label
+        : -signal.weight * (1 - signal.label);
+
+    for (const value of values) {
+      const key = normalizeFeatureName(value);
+
+      if (!key) continue;
+
+      scores.set(
+        key,
+        (scores.get(key) ?? 0) + influence,
+      );
+    }
+  }
+
+  for (const preference of imported) {
+    const key = normalizeFeatureName(preference.name);
+
+    if (!key) continue;
+
+    scores.set(
+      key,
+      (scores.get(key) ?? 0) + preference.score,
+    );
+  }
+
+  return [...scores.entries()]
+    .filter(([, score]) => score > 0)
+    .map(([name, score]) => ({
+      name,
+      score,
+    }))
+    .sort((a, b) => b.score - a.score);
+}
+
 async function getGenrePreferenceMap(
   mediaType: ContentType,
-  trainingDetails: DetailedFeatureItem[],
-  trainingSignals: TrainingSignal[],
+  items: DetailedFeatureItem[],
+  signals: TrainingSignal[],
   tasteProfile: TasteProfile | null,
 ): Promise<Map<number, number>> {
   const preferences = getFeaturePreferenceTargets(
     "genre",
-    trainingDetails,
-    trainingSignals,
+    items,
+    signals,
     tasteProfile?.preferences.genres,
-  ).slice(0, MAX_DISCOVERY_GENRES);
+  );
 
   if (preferences.length === 0) {
     return new Map();
@@ -1443,11 +1113,145 @@ async function buildPersonalizedSourceRequests(
 }
 
 /* =========================================================
+   ADAPTIVE EXPLORATION
+   ========================================================= */
+
+/**
+ * Adapts discovery to the strength and breadth of the active
+ * profile. Sparse or narrowly concentrated profiles get more
+ * exploration; broad, established profiles stay more focused.
+ */
+function buildAdaptiveExplorationProfile(
+  signals: Array<{
+    item: DetailedFeatureItem;
+    signal: TrainingSignal;
+  }>,
+): AdaptiveExplorationProfile {
+  const positiveTitles = new Map<
+    string,
+    {
+      item: DetailedFeatureItem;
+      weight: number;
+      label: number;
+    }
+  >();
+
+  for (const { item, signal } of signals) {
+    if (
+      signal.label < 0.58 ||
+      signal.weight < 0.2 ||
+      !Number.isFinite(signal.weight) ||
+      !Number.isFinite(signal.label)
+    ) {
+      continue;
+    }
+
+    const key = `${item.mediaType}:${item.id}`;
+    const existing = positiveTitles.get(key);
+
+    if (!existing || signal.weight > existing.weight) {
+      positiveTitles.set(key, {
+        item,
+        weight: signal.weight,
+        label: signal.label,
+      });
+    }
+  }
+
+  const genreMass = new Map<string, number>();
+
+  for (const {
+    item,
+    weight,
+    label,
+  } of positiveTitles.values()) {
+    const genres = [
+      ...new Set(
+        item.genres
+          .map(normalizeFeatureName)
+          .filter(Boolean),
+      ),
+    ];
+
+    if (genres.length === 0) continue;
+
+    const influence = clamp(
+      weight * (0.5 + label * 0.5),
+      0.1,
+      3,
+    );
+
+    const genreInfluence =
+      influence / Math.sqrt(genres.length);
+
+    for (const genre of genres) {
+      genreMass.set(
+        genre,
+        (genreMass.get(genre) ?? 0) + genreInfluence,
+      );
+    }
+  }
+
+  const titleCount = positiveTitles.size;
+
+  const totalGenreMass = [...genreMass.values()].reduce(
+    (sum, value) => sum + value,
+    0,
+  );
+
+  const dominantGenreMass = Math.max(
+    0,
+    ...genreMass.values(),
+  );
+
+  const concentration =
+    totalGenreMass > 0
+      ? dominantGenreMass / totalGenreMass
+      : 0;
+
+  const breadth = clamp(
+    (genreMass.size - 1) / 6,
+    0,
+    1,
+  );
+
+  const maturity = 1 - Math.exp(-titleCount / 7);
+
+  const coldStartBoost =
+    (1 - maturity) * 0.2;
+
+  const narrowTasteBoost =
+    Math.max(0, concentration - 0.4) * 0.18;
+
+  const breadthReduction =
+    breadth * 0.09;
+
+  const enrichmentExplorationShare = clamp(
+    0.22 +
+      coldStartBoost +
+      narrowTasteBoost -
+      breadthReduction,
+    0.18,
+    0.48,
+  );
+
+  return {
+    enrichmentExplorationShare,
+    rankingBlend: clamp(
+      enrichmentExplorationShare * 0.68,
+      0.12,
+      0.33,
+    ),
+  };
+}
+
+/* =========================================================
    PRE-ENRICHMENT SELECTION
    ========================================================= */
 
 function selectCandidatesForEnrichment(
   candidates: PreliminaryCandidate[],
+  explorationShare = 1 - PRIMARY_ENRICHMENT_SHARE,
 ): PreliminaryCandidate[] {
   if (candidates.length <= MAX_ENRICHED_CANDIDATES) {
     return [...candidates].sort(
@@ -1459,11 +1263,17 @@ function selectCandidatesForEnrichment(
     (a, b) => b.score - a.score,
   );
 
+  const safeExplorationShare = clamp(
+    explorationShare,
+    0.18,
+    0.48,
+  );
+
   const primaryCount = Math.max(
     1,
     Math.floor(
       MAX_ENRICHED_CANDIDATES *
-        PRIMARY_ENRICHMENT_SHARE,
+        (1 - safeExplorationShare),
     ),
   );
 
@@ -1613,7 +1423,146 @@ export async function getGorseInspiredRecommendations(
     ),
   ]);
 
-  const requests: SourceRequest[] = [
+  const validSeedDetails = seedDetails.filter(
+    (item): item is DetailedFeatureItem =>
+      item !== null,
+  );
+
+  const validNegativeDetails = negativeSeedDetails.filter(
+    (item): item is DetailedFeatureItem =>
+      item !== null,
+  );
+
+  const validTrainingDetails = trainingDetails
+    .map((item, index) => {
+      const signal = trainingSignals[index];
+
+      if (!item || !signal) return null;
+
+      return {
+        item,
+        signal,
+      };
+    })
+    .filter(
+      (
+        entry,
+      ): entry is {
+        item: DetailedFeatureItem;
+        signal: TrainingSignal;
+      } => entry !== null,
+    );
+
+  const temporalTrainingSignals =
+    applyTemporalInterestWeights(
+      validTrainingDetails.map(({ signal }) => signal),
+    );
+
+  const temporalSignalById = new Map(
+    temporalTrainingSignals.map((signal) => [
+      `${signal.mediaType}:${signal.id}`,
+      signal,
+    ]),
+  );
+
+  const temporallyWeightedTrainingDetails =
+    validTrainingDetails.map(({ item, signal }) => ({
+      item,
+      signal:
+        temporalSignalById.get(
+          `${signal.mediaType}:${signal.id}`,
+        ) ?? signal,
+    }));
+
+  const positiveSeeds = temporallyWeightedTrainingDetails
+    .filter(
+      ({ signal }) =>
+        signal.label >= 0.55 &&
+        signal.weight >= 0.2,
+    )
+    .map(({ item, signal }) => ({
+      item,
+      weight: signal.weight,
+      timestamp: signal.timestamp,
+    }));
+
+  const negativeSynopsisSeeds: SynopsisSeed[] =
+    validTrainingDetails
+      .filter(
+        ({ signal }) =>
+          signal.label <= 0.25 &&
+          signal.weight >= 0.2,
+      )
+      .map(({ item, signal }) => ({
+        item,
+        weight: signal.weight,
+        timestamp: signal.timestamp,
+      }));
+
+  const positiveSynopsisSeeds: SynopsisSeed[] =
+    positiveSeeds.map((seed) => ({
+      item: seed.item,
+      weight: seed.weight,
+      timestamp: seed.timestamp,
+    }));
+
+  const clusterSeedMap = new Map<
+    string,
+    InterestDiscoverySeed
+  >();
+
+  for (const seed of positiveSeeds) {
+    const key =
+      `${seed.item.mediaType}:${seed.item.id}`;
+
+    const existing = clusterSeedMap.get(key);
+
+    if (!existing || seed.weight > existing.weight) {
+      clusterSeedMap.set(key, {
+        item: seed.item,
+        weight: seed.weight,
+        timestamp: seed.timestamp,
+      });
+    }
+  }
+
+  const interestTargets = [
+    ...buildInterestDiscoveryTargets(
+      [...clusterSeedMap.values()],
+      mediaType,
+    ),
+
+    ...buildEmergingInterestTargets(
+      validTrainingDetails
+        .filter(
+          ({ signal }) =>
+            signal.label >= 0.58 &&
+            signal.weight >= 0.2,
+        )
+        .map(({ item, signal }) => ({
+          item,
+          weight: signal.weight,
+          timestamp: signal.timestamp,
+        })),
+      mediaType,
+    ),
+  ];
+
+  const clusterRequests =
+    buildInterestClusterSourceRequests(
+      mediaType,
+      interestTargets,
+    );
+
+  const personalizedRequests =
+    await buildPersonalizedSourceRequests(
+      mediaType,
+      validTrainingDetails.map((entry) => entry.item),
+      validTrainingDetails.map((entry) => entry.signal),
+      tasteProfile,
+    );
+
+  const sourceRequests: SourceRequest[] = [
     {
       name: "trending",
       weight: 7,
@@ -1641,162 +1590,22 @@ export async function getGorseInspiredRecommendations(
           mediaType,
         ),
     },
+    ...personalizedRequests,
+    ...clusterRequests,
   ];
 
-  for (const seed of seeds) {
-    requests.push({
-      name: `recommendations-from-${seed.id}`,
-      weight: 8 + seed.score * 0.45,
-      run: () =>
-        fetchCollection(
-          `/${mediaType}/${seed.id}/recommendations`,
-          mediaType,
-        ),
-    });
-
-    requests.push({
-      name: `similar-to-${seed.id}`,
-      weight: 6 + seed.score * 0.35,
-      run: () =>
-        fetchCollection(
-          `/${mediaType}/${seed.id}/similar`,
-          mediaType,
-        ),
-    });
-  }
-
-  if (tasteProfile) {
-    requests.push({
-      name: "imported-taste",
-      weight: 0,
-      run: () =>
-        getPersonalizedRecommendations(
-          tasteProfile,
-          mediaType,
-          16,
-        ),
-    });
-  }
-
-  const validTrainingDetails = trainingDetails
-    .map((item, index) => ({
-      item,
-      signal: trainingSignals[index],
-    }))
-    .filter(
-      (
-        entry,
-      ): entry is {
-        item: DetailedFeatureItem;
-        signal: TrainingSignal;
-      } => entry.item !== null,
-    );
-
-  const personalizedRequests =
-    await buildPersonalizedSourceRequests(
-      mediaType,
-      validTrainingDetails.map((entry) => entry.item),
-      validTrainingDetails.map((entry) => entry.signal),
-      tasteProfile,
-    );
-
-  /*
-   * Build independent interest clusters from positive evidence.
-   * History seeds and positive feedback examples both contribute,
-   * while duplicate titles are collapsed before clustering.
-   */
-  const clusterSeedMap = new Map<
-    string,
-    InterestDiscoverySeed
-  >();
-
-  seedDetails.forEach((item, index) => {
-    if (!item) return;
-
-    const key = `${item.mediaType}:${item.id}`;
-
-    clusterSeedMap.set(key, {
-      item,
-      weight: seeds[index]?.score ?? 1,
-    });
-  });
-
-  validTrainingDetails.forEach(({ item, signal }) => {
-    if (
-      signal.label < 0.58 ||
-      signal.weight < 0.2
-    ) {
-      return;
-    }
-
-    const key = `${item.mediaType}:${item.id}`;
-    const existing = clusterSeedMap.get(key);
-
-    clusterSeedMap.set(key, {
-      item,
-      weight: Math.max(
-        existing?.weight ?? 0,
-        clamp(signal.weight * 4, 0.5, 10),
-      ),
-    });
-  });
-
-  const interestTargets = [
-  ...buildInterestDiscoveryTargets(
-    [...clusterSeedMap.values()],
-    mediaType,
-  ),
-
-  ...buildEmergingInterestTargets(
-    validTrainingDetails
-      .filter(
-        ({ signal }) =>
-          signal.label >= 0.58 &&
-          signal.weight >= 0.2,
-      )
-      .map(({ item, signal }) => ({
-        item,
-        weight: signal.weight,
-        timestamp: signal.timestamp,
-      })),
-    mediaType,
-  ),
-];
-
-  const clusterGenreCatalog =
-    interestTargets.length > 0
-      ? await fetchGenreCatalog(mediaType)
-      : [];
-
-  const interestClusterRequests =
-    await buildInterestClusterSourceRequests(
-      interestTargets,
-      mediaType,
-      {
-        fetchCollection,
-        buildDiscoverPath,
-        genreCatalog: clusterGenreCatalog,
-        searchKeywordId,
-      },
-    );
-
-  requests.push(
-    ...personalizedRequests,
-    ...interestClusterRequests,
-  );
-
   const sourceResults = await Promise.all(
-    requests.map(async (request) => {
+    sourceRequests.map(async (source) => {
       try {
         return {
-          name: request.name,
-          weight: request.weight,
-          items: await request.run(),
+          name: source.name,
+          weight: source.weight,
+          items: await source.run(),
         };
       } catch {
         return {
-          name: request.name,
-          weight: request.weight,
+          name: source.name,
+          weight: source.weight,
           items: [],
         };
       }
@@ -1889,8 +1698,14 @@ export async function getGorseInspiredRecommendations(
     });
   }
 
+  const explorationProfile =
+    buildAdaptiveExplorationProfile(validTrainingDetails);
+
   const candidatesToEnrich =
-    selectCandidatesForEnrichment(preliminary);
+    selectCandidatesForEnrichment(
+      preliminary,
+      explorationProfile.enrichmentExplorationShare,
+    );
 
   /*
    * Only the selected pool receives expensive metadata
@@ -1917,121 +1732,39 @@ export async function getGorseInspiredRecommendations(
     ),
   );
 
-  /*
-   * Keep the strongest dedicated history seeds, then add
-   * positive training examples from the active profile.
-   * Training metadata has already been fetched above.
-   */
-  const enrichedSeeds: DetailedFeatureSeed[] = [];
-  const positiveFeatureSignals =
-    getPositiveFeatureTrainingSignals(trainingSignals);
-  const positiveFeatureKeys = new Set<string>();
+  const featureSeeds: FeatureVectorSeed[] =
+    positiveSeeds.map((seed) => ({
+      item: seed.item,
+      weight: seed.weight,
+      timestamp: seed.timestamp,
+    }));
 
-  seedDetails.forEach((item, index) => {
-    if (!item) return;
-
-    const key = `${item.mediaType}:${item.id}`;
-
-    if (positiveFeatureKeys.has(key)) return;
-
-    positiveFeatureKeys.add(key);
-
-    enrichedSeeds.push({
-      item,
-      weight: seeds[index]?.score ?? 1,
-    });
-  });
-
-  positiveFeatureSignals.forEach((signal) => {
-    if (enrichedSeeds.length >= MAX_FEATURE_POSITIVE_SEEDS) {
-      return;
-    }
-
-    const detailIndex = trainingSignals.findIndex(
-      (candidate) =>
-        candidate.id === signal.id &&
-        candidate.mediaType === signal.mediaType,
-    );
-
-    if (detailIndex < 0) return;
-
-    const item = trainingDetails[detailIndex];
-
-    if (!item) return;
-
-    const key = `${item.mediaType}:${item.id}`;
-
-    if (positiveFeatureKeys.has(key)) return;
-
-    positiveFeatureKeys.add(key);
-
-    enrichedSeeds.push({
-      item,
-      weight: clamp(signal.weight * 4, 1, 10),
-    });
-  });
-
-  const enrichedNegativeSeeds: DetailedFeatureSeed[] = [];
-
-  negativeSeedDetails.forEach((item, index) => {
-    if (!item) return;
-
-    enrichedNegativeSeeds.push({
-      item,
-      weight: negativeSeeds[index]?.score ?? 1,
-    });
-  });
-
-  const trainingExamples: LearnedTrainingExample[] = [];
-
-  trainingDetails.forEach((item, index) => {
-    const signal = trainingSignals[index];
-
-    if (!item || !signal) return;
-
-    trainingExamples.push({
-      item,
-      label: signal.label,
-      weight: signal.weight,
-      timestamp: signal.timestamp,
-    });
-  });
+  const negativeFeatureSeeds: FeatureVectorSeed[] =
+    negativeSynopsisSeeds.map((seed) => ({
+      item: seed.item,
+      weight: seed.weight,
+      timestamp: seed.timestamp,
+    }));
 
   const contentSimilarity = getFeatureSimilarityScores(
     enrichedCandidates,
-    enrichedSeeds,
-    tasteProfile,
-    enrichedNegativeSeeds,
+    featureSeeds,
+    negativeFeatureSeeds,
   );
-
-  const positiveSynopsisSeeds: SynopsisSeed[] = enrichedSeeds
-    .filter((seed) => Boolean(seed.item.overview?.trim()))
-    .map((seed) => ({
-      item: {
-        id: seed.item.id,
-        mediaType: seed.item.mediaType,
-        overview: seed.item.overview,
-      },
-      weight: seed.weight,
-    }));
-
-  const negativeSynopsisSeeds: SynopsisSeed[] =
-    enrichedNegativeSeeds
-      .filter((seed) => Boolean(seed.item.overview?.trim()))
-      .map((seed) => ({
-        item: {
-          id: seed.item.id,
-          mediaType: seed.item.mediaType,
-          overview: seed.item.overview,
-        },
-        weight: seed.weight,
-      }));
 
   const synopsisSimilarity = getSynopsisSimilarityScores(
     enrichedCandidates,
     positiveSynopsisSeeds,
     negativeSynopsisSeeds,
   );
+
+  const trainingExamples: LearnedTrainingExample[] =
+    validTrainingDetails.map(({ item, signal }) => ({
+      item,
+      label: signal.label,
+      weight: signal.weight,
+      timestamp: signal.timestamp,
+    }));
 
   const learnedScores = getLearnedRankingScores(
     enrichedCandidates,
@@ -2053,7 +1786,12 @@ export async function getGorseInspiredRecommendations(
       : preliminary;
 
   const ranked: RankedCandidate[] = rankingPool.map(
-    ({ item, score, clusterSources }) => {
+    ({
+      item,
+      score,
+      explorationScore,
+      clusterSources,
+    }) => {
       const key = `${item.mediaType}:${item.id}`;
 
       const isEnriched =
@@ -2076,10 +1814,14 @@ export async function getGorseInspiredRecommendations(
       const enrichmentPenalty =
         isEnriched ? 0 : 14;
 
+      const calibratedBaseScore =
+        score * (1 - explorationProfile.rankingBlend) +
+        explorationScore * explorationProfile.rankingBlend;
+
       return {
         ...item,
         _score:
-          score +
+          calibratedBaseScore +
           similarity * 20 +
           synopsisScore * 22 +
           learnedBoost -
@@ -2109,16 +1851,133 @@ export async function getGorseInspiredRecommendations(
       expiresAt: Date.now() + CACHE_TTL,
       items: recommendations,
     });
-
-    pruneRecommendationCache();
   }
 
   return recommendations;
 }
 
-export function clearGorseInspiredRecommendationCache(): void {
-  recommendationCache.clear();
-  detailCache.clear();
-  detailInFlight.clear();
-  genreCache.clear();
+function getGenreAffinityScore(
+  item: RecommendationItem,
+  preferences: Map<number, number>,
+): number {
+  if (
+    !item.genre_ids ||
+    item.genre_ids.length === 0 ||
+    preferences.size === 0
+  ) {
+    return 0;
+  }
+
+  let total = 0;
+  let count = 0;
+
+  for (const genreId of item.genre_ids) {
+    const preference = preferences.get(genreId);
+
+    if (preference === undefined) continue;
+
+    total += preference;
+    count += 1;
+  }
+
+  return count > 0
+    ? total / count
+    : 0;
+}
+
+function diversify(
+  candidates: RankedCandidate[],
+  limit: number,
+  clusterStrengths: Map<string, number>,
+): RecommendationItem[] {
+  const selected: RankedCandidate[] = [];
+  const selectedKeys = new Set<string>();
+  const genreCounts = new Map<number, number>();
+  const clusterCounts = new Map<string, number>();
+
+  const remaining = [...candidates];
+
+  while (
+    selected.length < limit &&
+    remaining.length > 0
+  ) {
+    let bestIndex = -1;
+    let bestScore = -Infinity;
+
+    for (let index = 0; index < remaining.length; index++) {
+      const candidate = remaining[index];
+
+      const key =
+        `${candidate.mediaType}:${candidate.id}`;
+
+      if (selectedKeys.has(key)) continue;
+
+      let penalty = 0;
+
+      for (const genreId of candidate.genre_ids ?? []) {
+        const count = genreCounts.get(genreId) ?? 0;
+
+        if (count >= 3) {
+          penalty += 3.5;
+        } else if (count >= 2) {
+          penalty += 1.5;
+        }
+      }
+
+      let clusterBoost = 0;
+
+      for (const cluster of candidate._clusterSources) {
+        const count = clusterCounts.get(cluster) ?? 0;
+        const strength = clusterStrengths.get(cluster) ?? 0.5;
+
+        if (count === 0) {
+          clusterBoost += strength * 2.5;
+        } else if (count === 1) {
+          clusterBoost += strength * 0.7;
+        } else {
+          penalty += count * 1.2;
+        }
+      }
+
+      const adjustedScore =
+        candidate._score +
+        clusterBoost -
+        penalty;
+
+      if (adjustedScore > bestScore) {
+        bestScore = adjustedScore;
+        bestIndex = index;
+      }
+    }
+
+    if (bestIndex < 0) break;
+
+    const [chosen] = remaining.splice(bestIndex, 1);
+
+    if (!chosen) break;
+
+    selected.push(chosen);
+
+    selectedKeys.add(
+      `${chosen.mediaType}:${chosen.id}`,
+    );
+
+    for (const genreId of chosen.genre_ids ?? []) {
+      genreCounts.set(
+        genreId,
+        (genreCounts.get(genreId) ?? 0) + 1,
+      );
+    }
+
+    for (const cluster of chosen._clusterSources) {
+      clusterCounts.set(
+        cluster,
+        (clusterCounts.get(cluster) ?? 0) + 1,
+      );
+    }
+  }
+
+  return selected.map(
+    ({ _score, _clusterSources, ...item }) => item,
+  );
 }
