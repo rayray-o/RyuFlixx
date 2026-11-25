@@ -1,6 +1,7 @@
 
 "use client";
 
+import { useEffect, useState } from "react";
 import { Image, Chip, Button } from "@heroui/react";
 import {
   getImageUrl,
@@ -27,8 +28,65 @@ interface OverviewSectionProps {
   movie: AppendToResponse<MovieDetails, "videos"[], "movie">;
 }
 
+function parseReleaseDate(value?: string | null): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function hasReleased(date: Date | null): boolean {
+  if (!date) return false;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return date.getTime() <= today.getTime();
+}
+
+function formatReleaseDate(date: Date): string {
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
-  const releaseYear = new Date(movie.release_date).getFullYear();
+  const releaseDate = parseReleaseDate(movie.release_date);
+  const releaseYear = releaseDate?.getFullYear() ?? null;
+
+  const [releaseClock, setReleaseClock] = useState(0);
+
+  useEffect(() => {
+    if (!releaseDate) return;
+
+    const delay = releaseDate.getTime() - Date.now();
+
+    if (delay <= 0) return;
+
+    const timer = window.setTimeout(
+      () => setReleaseClock((value) => value + 1),
+      Math.min(delay + 100, 2147480000),
+    );
+
+    return () => window.clearTimeout(timer);
+  }, [movie.release_date, releaseClock]);
+
+  const isReleased = hasReleased(releaseDate);
 
   const posterImage = getImageUrl(movie.poster_path);
   const title = mutateMovieTitle(movie);
@@ -58,7 +116,6 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
           <div className="pointer-events-none absolute inset-0 bg-linear-to-br from-white/[0.045] via-transparent to-transparent" />
 
           <div className="relative md:grid md:grid-cols-[210px_1fr] md:gap-7 lg:grid-cols-[230px_1fr] lg:gap-9">
-            {/* Poster */}
             <div className="hidden md:block">
               <Image
                 isBlurred
@@ -73,9 +130,7 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
               />
             </div>
 
-            {/* Information */}
             <div className="flex min-w-0 flex-col gap-7">
-              {/* Header */}
               <div
                 id="title"
                 className="flex flex-col gap-3"
@@ -107,7 +162,6 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
                   {fullTitle}
                 </h1>
 
-                {/* Metadata */}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-foreground-500">
                   <div className="flex items-center gap-1.5">
                     <Clock />
@@ -116,12 +170,15 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
                     </span>
                   </div>
 
-                  <span aria-hidden="true">•</span>
-
-                  <div className="flex items-center gap-1.5">
-                    <Calendar />
-                    <span>{releaseYear}</span>
-                  </div>
+                  {releaseYear !== null && (
+                    <>
+                      <span aria-hidden="true">•</span>
+                      <div className="flex items-center gap-1.5">
+                        <Calendar />
+                        <span>{releaseYear}</span>
+                      </div>
+                    </>
+                  )}
 
                   <span aria-hidden="true">•</span>
 
@@ -133,30 +190,39 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
                 <Genres genres={movie.genres} />
               </div>
 
-              {/* Recommendation feedback */}
               <DetailFeedback
                 id={movie.id}
                 mediaType="movie"
               />
 
-              {/* Actions */}
               <div
                 id="action"
                 className="flex flex-wrap items-center gap-3"
               >
-                <Button
-                  as={Link}
-                  href={`/movie/${movie.id}/player`}
-                  color="primary"
-                  variant="shadow"
-                  size="lg"
-                  className="font-bold"
-                  startContent={
-                    <FaCirclePlay size={21} />
-                  }
-                >
-                  Watch Now
-                </Button>
+                {isReleased ? (
+                  <Button
+                    as={Link}
+                    href={`/movie/${movie.id}/player`}
+                    color="primary"
+                    variant="shadow"
+                    size="lg"
+                    className="font-bold"
+                    startContent={
+                      <FaCirclePlay size={21} />
+                    }
+                  >
+                    Watch Now
+                  </Button>
+                ) : (
+                  <div className="flex min-h-12 items-center gap-2 rounded-xl border border-warning/20 bg-warning/10 px-4 py-2 text-sm font-semibold text-warning">
+                    <Calendar size={18} />
+                    <span>
+                      {releaseDate
+                        ? `Releases ${formatReleaseDate(releaseDate)}`
+                        : "Release date TBA"}
+                    </span>
+                  </div>
+                )}
 
                 <Trailer
                   videos={movie.videos.results}
@@ -174,7 +240,6 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
                 </div>
               </div>
 
-              {/* Story */}
               <div
                 id="story"
                 className="max-w-4xl"
