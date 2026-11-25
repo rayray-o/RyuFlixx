@@ -38,6 +38,9 @@ import {
 import {
   buildInterestClusterSourceRequests,
 } from "@/utils/personalization/interest-cluster-retrieval";
+import {
+  applyTemporalInterestWeights,
+} from "@/utils/personalization/temporal-interest-engine";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const REQUEST_TIMEOUT = 6500;
@@ -548,7 +551,7 @@ async function mapWithConcurrency<T, R>(
 function getHistorySeeds(
   mediaType: ContentType,
 ): HistorySeed[] {
-  return getFeedbackVectors(mediaType)
+  const signals = getFeedbackVectors(mediaType)
     .filter((vector) => {
       if (vector.confidence < 0.12) {
         return false;
@@ -593,6 +596,17 @@ function getHistorySeeds(
       );
     })
     .slice(0, MAX_HISTORY_SEEDS);
+
+  return applyTemporalInterestWeights(
+    signals.map((signal) => ({
+      timestamp: signal.updatedAt,
+      weight: signal.score,
+      signal,
+    })),
+  ).map(({ signal, weight }) => ({
+    ...signal,
+    score: clamp(weight, 0.5, 12),
+  }));
 }
 
 /**
@@ -602,7 +616,7 @@ function getHistorySeeds(
 function getNegativeHistorySeeds(
   mediaType: ContentType,
 ): HistorySeed[] {
-  return getFeedbackVectors(mediaType)
+  const signals = getFeedbackVectors(mediaType)
     .filter(
       (vector) =>
         vector.explicitFeedback === "dislike" &&
@@ -630,10 +644,21 @@ function getNegativeHistorySeeds(
       );
     })
     .slice(0, MAX_NEGATIVE_SEEDS);
+
+  return applyTemporalInterestWeights(
+    signals.map((signal) => ({
+      timestamp: signal.updatedAt,
+      weight: signal.score,
+      signal,
+    })),
+  ).map(({ signal, weight }) => ({
+    ...signal,
+    score: clamp(weight, 0.75, 12),
+  }));
 }
 
 function getTrainingSignals(): TrainingSignal[] {
-  return getFeedbackVectors()
+  const signals = getFeedbackVectors()
     .filter((vector) => {
       if (vector.confidence < 0.16) {
         return false;
@@ -677,6 +702,16 @@ function getTrainingSignals(): TrainingSignal[] {
         new Date(a.timestamp).getTime(),
     )
     .slice(0, MAX_TRAINING_TITLES);
+
+  return applyTemporalInterestWeights(
+    signals.map((signal) => ({
+      ...signal,
+      weight: signal.weight,
+    })),
+  ).map(({ shortTermInfluence: _shortTermInfluence,
+           longTermInfluence: _longTermInfluence,
+           recencyInfluence: _recencyInfluence,
+           ...signal }) => signal);
 }
 
 /**
@@ -686,46 +721,23 @@ function getTrainingSignals(): TrainingSignal[] {
 function getPositiveFeatureTrainingSignals(
   trainingSignals: TrainingSignal[],
 ): TrainingSignal[] {
-  const now = Date.now();
-
   return trainingSignals
     .filter(
       (signal) =>
         signal.label >= 0.58 &&
         signal.weight >= 0.2,
     )
-    .map((signal) => {
-      const timestamp = new Date(signal.timestamp).getTime();
-
-      const ageDays = Number.isFinite(timestamp)
-        ? Math.max(0, (now - timestamp) / 86400000)
-        : 365;
-
-      const recency = Math.max(
-        0.35,
-        Math.pow(0.5, ageDays / 120),
-      );
-
-      const strength =
+    .map((signal) => ({
+      signal,
+      strength:
         signal.weight *
-        (0.65 + recency * 0.35) *
-        (0.5 + signal.label * 0.5);
-
-      return {
-        signal,
-        strength,
-        recency,
-      };
-    })
+        (0.5 + signal.label * 0.5),
+    }))
     .sort((a, b) => b.strength - a.strength)
     .slice(0, MAX_FEATURE_POSITIVE_SEEDS)
-    .map(({ signal, recency }) => ({
+    .map(({ signal }) => ({
       ...signal,
-      weight: clamp(
-        signal.weight * (0.65 + recency * 0.35),
-        0.2,
-        2.5,
-      ),
+      weight: clamp(signal.weight, 0.2, 2.5),
     }));
 }
 
