@@ -1,4 +1,3 @@
-
 "use client";
 
 import CinematicMediaCard from "@/components/sections/Home/CinematicMediaCard";
@@ -15,6 +14,10 @@ import {
   EXPLICIT_FEEDBACK_UPDATED_EVENT,
   getAllExplicitFeedback,
 } from "@/utils/personalization/explicit-feedback-engine";
+import {
+  getLocalWatchlist,
+  getWatchHistory,
+} from "@/utils/localStorage";
 import { PROFILE_UPDATED_EVENT } from "@/utils/profiles";
 import { Skeleton } from "@heroui/react";
 import { useEffect, useRef, useState } from "react";
@@ -31,16 +34,10 @@ type StoredTasteProfile = {
 function readProfile(): TasteProfile | null {
   try {
     const raw = window.localStorage.getItem(PROFILE_KEY);
-
     if (!raw) return null;
 
-    const parsed = JSON.parse(
-      raw,
-    ) as StoredTasteProfile | TasteProfile;
-
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
+    const parsed = JSON.parse(raw) as StoredTasteProfile | TasteProfile;
+    if (!parsed || typeof parsed !== "object") return null;
 
     if (
       "tasteProfile" in parsed &&
@@ -63,21 +60,40 @@ function readProfile(): TasteProfile | null {
   }
 }
 
+function profileHasSignals(profile: TasteProfile | null): boolean {
+  if (!profile?.preferences) return false;
+
+  return Object.values(profile.preferences).some((signals) =>
+    Object.values(signals ?? {}).some(
+      (score) => Number.isFinite(score) && score > 0,
+    ),
+  );
+}
+
+function hasPersonalizationData(): boolean {
+  try {
+    return (
+      getWatchHistory().length > 0 ||
+      getLocalWatchlist().length > 0 ||
+      profileHasSignals(readProfile()) ||
+      getAllExplicitFeedback().length > 0
+    );
+  } catch {
+    return profileHasSignals(readProfile());
+  }
+}
+
 interface ForYouProps {
   type: ContentType;
 }
 
 const ForYou: React.FC<ForYouProps> = ({ type }) => {
   const [items, setItems] = useState<
-    Awaited<
-      ReturnType<typeof getGorseInspiredRecommendations>
-    >
+    Awaited<ReturnType<typeof getGorseInspiredRecommendations>>
   >([]);
-
-  const [loading, setLoading] = useState(true);
-  const [loadedType, setLoadedType] =
-    useState<ContentType | null>(null);
-
+  const [eligible, setEligible] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadedType, setLoadedType] = useState<ContentType | null>(null);
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -85,23 +101,27 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
 
     const load = async () => {
       const requestId = ++requestIdRef.current;
+      const canPersonalize = hasPersonalizationData();
+
+      setEligible(canPersonalize);
+
+      if (!canPersonalize) {
+        setItems([]);
+        setLoadedType(type);
+        setLoading(false);
+        return;
+      }
 
       setLoading(true);
 
       try {
-        const recommendations =
-          await getGorseInspiredRecommendations(
-            type,
-            20,
-            readProfile(),
-          );
+        const recommendations = await getGorseInspiredRecommendations(
+          type,
+          20,
+          readProfile(),
+        );
 
-        if (
-          cancelled ||
-          requestId !== requestIdRef.current
-        ) {
-          return;
-        }
+        if (cancelled || requestId !== requestIdRef.current) return;
 
         const excluded = new Set(
           getAllExplicitFeedback()
@@ -110,37 +130,21 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
                 feedback.value === "dislike" ||
                 feedback.value === "not_interested",
             )
-            .map(
-              (feedback) =>
-                `${feedback.mediaType}:${feedback.id}`,
-            ),
+            .map((feedback) => `${feedback.mediaType}:${feedback.id}`),
         );
 
-        const visibleRecommendations =
-          recommendations.filter(
-            (item) =>
-              !excluded.has(
-                `${item.mediaType}:${item.id}`,
-              ),
-          );
+        const visible = recommendations.filter(
+          (item) => !excluded.has(`${item.mediaType}:${item.id}`),
+        );
 
-        setItems(visibleRecommendations.slice(0, 12));
+        setItems(visible.slice(0, 12));
         setLoadedType(type);
       } catch {
-        if (
-          cancelled ||
-          requestId !== requestIdRef.current
-        ) {
-          return;
-        }
-
+        if (cancelled || requestId !== requestIdRef.current) return;
         setItems([]);
         setLoadedType(type);
       } finally {
-        if (
-          !cancelled &&
-          requestId === requestIdRef.current
-        ) {
+        if (!cancelled && requestId === requestIdRef.current) {
           setLoading(false);
         }
       }
@@ -151,13 +155,13 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
       void load();
     };
 
-    const handleStorageChange = (
-      event: StorageEvent,
-    ) => {
+    const handleStorageChange = (event: StorageEvent) => {
       if (
         event.key === null ||
         event.key === PROFILE_KEY ||
-        event.key === "ryuflix_active_profile_v1"
+        event.key === "ryuflix_active_profile_v1" ||
+        event.key === "ryuflix_watch_history_v1" ||
+        event.key === "ryuflix_watchlist_v1"
       ) {
         refresh();
       }
@@ -165,59 +169,43 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
 
     void load();
 
-    window.addEventListener(
-      PROFILE_UPDATED_EVENT,
-      refresh,
-    );
-
-    window.addEventListener(
-      EXPLICIT_FEEDBACK_UPDATED_EVENT,
-      refresh,
-    );
-
-    window.addEventListener(
-      "storage",
-      handleStorageChange,
-    );
+    window.addEventListener(PROFILE_UPDATED_EVENT, refresh);
+    window.addEventListener(EXPLICIT_FEEDBACK_UPDATED_EVENT, refresh);
+    window.addEventListener("storage", handleStorageChange);
+    window.addEventListener("ryuflix-history-updated", refresh);
+    window.addEventListener("ryuflix-watchlist-updated", refresh);
 
     return () => {
       cancelled = true;
       requestIdRef.current += 1;
-
-      window.removeEventListener(
-        PROFILE_UPDATED_EVENT,
-        refresh,
-      );
-
-      window.removeEventListener(
-        EXPLICIT_FEEDBACK_UPDATED_EVENT,
-        refresh,
-      );
-
-      window.removeEventListener(
-        "storage",
-        handleStorageChange,
-      );
+      window.removeEventListener(PROFILE_UPDATED_EVENT, refresh);
+      window.removeEventListener(EXPLICIT_FEEDBACK_UPDATED_EVENT, refresh);
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("ryuflix-history-updated", refresh);
+      window.removeEventListener("ryuflix-watchlist-updated", refresh);
     };
   }, [type]);
 
-  // Never show the previous media type while the new one loads.
-  const showingCurrentType = loadedType === type;
+  // Cold-start users should not see a For You heading, skeleton,
+  // or "temporarily unavailable" placeholder at all.
+  if (!eligible) return null;
 
-  const showSkeleton =
-    !showingCurrentType || loading;
+  const showingCurrentType = loadedType === type;
+  const showSkeleton = !showingCurrentType || loading;
+
+  // If a user has data but the recommender cannot produce candidates,
+  // hide this shelf instead of showing an error-shaped empty row.
+  if (!showSkeleton && items.length === 0) return null;
 
   return (
     <section className="relative py-5 md:py-7 lg:py-9">
       <div className="mb-4">
-        <SectionTitle>
-          For You
-        </SectionTitle>
+        <SectionTitle>For You</SectionTitle>
       </div>
 
       <div className="overflow-hidden">
         {showSkeleton ? (
-          <div className="flex gap-3 overflow-hidden pb-3 md:gap-4 lg:gap-5">
+          <div className="flex gap-3 overflow-hidden pb-3 md:gap-4 md:gap-5 lg:gap-5">
             {Array.from({ length: 4 }).map((_, index) => (
               <Skeleton
                 key={`${type}-${index}`}
@@ -225,7 +213,7 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
               />
             ))}
           </div>
-        ) : items.length > 0 ? (
+        ) : (
           <Carousel
             classNames={{
               wrapper: "justify-start",
@@ -237,10 +225,7 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
                 key={`${item.mediaType}-${item.id}`}
                 className="embla__slide flex min-h-fit max-w-fit flex-col items-stretch px-1 py-2"
               >
-                <CinematicMediaCard
-                  media={item}
-                />
-
+                <CinematicMediaCard media={item} />
                 <RecommendationFeedback
                   id={item.id}
                   mediaType={item.mediaType}
@@ -248,12 +233,6 @@ const ForYou: React.FC<ForYouProps> = ({ type }) => {
               </div>
             ))}
           </Carousel>
-        ) : (
-          <div className="flex h-32 items-center justify-center rounded-xl bg-white/[0.035]">
-            <span className="text-sm text-white/45">
-              Recommendations are temporarily unavailable.
-            </span>
-          </div>
         )}
       </div>
     </section>
