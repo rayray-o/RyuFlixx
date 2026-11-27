@@ -10,8 +10,9 @@ import {
 import {
   getBehavioralSignal,
 } from "@/utils/personalization/behavioral-memory";
-import { 
-  getGorseInspiredRecommendations } from "@/utils/personalization/gorse-inspired-engine";
+import {
+  getGorseInspiredRecommendations,
+} from "@/utils/personalization/gorse-inspired-engine";
 import type { RecommendationItem } from "@/utils/personalization/recommendation-engine";
 import type { TasteProfile } from "@/utils/personalization/taste-engine";
 
@@ -745,13 +746,14 @@ function fingerprint(
 /**
  * Generates personalized homepage rows.
  *
- * The Gorse-inspired recommender supplies a learned ranking
- * across the candidate catalogue. Each shelf then applies its
- * own genre/language/country constraint, while the page selector
- * prevents the same titles from dominating multiple shelves.
+ * When suppliedRecommendations is provided, the shared
+ * homepage recommendation service has already generated
+ * the Gorse recommendation pool. Reuse it instead of
+ * running the recommendation algorithm a second time.
  */
 export async function generateHomepageRows(
   type: ContentType,
+  suppliedRecommendations?: RecommendationItem[],
 ): Promise<HomepageRow[]> {
   const profile = getTasteProfile();
 
@@ -771,6 +773,7 @@ export async function generateHomepageRows(
   }
 
   const personalizedPool =
+    suppliedRecommendations ??
     await getGorseInspiredRecommendations(
       type,
       30,
