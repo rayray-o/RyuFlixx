@@ -931,3 +931,144 @@ export async function generateHomepageRows(
 export function clearHomepageGenerationCache(): void {
   cache.clear();
 }
+export type HomepageRecommendationSnapshot = {
+  eligible: boolean;
+  forYou: RecommendationItem[];
+  rows: HomepageRow[];
+};
+
+type HomepageRecommendationListener = (
+  snapshot: HomepageRecommendationSnapshot,
+) => void;
+
+type HomepageRecommendationCacheEntry = {
+  expiresAt: number;
+  snapshot: HomepageRecommendationSnapshot;
+};
+
+const homepageRecommendationCache = new Map<
+  ContentType,
+  HomepageRecommendationCacheEntry
+>();
+
+const homepageRecommendationInFlight = new Map<
+  ContentType,
+  Promise<void>
+>();
+
+const homepageRecommendationListeners = new Map<
+  ContentType,
+  Set<HomepageRecommendationListener>
+>();
+
+const HOMEPAGE_RECOMMENDATION_TTL = 5 * 60 * 1000;
+
+function publishHomepageRecommendations(
+  type: ContentType,
+  snapshot: HomepageRecommendationSnapshot,
+): void {
+  homepageRecommendationCache.set(type, {
+    expiresAt: Date.now() + HOMEPAGE_RECOMMENDATION_TTL,
+    snapshot,
+  });
+
+  const listeners = homepageRecommendationListeners.get(type);
+
+  listeners?.forEach((listener) => {
+    try {
+      listener(snapshot);
+    } catch {
+      // One component must not interrupt other subscribers.
+    }
+  });
+}
+
+export function subscribeHomepageRecommendations(
+  type: ContentType,
+  listener: HomepageRecommendationListener,
+): () => void {
+  let listeners = homepageRecommendationListeners.get(type);
+
+  if (!listeners) {
+    listeners = new Set();
+    homepageRecommendationListeners.set(type, listeners);
+  }
+
+  listeners.add(listener);
+
+  const cached = homepageRecommendationCache.get(type);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    listener(cached.snapshot);
+  } else {
+    void refreshHomepageRecommendations(type);
+  }
+
+  return () => {
+    listeners?.delete(listener);
+
+    if (listeners?.size === 0) {
+      homepageRecommendationListeners.delete(type);
+    }
+  };
+}
+
+export function refreshHomepageRecommendations(
+  type: ContentType,
+): Promise<void> {
+  const existing = homepageRecommendationInFlight.get(type);
+
+  if (existing) return existing;
+
+  const job = (async () => {
+    try {
+      const profile = getTasteProfile();
+
+      // Run the recommendation engine once.
+      const recommendations =
+        await getGorseInspiredRecommendations(
+          type,
+          30,
+          profile,
+        );
+
+      // Reuse that exact recommendation pool for generated rows.
+      const rows = await generateHomepageRows(
+        type,
+        recommendations,
+      );
+
+      const eligible =
+        recommendations.length > 0 &&
+        (getHistoryIds().size > 0 ||
+          profile !== null);
+
+      publishHomepageRecommendations(type, {
+        eligible,
+        forYou: recommendations.slice(0, 12),
+        rows,
+      });
+    } catch (error) {
+      console.error(
+        "[RyuFlixx] Homepage recommendations failed:",
+        error,
+      );
+
+      const cached = homepageRecommendationCache.get(type);
+
+      if (cached) {
+        publishHomepageRecommendations(type, cached.snapshot);
+      }
+    }
+  })();
+
+  homepageRecommendationInFlight.set(type, job);
+
+  void job.finally(() => {
+    if (homepageRecommendationInFlight.get(type) === job) {
+      homepageRecommendationInFlight.delete(type);
+    }
+  });
+
+  return job;
+               }
