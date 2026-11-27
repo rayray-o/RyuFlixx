@@ -958,8 +958,20 @@ type HomepageRecommendationCacheEntry = {
   snapshot: HomepageRecommendationSnapshot;
 };
 
+type PersistedHomepageEntry =
+  HomepageRecommendationCacheEntry & {
+    key: string;
+  };
+
 const HOMEPAGE_RECOMMENDATION_TTL = 5 * 60 * 1000;
-const HOMEPAGE_STORAGE_KEY = "ryuflix_homepage_recommendations_v2";
+const HOMEPAGE_STORAGE_KEY =
+  "ryuflix_homepage_recommendations_v3";
+
+const HOMEPAGE_DB_NAME =
+  "ryuflix-homepage-recommendations";
+
+const HOMEPAGE_DB_VERSION = 1;
+const HOMEPAGE_DB_STORE = "snapshots";
 
 const homepageRecommendationCache = new Map<
   string,
@@ -976,71 +988,243 @@ const homepageRecommendationListeners = new Map<
   Set<HomepageRecommendationListener>
 >();
 
+let homepageDatabasePromise:
+  | Promise<IDBDatabase | null>
+  | null = null;
+
 function getHomepageCacheKey(type: ContentType): string {
   return `${getProfileStorageKey(HOMEPAGE_STORAGE_KEY)}:${type}`;
 }
 
-function readPersistedHomepageSnapshot(
-  type: ContentType,
+function openHomepageDatabase(): Promise<IDBDatabase | null> {
+  if (homepageDatabasePromise) return homepageDatabasePromise;
+
+  homepageDatabasePromise = new Promise((resolve) => {
+    if (typeof indexedDB === "undefined") {
+      resolve(null);
+      return;
+    }
+
+    try {
+      const request = indexedDB.open(
+        HOMEPAGE_DB_NAME,
+        HOMEPAGE_DB_VERSION,
+      );
+
+      request.onupgradeneeded = () => {
+        const database = request.result;
+
+        if (!database.objectStoreNames.contains(HOMEPAGE_DB_STORE)) {
+          database.createObjectStore(HOMEPAGE_DB_STORE, {
+            keyPath: "key",
+          });
+        }
+      };
+
+      request.onsuccess = () => {
+        const database = request.result;
+
+        database.onversionchange = () => {
+          database.close();
+          homepageDatabasePromise = null;
+        };
+
+        resolve(database);
+      };
+
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+
+  return homepageDatabasePromise;
+}
+
+function isValidHomepageEntry(
+  value: unknown,
+): value is HomepageRecommendationCacheEntry {
+  if (!value || typeof value !== "object") return false;
+
+  const entry =
+    value as Partial<HomepageRecommendationCacheEntry>;
+
+  const snapshot = entry.snapshot as
+    | Partial<HomepageRecommendationSnapshot>
+    | undefined;
+
+  return (
+    typeof entry.expiresAt === "number" &&
+    !!snapshot &&
+    typeof snapshot.eligible === "boolean" &&
+    Array.isArray(snapshot.forYou) &&
+    Array.isArray(snapshot.rows)
+  );
+}
+
+function readLocalHomepageSnapshot(
+  key: string,
 ): HomepageRecommendationCacheEntry | null {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(
-      getHomepageCacheKey(type),
-    );
-
+    const raw = window.localStorage.getItem(key);
     if (!raw) return null;
 
     const parsed: unknown = JSON.parse(raw);
 
-    if (!parsed || typeof parsed !== "object") return null;
+    return isValidHomepageEntry(parsed) ? parsed : null;
+  } catch (error) {
+    console.warn(
+      "[RyuFlixx] Could not read local homepage cache:",
+      error,
+    );
 
-    const entry = parsed as Partial<HomepageRecommendationCacheEntry>;
-    const snapshot = entry.snapshot as
-      | Partial<HomepageRecommendationSnapshot>
-      | undefined;
+    return null;
+  }
+}
 
-    if (
-      typeof entry.expiresAt !== "number" ||
-      !snapshot ||
-      typeof snapshot.eligible !== "boolean" ||
-      !Array.isArray(snapshot.forYou) ||
-      !Array.isArray(snapshot.rows)
-    ) {
-      return null;
-    }
+async function readIndexedDbHomepageSnapshot(
+  key: string,
+): Promise<HomepageRecommendationCacheEntry | null> {
+  try {
+    const database = await openHomepageDatabase();
+    if (!database) return null;
 
-    return {
-      expiresAt: entry.expiresAt,
-      snapshot: snapshot as HomepageRecommendationSnapshot,
-    };
+    return await new Promise((resolve) => {
+      const transaction = database.transaction(
+        HOMEPAGE_DB_STORE,
+        "readonly",
+      );
+
+      const request = transaction
+        .objectStore(HOMEPAGE_DB_STORE)
+        .get(key);
+
+      request.onsuccess = () => {
+        const result = request.result as
+          | PersistedHomepageEntry
+          | undefined;
+
+        if (!result) {
+          resolve(null);
+          return;
+        }
+
+        const entry: HomepageRecommendationCacheEntry = {
+          expiresAt: result.expiresAt,
+          snapshot: result.snapshot,
+        };
+
+        resolve(
+          isValidHomepageEntry(entry) ? entry : null,
+        );
+      };
+
+      request.onerror = () => resolve(null);
+      transaction.onerror = () => resolve(null);
+    });
   } catch {
     return null;
   }
 }
 
-function getHomepageSnapshot(
+/**
+ * Restore memory first, then localStorage, then IndexedDB.
+ * Expired snapshots are deliberately accepted as stale content.
+ */
+async function getHomepageSnapshot(
   type: ContentType,
-): HomepageRecommendationCacheEntry | null {
+): Promise<HomepageRecommendationCacheEntry | null> {
   const key = getHomepageCacheKey(type);
+
   const memoryCached = homepageRecommendationCache.get(key);
 
   if (memoryCached) return memoryCached;
 
-  const persisted = readPersistedHomepageSnapshot(type);
+  const localCached = readLocalHomepageSnapshot(key);
 
-  if (persisted) {
-    homepageRecommendationCache.set(key, persisted);
+  if (localCached) {
+    homepageRecommendationCache.set(key, localCached);
+    return localCached;
   }
 
-  return persisted;
+  const indexedDbCached =
+    await readIndexedDbHomepageSnapshot(key);
+
+  if (indexedDbCached) {
+    homepageRecommendationCache.set(key, indexedDbCached);
+
+    // Repair the faster localStorage copy when possible.
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          key,
+          JSON.stringify(indexedDbCached),
+        );
+      }
+    } catch {
+      // IndexedDB remains the durable copy.
+    }
+  }
+
+  return indexedDbCached;
 }
 
-function publishHomepageRecommendations(
+async function persistHomepageSnapshot(
+  key: string,
+  entry: HomepageRecommendationCacheEntry,
+): Promise<void> {
+  const serialized = JSON.stringify(entry);
+
+  // Fast restore path.
+  try {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(key, serialized);
+    }
+  } catch (error) {
+    console.warn(
+      "[RyuFlixx] localStorage homepage cache write failed; using IndexedDB:",
+      error,
+    );
+  }
+
+  // Durable backup, including when localStorage is full.
+  try {
+    const database = await openHomepageDatabase();
+    if (!database) return;
+
+    await new Promise<void>((resolve) => {
+      const transaction = database.transaction(
+        HOMEPAGE_DB_STORE,
+        "readwrite",
+      );
+
+      const record: PersistedHomepageEntry = {
+        key,
+        expiresAt: entry.expiresAt,
+        snapshot: entry.snapshot,
+      };
+
+      transaction.objectStore(HOMEPAGE_DB_STORE).put(record);
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => resolve();
+      transaction.onabort = () => resolve();
+    });
+  } catch (error) {
+    console.warn(
+      "[RyuFlixx] IndexedDB homepage cache write failed:",
+      error,
+    );
+  }
+}
+
+async function publishHomepageRecommendations(
   type: ContentType,
   snapshot: HomepageRecommendationSnapshot,
-): void {
+): Promise<void> {
   const key = getHomepageCacheKey(type);
 
   const entry: HomepageRecommendationCacheEntry = {
@@ -1050,14 +1234,8 @@ function publishHomepageRecommendations(
 
   homepageRecommendationCache.set(key, entry);
 
-  // Persist the last successful homepage across browser refreshes.
-  try {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(key, JSON.stringify(entry));
-    }
-  } catch {
-    // The in-memory result remains available if storage is full.
-  }
+  // Finish saving before considering the generation job complete.
+  await persistHomepageSnapshot(key, entry);
 
   const listeners = homepageRecommendationListeners.get(key);
 
@@ -1065,7 +1243,7 @@ function publishHomepageRecommendations(
     try {
       listener(snapshot);
     } catch {
-      // One subscriber must not interrupt the others.
+      // One subscriber must not interrupt other subscribers.
     }
   });
 }
@@ -1085,23 +1263,37 @@ export function subscribeHomepageRecommendations(
 
   listeners.add(listener);
 
-  const cached = getHomepageSnapshot(type);
+  let active = true;
 
-  // Immediately restore cached recommendations, even if stale.
-  if (cached) {
-    try {
-      listener(cached.snapshot);
-    } catch {
-      // Ignore subscriber errors.
+  const restore = async () => {
+    const cached = await getHomepageSnapshot(type);
+
+    if (!active) return;
+
+    if (cached) {
+      try {
+        listener(cached.snapshot);
+      } catch {
+        // Ignore subscriber errors.
+      }
+
+      // Keep stale content visible while refreshing.
+      if (cached.expiresAt <= Date.now()) {
+        void refreshHomepageRecommendations(type);
+      }
+
+      return;
     }
-  }
 
-  // Refresh expired data in the background without blanking it.
-  if (!cached || cached.expiresAt <= Date.now()) {
+    // First visit or no saved snapshot.
     void refreshHomepageRecommendations(type);
-  }
+  };
+
+  void restore();
 
   return () => {
+    active = false;
+
     listeners?.delete(listener);
 
     if (listeners?.size === 0) {
@@ -1114,6 +1306,7 @@ export function refreshHomepageRecommendations(
   type: ContentType,
 ): Promise<void> {
   const key = getHomepageCacheKey(type);
+
   const existing = homepageRecommendationInFlight.get(key);
 
   if (existing) return existing;
@@ -1129,10 +1322,10 @@ export function refreshHomepageRecommendations(
           profile,
         );
 
-      const previous = getHomepageSnapshot(type);
+      const previous = await getHomepageSnapshot(type);
 
-      // Never erase a working homepage because of a temporary
-      // empty recommendation response.
+      // Never replace useful saved results with a temporary
+      // empty response from the recommendation engine.
       if (
         recommendations.length === 0 &&
         previous &&
@@ -1144,38 +1337,46 @@ export function refreshHomepageRecommendations(
         return;
       }
 
-      // Reuse the exact same recommendation pool for generated rows.
       const rows = await generateHomepageRows(
         type,
         recommendations,
       );
 
-      // Explicit feedback also establishes a user's interests.
-      const hasExplicitFeedback = getAllExplicitFeedback().some(
-        (feedback) => feedback.mediaType === type,
-      );
-
-      const eligible =
-        recommendations.length > 0 &&
-        (
-          getHistoryIds().size > 0 ||
-          profile !== null ||
-          hasExplicitFeedback
+      const hasExplicitFeedback =
+        getAllExplicitFeedback().some(
+          (feedback) => feedback.mediaType === type,
         );
 
-      publishHomepageRecommendations(type, {
-        eligible,
-        forYou: recommendations.slice(0, 12),
-        rows,
-      });
+      const hasUserSignals =
+        getHistoryIds().size > 0 ||
+        getLocalWatchlist().length > 0 ||
+        profile !== null ||
+        hasExplicitFeedback;
+
+      const snapshot: HomepageRecommendationSnapshot = {
+        eligible:
+          hasUserSignals ||
+          Boolean(previous?.snapshot.eligible),
+
+        forYou:
+          recommendations.length > 0
+            ? recommendations.slice(0, 12)
+            : previous?.snapshot.forYou ?? [],
+
+        rows:
+          rows.length > 0
+            ? rows
+            : previous?.snapshot.rows ?? [],
+      };
+
+      await publishHomepageRecommendations(type, snapshot);
     } catch (error) {
       console.error(
         "[RyuFlixx] Homepage recommendations failed:",
         error,
       );
 
-      // Keep the previous snapshot. Never clear the homepage
-      // because a background refresh failed.
+      // Leave the last successful snapshot untouched.
     }
   })();
 
