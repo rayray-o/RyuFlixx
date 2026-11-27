@@ -1,65 +1,229 @@
 
 "use client";
 
+import { env } from "@/utils/env";
 import type { ContentType } from "@/types";
 import {
   getWatchHistory,
   getLocalWatchlist,
 } from "@/utils/localStorage";
 import {
-  getAllExplicitFeedback,
-} from "@/utils/personalization/explicit-feedback-engine";
-import {
   getGorseInspiredRecommendations,
 } from "@/utils/personalization/gorse-inspired-engine";
-import {
-  generateHomepageRows,
-  clearHomepageGenerationCache,
-  type HomepageRow,
-} from "@/utils/personalization/homepage-generation-engine";
 import type { RecommendationItem } from "@/utils/personalization/recommendation-engine";
 import type { TasteProfile } from "@/utils/personalization/taste-engine";
 
-const DB_NAME = "ryuflix-homepage-cache";
-const DB_VERSION = 1;
-const STORE_NAME = "snapshots";
+const BASE_URL = "https://api.themoviedb.org/3";
+const CACHE_TTL = 10 * 60 * 1000;
+const MAX_ROWS = 9;
+const ROW_SIZE = 18;
+const REQUEST_TIMEOUT = 5000;
 
-const SNAPSHOT_TTL = 15 * 60 * 1000;
-const MIN_REFRESH_INTERVAL = 90 * 1000;
-const EVENT_DEBOUNCE = 1800;
+type RawItem = Record<string, unknown>;
 
-type HomepageSnapshot = {
-  type: ContentType;
-  eligible: boolean;
-  forYou: RecommendationItem[];
+export type HomepageRow = {
+  id: string;
+  title: string;
+  reason: string;
+  items: RecommendationItem[];
+  affinity: number;
+  family: "genre" | "language" | "country" | "discovery";
+};
+
+type RowCandidate = {
+  id: string;
+  title: string;
+  reason: string;
+  family: HomepageRow["family"];
+  affinity: number;
+  params: Record<string, string>;
+};
+
+type TasteSignal = {
+  name: string;
+  score: number;
+  id?: number;
+};
+
+type InterestData = {
+  genres: TasteSignal[];
+  languages: TasteSignal[];
+  countries: TasteSignal[];
+};
+
+type CachedRows = {
+  expiresAt: number;
   rows: HomepageRow[];
-  fingerprint: string;
-  generatedAt: number;
 };
 
-type SnapshotListener = (
-  snapshot: HomepageSnapshot,
-) => void;
+const cache = new Map<string, CachedRows>();
+const inFlight = new Map<string, Promise<HomepageRow[]>>();
 
-type StoredSnapshot = {
-  key: string;
-  snapshot: HomepageSnapshot;
+const MOVIE_GENRES: Record<string, number> = {
+  Action: 28,
+  Adventure: 12,
+  Animation: 16,
+  Comedy: 35,
+  Crime: 80,
+  Documentary: 99,
+  Drama: 18,
+  Family: 10751,
+  Fantasy: 14,
+  History: 36,
+  Horror: 27,
+  Music: 10402,
+  Mystery: 9648,
+  Romance: 10749,
+  "Science Fiction": 878,
+  Thriller: 53,
+  War: 10752,
+  Western: 37,
 };
 
-const memoryCache = new Map<string, HomepageSnapshot>();
-const inFlight = new Map<string, Promise<void>>();
-const listeners = new Map<
-  ContentType,
-  Set<SnapshotListener>
->();
-const refreshTimers = new Map<string, number>();
+const TV_GENRES: Record<string, number> = {
+  Action: 10759,
+  Adventure: 10759,
+  Animation: 16,
+  Comedy: 35,
+  Crime: 80,
+  Documentary: 99,
+  Drama: 18,
+  Family: 10751,
+  Fantasy: 10765,
+  History: 10768,
+  Horror: 9648,
+  Music: 10463,
+  Mystery: 9648,
+  Romance: 18,
+  "Science Fiction": 10765,
+  Thriller: 9648,
+  War: 10768,
+  Western: 37,
+};
 
-let databasePromise: Promise<IDBDatabase | null> | null =
-  null;
+const GENRE_NAMES: Record<number, string> = {
+  28: "Action",
+  12: "Adventure",
+  16: "Animation",
+  35: "Comedy",
+  80: "Crime",
+  99: "Documentary",
+  18: "Drama",
+  10751: "Family",
+  14: "Fantasy",
+  36: "History",
+  27: "Horror",
+  10402: "Music",
+  9648: "Mystery",
+  10749: "Romance",
+  878: "Science Fiction",
+  10770: "TV Movie",
+  53: "Thriller",
+  10752: "War",
+  37: "Western",
+  10759: "Action & Adventure",
+  10765: "Sci-Fi & Fantasy",
+  10768: "War & Politics",
+  10463: "Music",
+};
 
-function readProfile(): TasteProfile | null {
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English",
+  hi: "Hindi",
+  ko: "Korean",
+  ja: "Japanese",
+  ta: "Tamil",
+  te: "Telugu",
+  ml: "Malayalam",
+  bn: "Bengali",
+  fr: "French",
+  es: "Spanish",
+  de: "German",
+  it: "Italian",
+  zh: "Chinese",
+  th: "Thai",
+  tr: "Turkish",
+  ar: "Arabic",
+  ru: "Russian",
+  pt: "Portuguese",
+};
+
+const LANGUAGE_CODES: Record<string, string> = {
+  english: "en",
+  hindi: "hi",
+  korean: "ko",
+  japanese: "ja",
+  tamil: "ta",
+  telugu: "te",
+  malayalam: "ml",
+  bengali: "bn",
+  french: "fr",
+  spanish: "es",
+  german: "de",
+  italian: "it",
+  chinese: "zh",
+  thai: "th",
+  turkish: "tr",
+  arabic: "ar",
+  russian: "ru",
+  portuguese: "pt",
+};
+
+const COUNTRY_NAMES: Record<string, string> = {
+  US: "United States",
+  IN: "India",
+  KR: "South Korea",
+  JP: "Japan",
+  GB: "United Kingdom",
+  FR: "France",
+  DE: "Germany",
+  ES: "Spain",
+  IT: "Italy",
+  CN: "China",
+  TH: "Thailand",
+  TR: "Turkey",
+  CA: "Canada",
+  AU: "Australia",
+};
+
+const COUNTRY_CODES: Record<string, string> = {
+  "united states": "US",
+  usa: "US",
+  america: "US",
+  india: "IN",
+  "south korea": "KR",
+  korea: "KR",
+  japan: "JP",
+  "united kingdom": "GB",
+  uk: "GB",
+  france: "FR",
+  germany: "DE",
+  spain: "ES",
+  italy: "IT",
+  china: "CN",
+  thailand: "TH",
+  turkey: "TR",
+  canada: "CA",
+  australia: "AU",
+};
+
+function normalize(value: string): string {
+  return value.toLowerCase().trim();
+}
+
+function clamp(
+  value: number,
+  min: number,
+  max: number,
+): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getTasteProfile(): TasteProfile | null {
+  if (typeof window === "undefined") return null;
+
   try {
-    const raw = localStorage.getItem(
+    const raw = window.localStorage.getItem(
       "ryuflix_taste_profile",
     );
 
@@ -68,8 +232,9 @@ function readProfile(): TasteProfile | null {
     const parsed = JSON.parse(raw);
 
     if (
-      parsed?.tasteProfile &&
-      typeof parsed.tasteProfile === "object"
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.tasteProfile
     ) {
       return parsed.tasteProfile as TasteProfile;
     }
@@ -88,395 +253,674 @@ function readProfile(): TasteProfile | null {
   }
 }
 
-function hasTasteSignals(
-  profile: TasteProfile | null,
-): boolean {
-  if (!profile) return false;
+function addSignal(
+  map: Map<string, TasteSignal>,
+  name: string,
+  score: number,
+  id?: number,
+): void {
+  const cleanName = name.trim();
 
-  if (
-    profile.topGenres?.length ||
-    profile.topKeywords?.length ||
-    profile.topDirectors?.length ||
-    profile.topActors?.length
-  ) {
-    return true;
+  if (!cleanName || !Number.isFinite(score) || score <= 0) {
+    return;
   }
 
-  return Object.values(
-    profile.preferences ?? {},
-  ).some((signals) =>
-    Object.values(signals ?? {}).some(
-      (score) =>
-        typeof score === "number" &&
-        Number.isFinite(score) &&
-        score > 0,
-    ),
+  const key = normalize(cleanName);
+  const existing = map.get(key);
+
+  if (existing) {
+    existing.score += score;
+
+    if (!existing.id && id) {
+      existing.id = id;
+    }
+
+    return;
+  }
+
+  map.set(key, {
+    name: cleanName,
+    score,
+    id,
+  });
+}
+
+function getProfileInterests(
+  profile: TasteProfile | null,
+): InterestData {
+  const genres = new Map<string, TasteSignal>();
+  const languages = new Map<string, TasteSignal>();
+  const countries = new Map<string, TasteSignal>();
+
+  if (!profile) {
+    return {
+      genres: [],
+      languages: [],
+      countries: [],
+    };
+  }
+
+  // Read the actual weighted preference maps.
+  for (const [name, score] of Object.entries(
+    profile.preferences?.genres ?? {},
+  )) {
+    addSignal(genres, name, score);
+  }
+
+  for (const [name, score] of Object.entries(
+    profile.preferences?.languages ?? {},
+  )) {
+    addSignal(languages, name, score);
+  }
+
+  for (const [name, score] of Object.entries(
+    profile.preferences?.countries ?? {},
+  )) {
+    addSignal(countries, name, score);
+  }
+
+  // Also read the profile's explicit top-signal arrays.
+  // The old generator completely ignored these.
+  for (const item of profile.topGenres ?? []) {
+    addSignal(
+      genres,
+      item.name,
+      item.score,
+      item.id,
+    );
+  }
+
+  for (const item of profile.topKeywords ?? []) {
+    // Keywords are useful ranking signals but aren't
+    // directly translated into TMDB discover shelves.
+    void item;
+  }
+
+  return {
+    genres: [...genres.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8),
+    languages: [...languages.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5),
+    countries: [...countries.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5),
+  };
+}
+
+/**
+ * When the taste profile is incomplete, infer interests
+ * directly from the already-ranked Gorse recommendation pool.
+ *
+ * This avoids another batch of TMDB detail requests.
+ */
+function enrichInterestsFromRecommendations(
+  interests: InterestData,
+  recommendations: RecommendationItem[],
+  type: ContentType,
+): InterestData {
+  const genres = new Map<string, TasteSignal>();
+  const languages = new Map<string, TasteSignal>();
+  const countries = new Map<string, TasteSignal>();
+
+  for (const item of interests.genres) {
+    addSignal(genres, item.name, item.score, item.id);
+  }
+
+  for (const item of interests.languages) {
+    addSignal(languages, item.name, item.score);
+  }
+
+  for (const item of interests.countries) {
+    addSignal(countries, item.name, item.score);
+  }
+
+  recommendations.forEach((item, index) => {
+    if (item.mediaType !== type) return;
+
+    // Higher-ranked recommendations contribute more.
+    const weight = Math.max(
+      0.25,
+      1.5 - index * 0.035,
+    );
+
+    for (const genreId of item.genre_ids ?? []) {
+      const name = GENRE_NAMES[genreId];
+
+      if (name) {
+        addSignal(genres, name, weight, genreId);
+      }
+    }
+
+    if (item.original_language) {
+      addSignal(
+        languages,
+        item.original_language.toLowerCase(),
+        weight,
+      );
+    }
+  });
+
+  return {
+    genres: [...genres.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8),
+    languages: [...languages.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5),
+    countries: [...countries.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5),
+  };
+}
+
+function getGenreId(
+  type: ContentType,
+  name: string,
+  knownId?: number,
+): number | null {
+  if (knownId && knownId > 0) {
+    return knownId;
+  }
+
+  const genres =
+    type === "movie"
+      ? MOVIE_GENRES
+      : TV_GENRES;
+
+  const normalized = normalize(name);
+
+  const match = Object.entries(genres).find(
+    ([genre]) => normalize(genre) === normalized,
+  );
+
+  return match ? match[1] : null;
+}
+
+function getLanguageCode(name: string): string | null {
+  const normalized = normalize(name);
+
+  if (/^[a-z]{2}$/.test(normalized)) {
+    return normalized;
+  }
+
+  return LANGUAGE_CODES[normalized] ?? null;
+}
+
+function getCountryCode(name: string): string | null {
+  const normalized = normalize(name);
+
+  if (/^[a-z]{2}$/.test(normalized)) {
+    return normalized.toUpperCase();
+  }
+
+  return COUNTRY_CODES[normalized] ?? null;
+}
+
+function buildRowCandidates(
+  type: ContentType,
+  interests: InterestData,
+): RowCandidate[] {
+  const rows: RowCandidate[] = [];
+  const seen = new Set<string>();
+
+  const add = (candidate: RowCandidate) => {
+    if (seen.has(candidate.id)) return;
+
+    seen.add(candidate.id);
+    rows.push(candidate);
+  };
+
+  for (const genre of interests.genres) {
+    const id = getGenreId(
+      type,
+      genre.name,
+      genre.id,
+    );
+
+    if (!id) continue;
+
+    add({
+      id: `personalized-genre-${id}`,
+      title: `More ${genre.name}`,
+      reason: `Based on your interest in ${genre.name.toLowerCase()}.`,
+      family: "genre",
+      affinity: genre.score,
+      params: {
+        with_genres: String(id),
+      },
+    });
+  }
+
+  for (const language of interests.languages) {
+    const code = getLanguageCode(language.name);
+
+    if (!code) continue;
+
+    const displayName =
+      LANGUAGE_NAMES[code] ?? language.name;
+
+    add({
+      id: `personalized-language-${code}`,
+      title:
+        code === "hi"
+          ? "Hindi Cinema"
+          : `${displayName} Language Picks`,
+      reason: "Selected from your language preferences.",
+      family: "language",
+      affinity: language.score,
+      params: {
+        with_original_language: code,
+      },
+    });
+  }
+
+  for (const country of interests.countries) {
+    const code = getCountryCode(country.name);
+
+    if (!code) continue;
+
+    const displayName =
+      COUNTRY_NAMES[code] ?? country.name;
+
+    add({
+      id: `personalized-country-${code}`,
+      title: `${displayName} Cinema`,
+      reason: "More titles from a country you watch.",
+      family: "country",
+      affinity: country.score,
+      params: {
+        with_origin_country: code,
+      },
+    });
+  }
+
+  // Limit row count while preserving more than one family
+  // whenever the user's signals support it.
+  const genres = rows.filter((row) => row.family === "genre");
+  const languages = rows.filter((row) => row.family === "language");
+  const countries = rows.filter((row) => row.family === "country");
+
+  const selected: RowCandidate[] = [
+    ...genres.slice(0, 4),
+    ...languages.slice(0, 3),
+    ...countries.slice(0, 2),
+  ];
+
+  return selected
+    .sort((a, b) => b.affinity - a.affinity)
+    .slice(0, MAX_ROWS);
+}
+
+function getHistoryIds(): Set<string> {
+  const ids = new Set<string>();
+
+  try {
+    for (const item of getWatchHistory()) {
+      ids.add(`${item.type}:${item.media_id}`);
+    }
+  } catch {
+    // History is optional.
+  }
+
+  try {
+    for (const item of getLocalWatchlist()) {
+      ids.add(`${item.type}:${item.id}`);
+    }
+  } catch {
+    // Watchlist is optional.
+  }
+
+  return ids;
+}
+
+function getRawTitle(
+  item: RawItem,
+  type: ContentType,
+): RecommendationItem | null {
+  const id = Number(item.id);
+
+  if (!Number.isFinite(id) || id <= 0) {
+    return null;
+  }
+
+  return {
+    id,
+    mediaType: type,
+    title:
+      typeof item.title === "string"
+        ? item.title
+        : undefined,
+    name:
+      typeof item.name === "string"
+        ? item.name
+        : undefined,
+    poster_path:
+      typeof item.poster_path === "string"
+        ? item.poster_path
+        : null,
+    backdrop_path:
+      typeof item.backdrop_path === "string"
+        ? item.backdrop_path
+        : null,
+    vote_average: Number(item.vote_average) || 0,
+    vote_count: Number(item.vote_count) || 0,
+    popularity: Number(item.popularity) || 0,
+    release_date:
+      typeof item.release_date === "string"
+        ? item.release_date
+        : undefined,
+    first_air_date:
+      typeof item.first_air_date === "string"
+        ? item.first_air_date
+        : undefined,
+    genre_ids: Array.isArray(item.genre_ids)
+      ? item.genre_ids.filter(
+          (value): value is number =>
+            typeof value === "number",
+        )
+      : [],
+    overview:
+      typeof item.overview === "string"
+        ? item.overview
+        : undefined,
+    original_language:
+      typeof item.original_language === "string"
+        ? item.original_language
+        : undefined,
+  };
+}
+
+async function request<T>(
+  path: string,
+): Promise<T | null> {
+  const controller = new AbortController();
+
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT,
+  );
+
+  try {
+    const response = await fetch(
+      `${BASE_URL}${path}`,
+      {
+        method: "GET",
+        cache: "force-cache",
+        signal: controller.signal,
+        headers: {
+          Authorization:
+            `Bearer ${env.NEXT_PUBLIC_TMDB_ACCESS_TOKEN}`,
+          accept: "application/json",
+        },
+      },
+    );
+
+    if (!response.ok) return null;
+
+    return (await response.json()) as T;
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function qualityScore(
+  item: RecommendationItem,
+): number {
+  const rating = clamp(
+    item.vote_average ?? 0,
+    0,
+    10,
+  );
+
+  const votes = Math.max(
+    0,
+    item.vote_count ?? 0,
+  );
+
+  const popularity = Math.max(
+    0,
+    item.popularity ?? 0,
+  );
+
+  return (
+    rating * 1.2 +
+    Math.log10(votes + 1) * 1.1 +
+    Math.log10(popularity + 1) * 0.8
   );
 }
 
-function hasPersonalizationData(): boolean {
-  try {
-    if (getWatchHistory().length > 0) return true;
-  } catch {}
-
-  try {
-    if (getLocalWatchlist().length > 0) return true;
-  } catch {}
-
-  try {
-    if (getAllExplicitFeedback().length > 0) return true;
-  } catch {}
-
-  return hasTasteSignals(readProfile());
-}
-
-function hash(value: string): string {
-  let result = 2166136261;
-
-  for (let index = 0; index < value.length; index++) {
-    result ^= value.charCodeAt(index);
-    result = Math.imul(result, 16777619);
-  }
-
-  return (result >>> 0).toString(36);
-}
-
-function getProfileKey(): string {
-  try {
-    return (
-      localStorage.getItem(
-        "ryuflix_active_profile_v1",
-      ) ?? "default"
-    );
-  } catch {
-    return "default";
-  }
-}
-
-function getSnapshotKey(
+async function fetchRowItems(
   type: ContentType,
-): string {
-  return `${type}:${hash(getProfileKey())}`;
-}
-
-function getActivityFingerprint(): string {
-  const data: Record<string, unknown> = {};
-
-  try {
-    data.history = getWatchHistory().map((item) => [
-      item.type,
-      item.media_id,
-      item.updated_at,
-      item.last_position,
-      item.completed,
-      item.season,
-      item.episode,
-    ]);
-  } catch {
-    data.history = [];
-  }
-
-  try {
-    data.watchlist = getLocalWatchlist().map((item) => [
-      item.type,
-      item.id,
-      item.saved_date,
-    ]);
-  } catch {
-    data.watchlist = [];
-  }
-
-  try {
-    data.feedback = getAllExplicitFeedback().map((item) => [
-      item.mediaType,
-      item.id,
-      item.value,
-      item.updatedAt,
-    ]);
-  } catch {
-    data.feedback = [];
-  }
-
-  try {
-    data.taste = localStorage.getItem(
-      "ryuflix_taste_profile",
-    );
-  } catch {
-    data.taste = null;
-  }
-
-  return hash(JSON.stringify(data));
-}
-
-function openDatabase(): Promise<IDBDatabase | null> {
-  if (databasePromise) return databasePromise;
-
-  databasePromise = new Promise((resolve) => {
-    if (typeof indexedDB === "undefined") {
-      resolve(null);
-      return;
-    }
-
-    const request = indexedDB.open(
-      DB_NAME,
-      DB_VERSION,
-    );
-
-    request.onupgradeneeded = () => {
-      const database = request.result;
-
-      if (
-        !database.objectStoreNames.contains(STORE_NAME)
-      ) {
-        database.createObjectStore(STORE_NAME, {
-          keyPath: "key",
-        });
-      }
-    };
-
-    request.onsuccess = () => {
-      const database = request.result;
-
-      database.onversionchange = () => {
-        database.close();
-        databasePromise = null;
-      };
-
-      resolve(database);
-    };
-
-    request.onerror = () => resolve(null);
-    request.onblocked = () => resolve(null);
+  candidate: RowCandidate,
+): Promise<RecommendationItem[]> {
+  const params = new URLSearchParams({
+    include_adult: "false",
+    sort_by: "popularity.desc",
+    "vote_count.gte": "15",
+    page: "1",
+    ...candidate.params,
   });
 
-  return databasePromise;
-}
+  const response = await request<{
+    results?: RawItem[];
+  }>(
+    `/discover/${type}?${params.toString()}`,
+  );
 
-async function readPersistentSnapshot(
-  key: string,
-): Promise<HomepageSnapshot | null> {
-  try {
-    const database = await openDatabase();
-    if (!database) return null;
-
-    return await new Promise((resolve) => {
-      const transaction = database.transaction(
-        STORE_NAME,
-        "readonly",
-      );
-
-      const request = transaction
-        .objectStore(STORE_NAME)
-        .get(key);
-
-      request.onsuccess = () => {
-        const result = request.result as
-          | StoredSnapshot
-          | undefined;
-
-        resolve(result?.snapshot ?? null);
-      };
-
-      request.onerror = () => resolve(null);
-      transaction.onerror = () => resolve(null);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function writePersistentSnapshot(
-  key: string,
-  snapshot: HomepageSnapshot,
-): Promise<void> {
-  try {
-    const database = await openDatabase();
-    if (!database) return;
-
-    await new Promise<void>((resolve) => {
-      const transaction = database.transaction(
-        STORE_NAME,
-        "readwrite",
-      );
-
-      transaction.objectStore(STORE_NAME).put({
-        key,
-        snapshot,
-      } satisfies StoredSnapshot);
-
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => resolve();
-      transaction.onabort = () => resolve();
-    });
-  } catch {
-    // The in-memory snapshot remains usable.
-  }
-}
-
-function notify(
-  type: ContentType,
-  snapshot: HomepageSnapshot,
-): void {
-  for (const listener of listeners.get(type) ?? []) {
-    try {
-      listener(snapshot);
-    } catch (error) {
-      console.error(
-        "[RyuFlixx] Homepage listener failed:",
-        error,
-      );
-    }
-  }
-}
-
-function filterExplicitDislikes(
-  items: RecommendationItem[],
-): RecommendationItem[] {
-  try {
-    const excluded = new Set(
-      getAllExplicitFeedback()
-        .filter(
-          (feedback) =>
-            feedback.value === "dislike" ||
-            feedback.value === "not_interested",
-        )
-        .map(
-          (feedback) =>
-            `${feedback.mediaType}:${feedback.id}`,
-        ),
+  return (response?.results ?? [])
+    .map((item) => getRawTitle(item, type))
+    .filter(
+      (item): item is RecommendationItem =>
+        item !== null,
     );
-
-    return items.filter(
-      (item) =>
-        !excluded.has(
-          `${item.mediaType}:${item.id}`,
-        ),
-    );
-  } catch {
-    return items;
-  }
 }
 
-async function getPreviousSnapshot(
-  key: string,
-): Promise<HomepageSnapshot | null> {
-  const cached = memoryCache.get(key);
-
-  if (cached) return cached;
-
-  const persistent =
-    await readPersistentSnapshot(key);
-
-  if (persistent) {
-    memoryCache.set(key, persistent);
-  }
-
-  return persistent;
-}
-
-async function generateSnapshot(
+function makeFingerprint(
   type: ContentType,
-  key: string,
-): Promise<void> {
-  const existing = inFlight.get(key);
-  if (existing) return existing;
+  interests: InterestData,
+  recommendations: RecommendationItem[],
+): string {
+  return JSON.stringify({
+    type,
+    genres: interests.genres,
+    languages: interests.languages,
+    countries: interests.countries,
+    recommendationIds: recommendations
+      .slice(0, 30)
+      .map((item) => `${item.mediaType}:${item.id}`),
+  });
+}
 
-  const job = (async () => {
-    const previous = await getPreviousSnapshot(key);
-    const eligible = hasPersonalizationData();
+function createFallbackCandidate(): RowCandidate {
+  return {
+    id: "personalized-discovery",
+    title: "Discover Something New",
+    reason: "A selection to help expand your interests.",
+    family: "discovery",
+    affinity: 0,
+    params: {},
+  };
+}
 
-    let recommendations: RecommendationItem[] = [];
+async function buildRows(
+  type: ContentType,
+  candidates: RowCandidate[],
+  recommendations: RecommendationItem[],
+): Promise<HomepageRow[]> {
+  const personalizedRank = new Map<string, number>();
 
-    if (eligible) {
-      try {
-        recommendations =
-          await getGorseInspiredRecommendations(
-            type,
-            30,
-            readProfile(),
-          );
-      } catch (error) {
-        console.warn(
-          "[RyuFlixx] Recommendation ranking unavailable; generating shelves without it.",
-          error,
-        );
-      }
+  recommendations.forEach((item, index) => {
+    personalizedRank.set(
+      `${item.mediaType}:${item.id}`,
+      index,
+    );
+  });
+
+  const excluded = getHistoryIds();
+  const usedAcrossPage = new Set<string>();
+
+  const fetchedRows = await Promise.all(
+    candidates.map(async (candidate) => ({
+      candidate,
+      items: await fetchRowItems(type, candidate),
+    })),
+  );
+
+  const rows: HomepageRow[] = [];
+
+  for (const result of fetchedRows) {
+    const ranked = result.items
+      .filter(
+        (item) =>
+          !excluded.has(`${item.mediaType}:${item.id}`),
+      )
+      .map((item) => {
+        const key = `${item.mediaType}:${item.id}`;
+        const learnedRank = personalizedRank.get(key);
+
+        const algorithmScore =
+          learnedRank === undefined
+            ? 0
+            : Math.max(0, 60 - learnedRank * 1.5);
+
+        return {
+          item,
+          score:
+            algorithmScore +
+            qualityScore(item) +
+            result.candidate.affinity * 0.08,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const selected: RecommendationItem[] = [];
+
+    for (const entry of ranked) {
+      const key =
+        `${entry.item.mediaType}:${entry.item.id}`;
+
+      if (usedAcrossPage.has(key)) continue;
+
+      selected.push(entry.item);
+      usedAcrossPage.add(key);
+
+      if (selected.length >= ROW_SIZE) break;
     }
 
-    let rows: HomepageRow[] = [];
+    if (selected.length < 4) continue;
 
-    try {
-      /*
-       * Only clear a potentially failed empty cache.
-       * Successful generator results keep their own TTL cache.
-       */
-      if (!previous || previous.rows.length === 0) {
-        clearHomepageGenerationCache();
-      }
+    rows.push({
+      id: result.candidate.id,
+      title: result.candidate.title,
+      reason: result.candidate.reason,
+      items: selected,
+      affinity: result.candidate.affinity,
+      family: result.candidate.family,
+    });
+  }
 
-      rows = await generateHomepageRows(
-        type,
-        recommendations,
-      );
-    } catch (error) {
-      console.error(
-        "[RyuFlixx] Personalized shelf generation failed:",
-        error,
-      );
+  const familyOrder = {
+    genre: 0,
+    language: 1,
+    country: 2,
+    discovery: 3,
+  };
+
+  rows.sort((a, b) => {
+    if (familyOrder[a.family] !== familyOrder[b.family]) {
+      return familyOrder[a.family] - familyOrder[b.family];
     }
 
-    const visibleRecommendations =
-      filterExplicitDislikes(recommendations).slice(0, 12);
+    return b.affinity - a.affinity;
+  });
 
-    const finalRows =
-      rows.length > 0
-        ? rows
-        : previous?.rows ?? [];
+  return rows;
+}
 
-    const finalForYou =
-      visibleRecommendations.length > 0
-        ? visibleRecommendations
-        : filterExplicitDislikes(
-            previous?.forYou ?? [],
-          );
+/**
+ * Generates the personalized homepage shelves.
+ *
+ * It reuses the existing recommendation pool instead of
+ * performing another recommendation-engine run.
+ *
+ * Taste signals are derived immediately from the profile
+ * and ranked recommendations. No extra watch-history
+ * detail requests are needed.
+ */
+export async function generateHomepageRows(
+  type: ContentType,
+  suppliedRecommendations?: RecommendationItem[],
+): Promise<HomepageRow[]> {
+  const profile = getTasteProfile();
 
-    const snapshot: HomepageSnapshot = {
+  const recommendations =
+    suppliedRecommendations ??
+    await getGorseInspiredRecommendations(
       type,
-      eligible:
-        eligible ||
-        Boolean(
-          previous?.eligible &&
-            (previous.rows.length > 0 ||
-              previous.forYou.length > 0),
-        ),
-      forYou: finalForYou,
-      rows: finalRows,
-      fingerprint: getActivityFingerprint(),
-      generatedAt: Date.now(),
-    };
+      30,
+      profile,
+    );
 
-    memoryCache.set(key, snapshot);
+  const profileInterests =
+    getProfileInterests(profile);
 
-    await writePersistentSnapshot(key, snapshot);
+  const interests =
+    enrichInterestsFromRecommendations(
+      profileInterests,
+      recommendations,
+      type,
+    );
 
-    notify(type, snapshot);
-  })();
+  let candidates = buildRowCandidates(
+    type,
+    interests,
+  );
+
+  if (candidates.length === 0) {
+    candidates = [createFallbackCandidate()];
+  }
+
+  const key = makeFingerprint(
+    type,
+    interests,
+    recommendations,
+  );
+
+  const cached = cache.get(key);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.rows;
+  }
+
+  const existing = inFlight.get(key);
+
+  if (existing) {
+    return existing;
+  }
+
+  const job = buildRows(
+    type,
+    candidates,
+    recommendations,
+  ).then((rows) => {
+    if (rows.length > 0) {
+      cache.set(key, {
+        expiresAt: Date.now() + CACHE_TTL,
+        rows,
+      });
+    }
+
+    return rows;
+  });
 
   inFlight.set(key, job);
 
   try {
-    await job;
-  } catch (error) {
-    console.error(
-      "[RyuFlixx] Homepage generation failed:",
-      error,
-    );
-
-    const previous = await getPreviousSnapshot(key);
-
-    if (previous) {
-      notify(type, previous);
-    }
+    return await job;
   } finally {
     if (inFlight.get(key) === job) {
       inFlight.delete(key);
@@ -484,152 +928,6 @@ async function generateSnapshot(
   }
 }
 
-function scheduleGeneration(
-  type: ContentType,
-  key: string,
-  force = false,
-): void {
-  if (inFlight.has(key)) return;
-
-  const existingTimer = refreshTimers.get(key);
-
-  if (existingTimer !== undefined) {
-    if (!force) return;
-
-    window.clearTimeout(existingTimer);
-    refreshTimers.delete(key);
-  }
-
-  const snapshot = memoryCache.get(key);
-
-  if (
-    !force &&
-    snapshot &&
-    snapshot.rows.length > 0 &&
-    Date.now() - snapshot.generatedAt <
-      MIN_REFRESH_INTERVAL
-  ) {
-    return;
-  }
-
-  const timer = window.setTimeout(() => {
-    refreshTimers.delete(key);
-    void generateSnapshot(type, key);
-  }, force ? 350 : EVENT_DEBOUNCE);
-
-  refreshTimers.set(key, timer);
-}
-
-export function subscribeHomepageRecommendations(
-  type: ContentType,
-  listener: SnapshotListener,
-): () => void {
-  let active = true;
-
-  const typeListeners =
-    listeners.get(type) ??
-    new Set<SnapshotListener>();
-
-  typeListeners.add(listener);
-  listeners.set(type, typeListeners);
-
-  const key = getSnapshotKey(type);
-
-  const load = async () => {
-    const snapshot = await getPreviousSnapshot(key);
-
-    if (!active) return;
-
-    if (snapshot) {
-      listener(snapshot);
-    } else {
-      listener({
-        type,
-        eligible: hasPersonalizationData(),
-        forYou: [],
-        rows: [],
-        fingerprint: getActivityFingerprint(),
-        generatedAt: 0,
-      });
-    }
-
-    const currentFingerprint =
-      getActivityFingerprint();
-
-    const changed =
-      !snapshot ||
-      snapshot.fingerprint !== currentFingerprint;
-
-    const expired =
-      !snapshot ||
-      Date.now() - snapshot.generatedAt > SNAPSHOT_TTL;
-
-    /*
-     * Critical regression fix:
-     * Empty personalized snapshots are never considered
-     * complete. Retry generation even if their fingerprint
-     * and timestamp look fresh.
-     */
-    const missingPersonalizedRows =
-      !snapshot || snapshot.rows.length === 0;
-
-    if (
-      missingPersonalizedRows ||
-      changed ||
-      expired
-    ) {
-      scheduleGeneration(
-        type,
-        key,
-        missingPersonalizedRows,
-      );
-    }
-  };
-
-  void load();
-
-  return () => {
-    active = false;
-
-    typeListeners.delete(listener);
-
-    if (typeListeners.size === 0) {
-      listeners.delete(type);
-    }
-  };
-}
-
-export function refreshHomepageRecommendations(
-  type: ContentType,
-  force = false,
-): void {
-  const key = getSnapshotKey(type);
-
-  void (async () => {
-    const snapshot = await getPreviousSnapshot(key);
-
-    if (snapshot) {
-      notify(type, snapshot);
-    }
-
-    const missingRows =
-      !snapshot || snapshot.rows.length === 0;
-
-    scheduleGeneration(
-      type,
-      key,
-      force || missingRows,
-    );
-  })();
-}
-
-export function clearHomepageRecommendationMemory(): void {
-  memoryCache.clear();
-  clearHomepageGenerationCache();
-
-  for (const timer of refreshTimers.values()) {
-    window.clearTimeout(timer);
-  }
-
-  refreshTimers.clear();
+export function clearHomepageGenerationCache(): void {
+  cache.clear();
 }
