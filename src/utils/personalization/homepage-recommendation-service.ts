@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { ContentType } from "@/types";
@@ -10,7 +11,6 @@ import {
 } from "@/utils/personalization/explicit-feedback-engine";
 import {
   getGorseInspiredRecommendations,
-  clearGorseInspiredRecommendationCache,
 } from "@/utils/personalization/gorse-inspired-engine";
 import {
   generateHomepageRows,
@@ -25,7 +25,8 @@ const DB_VERSION = 1;
 const STORE_NAME = "snapshots";
 
 const SNAPSHOT_TTL = 15 * 60 * 1000;
-const MAX_STALE_AGE = 7 * 24 * 60 * 60 * 1000;
+const MIN_REFRESH_INTERVAL = 90 * 1000;
+const EVENT_DEBOUNCE = 1800;
 
 type HomepageSnapshot = {
   type: ContentType;
@@ -36,26 +37,49 @@ type HomepageSnapshot = {
   generatedAt: number;
 };
 
-type SnapshotListener = (snapshot: HomepageSnapshot) => void;
+type SnapshotListener = (
+  snapshot: HomepageSnapshot,
+) => void;
+
+type StoredSnapshot = {
+  key: string;
+  snapshot: HomepageSnapshot;
+};
 
 const memoryCache = new Map<string, HomepageSnapshot>();
 const inFlight = new Map<string, Promise<void>>();
-const listeners = new Map<ContentType, Set<SnapshotListener>>();
+const listeners = new Map<
+  ContentType,
+  Set<SnapshotListener>
+>();
 
-let databasePromise: Promise<IDBDatabase | null> | null = null;
+const refreshTimers = new Map<string, number>();
+
+let databasePromise: Promise<IDBDatabase | null> | null =
+  null;
 
 function readProfile(): TasteProfile | null {
   try {
-    const raw = localStorage.getItem("ryuflix_taste_profile");
+    const raw = localStorage.getItem(
+      "ryuflix_taste_profile",
+    );
+
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
 
-    if (parsed?.tasteProfile) {
+    if (
+      parsed?.tasteProfile &&
+      typeof parsed.tasteProfile === "object"
+    ) {
       return parsed.tasteProfile as TasteProfile;
     }
 
-    if (typeof parsed?.confidence === "number") {
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.confidence === "number"
+    ) {
       return parsed as TasteProfile;
     }
 
@@ -65,30 +89,53 @@ function readProfile(): TasteProfile | null {
   }
 }
 
-function hasTasteSignals(profile: TasteProfile | null): boolean {
-  if (!profile?.preferences) return false;
+function hasTasteSignals(
+  profile: TasteProfile | null,
+): boolean {
+  if (!profile) return false;
 
-  return Object.values(profile.preferences).some((signals) =>
-    Object.values(signals ?? {}).some(
-      (score) =>
-        typeof score === "number" &&
-        Number.isFinite(score) &&
-        score > 0,
-    ),
+  if (
+    profile.topGenres?.length ||
+    profile.topKeywords?.length ||
+    profile.topDirectors?.length ||
+    profile.topActors?.length
+  ) {
+    return true;
+  }
+
+  if (!profile.preferences) return false;
+
+  return Object.values(profile.preferences).some(
+    (signals) =>
+      Object.values(signals ?? {}).some(
+        (score) =>
+          typeof score === "number" &&
+          Number.isFinite(score) &&
+          score > 0,
+      ),
   );
 }
 
 function hasPersonalizationData(): boolean {
   try {
-    return (
-      getWatchHistory().length > 0 ||
-      getLocalWatchlist().length > 0 ||
-      getAllExplicitFeedback().length > 0 ||
-      hasTasteSignals(readProfile())
-    );
+    if (getWatchHistory().length > 0) return true;
   } catch {
-    return false;
+    // Check other sources independently.
   }
+
+  try {
+    if (getLocalWatchlist().length > 0) return true;
+  } catch {
+    // Check other sources independently.
+  }
+
+  try {
+    if (getAllExplicitFeedback().length > 0) return true;
+  } catch {
+    // Check imported taste independently.
+  }
+
+  return hasTasteSignals(readProfile());
 }
 
 function hash(value: string): string {
@@ -104,29 +151,73 @@ function hash(value: string): string {
 
 function getProfileKey(): string {
   try {
-    return localStorage.getItem("ryuflix_active_profile_v1") ?? "default";
+    return (
+      localStorage.getItem(
+        "ryuflix_active_profile_v1",
+      ) ?? "default"
+    );
   } catch {
     return "default";
   }
 }
 
-function getSnapshotKey(type: ContentType): string {
+function getSnapshotKey(
+  type: ContentType,
+): string {
   return `${type}:${hash(getProfileKey())}`;
 }
 
 function getActivityFingerprint(): string {
+  const data: Record<string, unknown> = {};
+
   try {
-    return hash(
-      JSON.stringify({
-        history: getWatchHistory(),
-        watchlist: getLocalWatchlist(),
-        feedback: getAllExplicitFeedback(),
-        taste: localStorage.getItem("ryuflix_taste_profile"),
-      }),
+    data.history = getWatchHistory().map((item) => [
+      item.type,
+      item.media_id,
+      item.updated_at,
+      item.last_position,
+      item.completed,
+      item.season,
+      item.episode,
+    ]);
+  } catch {
+    data.history = "unavailable";
+  }
+
+  try {
+    data.watchlist = getLocalWatchlist().map(
+      (item) => [
+        item.type,
+        item.id,
+        item.saved_date,
+      ],
     );
   } catch {
-    return "unavailable";
+    data.watchlist = "unavailable";
   }
+
+  try {
+    data.feedback = getAllExplicitFeedback().map(
+      (item) => [
+        item.mediaType,
+        item.id,
+        item.value,
+        item.updatedAt,
+      ],
+    );
+  } catch {
+    data.feedback = "unavailable";
+  }
+
+  try {
+    data.taste = localStorage.getItem(
+      "ryuflix_taste_profile",
+    );
+  } catch {
+    data.taste = "unavailable";
+  }
+
+  return hash(JSON.stringify(data));
 }
 
 function openDatabase(): Promise<IDBDatabase | null> {
@@ -138,19 +229,36 @@ function openDatabase(): Promise<IDBDatabase | null> {
       return;
     }
 
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(
+      DB_NAME,
+      DB_VERSION,
+    );
 
     request.onupgradeneeded = () => {
       const database = request.result;
 
-      if (!database.objectStoreNames.contains(STORE_NAME)) {
+      if (
+        !database.objectStoreNames.contains(
+          STORE_NAME,
+        )
+      ) {
         database.createObjectStore(STORE_NAME, {
           keyPath: "key",
         });
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const database = request.result;
+
+      database.onversionchange = () => {
+        database.close();
+        databasePromise = null;
+      };
+
+      resolve(database);
+    };
+
     request.onerror = () => resolve(null);
     request.onblocked = () => resolve(null);
   });
@@ -171,17 +279,20 @@ async function readPersistentSnapshot(
         "readonly",
       );
 
-      const request = transaction.objectStore(STORE_NAME).get(key);
+      const request = transaction
+        .objectStore(STORE_NAME)
+        .get(key);
 
       request.onsuccess = () => {
         const result = request.result as
-          | { key: string; snapshot: HomepageSnapshot }
+          | StoredSnapshot
           | undefined;
 
         resolve(result?.snapshot ?? null);
       };
 
       request.onerror = () => resolve(null);
+      transaction.onerror = () => resolve(null);
     });
   } catch {
     return null;
@@ -205,14 +316,14 @@ async function writePersistentSnapshot(
       transaction.objectStore(STORE_NAME).put({
         key,
         snapshot,
-      });
+      } satisfies StoredSnapshot);
 
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => resolve();
       transaction.onabort = () => resolve();
     });
   } catch {
-    // The in-memory snapshot remains usable if IndexedDB fails.
+    // Memory cache remains available if IndexedDB fails.
   }
 }
 
@@ -224,42 +335,18 @@ function notify(
     try {
       listener(snapshot);
     } catch {
-      // One component must not interrupt other subscribers.
+      // A component error must not interrupt other subscribers.
     }
   }
 }
 
-async function generateSnapshot(
-  type: ContentType,
-  key: string,
-): Promise<void> {
-  const existing = inFlight.get(key);
-  if (existing) return existing;
+function filterExplicitDislikes(
+  items: RecommendationItem[],
+): RecommendationItem[] {
+  let excluded = new Set<string>();
 
-  const job = (async () => {
-    const profile = readProfile();
-    const eligible = hasPersonalizationData();
-
-    let recommendations: RecommendationItem[] = [];
-    let rows: HomepageRow[] = [];
-
-    if (eligible) {
-      recommendations = await getGorseInspiredRecommendations(
-        type,
-        30,
-        profile,
-      );
-
-      // Both homepage sections share this exact recommendation pool.
-      clearHomepageGenerationCache();
-
-      rows = await generateHomepageRows(
-        type,
-        recommendations,
-      );
-    }
-
-    const excluded = new Set(
+  try {
+    excluded = new Set(
       getAllExplicitFeedback()
         .filter(
           (feedback) =>
@@ -271,23 +358,128 @@ async function generateSnapshot(
             `${feedback.mediaType}:${feedback.id}`,
         ),
     );
+  } catch {
+    // Do not discard recommendations if feedback storage fails.
+  }
+
+  return items.filter(
+    (item) =>
+      !excluded.has(
+        `${item.mediaType}:${item.id}`,
+      ),
+  );
+}
+
+async function getPreviousSnapshot(
+  key: string,
+): Promise<HomepageSnapshot | null> {
+  const memorySnapshot = memoryCache.get(key);
+
+  if (memorySnapshot) {
+    return memorySnapshot;
+  }
+
+  const persistentSnapshot =
+    await readPersistentSnapshot(key);
+
+  if (persistentSnapshot) {
+    memoryCache.set(key, persistentSnapshot);
+  }
+
+  return persistentSnapshot;
+}
+
+/**
+ * One shared generation job supplies both For You
+ * and the personalized homepage rows.
+ *
+ * Crucially, homepage rows are generated even when
+ * the Gorse recommendation request fails.
+ */
+async function generateSnapshot(
+  type: ContentType,
+  key: string,
+): Promise<void> {
+  const existing = inFlight.get(key);
+
+  if (existing) return existing;
+
+  const job = (async () => {
+    const previous = await getPreviousSnapshot(key);
+    const eligible = hasPersonalizationData();
+
+    let recommendations: RecommendationItem[] = [];
+
+    // Gorse is one source of ranking, not a dependency
+    // that is allowed to prevent the homepage from generating.
+    if (eligible) {
+      try {
+        recommendations =
+          await getGorseInspiredRecommendations(
+            type,
+            30,
+            readProfile(),
+          );
+      } catch {
+        recommendations = [];
+      }
+    }
+
+    let rows: HomepageRow[] = [];
+
+    try {
+      // The row generator receives the already-computed pool.
+      // An empty array is intentional: it prevents a second
+      // expensive Gorse run if the first request failed.
+      clearHomepageGenerationCache();
+
+      rows = await generateHomepageRows(
+        type,
+        recommendations,
+      );
+    } catch (error) {
+      console.error(
+        "[RyuFlixx] Personalized homepage row generation failed:",
+        error,
+      );
+    }
+
+    const visibleRecommendations =
+      filterExplicitDislikes(recommendations).slice(0, 12);
+
+    // Never replace a previously useful personalized snapshot
+    // with an empty result from a temporary network/API failure.
+    const finalRows =
+      rows.length > 0
+        ? rows
+        : previous?.rows ?? [];
+
+    const finalForYou =
+      visibleRecommendations.length > 0
+        ? visibleRecommendations
+        : filterExplicitDislikes(
+            previous?.forYou ?? [],
+          );
 
     const snapshot: HomepageSnapshot = {
       type,
-      eligible,
-      forYou: recommendations
-        .filter(
-          (item) =>
-            !excluded.has(`${item.mediaType}:${item.id}`),
-        )
-        .slice(0, 12),
-      rows,
+      eligible:
+        eligible ||
+        Boolean(
+          previous?.eligible &&
+            (previous.rows.length > 0 ||
+              previous.forYou.length > 0),
+        ),
+      forYou: finalForYou,
+      rows: finalRows,
       fingerprint: getActivityFingerprint(),
       generatedAt: Date.now(),
     };
 
     memoryCache.set(key, snapshot);
+
     await writePersistentSnapshot(key, snapshot);
+
     notify(type, snapshot);
   })();
 
@@ -295,6 +487,17 @@ async function generateSnapshot(
 
   try {
     await job;
+  } catch (error) {
+    console.error(
+      "[RyuFlixx] Homepage recommendation generation failed:",
+      error,
+    );
+
+    const previous = await getPreviousSnapshot(key);
+
+    if (previous) {
+      notify(type, previous);
+    }
   } finally {
     if (inFlight.get(key) === job) {
       inFlight.delete(key);
@@ -302,63 +505,109 @@ async function generateSnapshot(
   }
 }
 
+function scheduleGeneration(
+  type: ContentType,
+  key: string,
+  force = false,
+): void {
+  if (inFlight.has(key)) return;
+
+  const existingTimer = refreshTimers.get(key);
+
+  if (existingTimer !== undefined) {
+    if (!force) return;
+
+    window.clearTimeout(existingTimer);
+    refreshTimers.delete(key);
+  }
+
+  const snapshot = memoryCache.get(key);
+
+  if (
+    !force &&
+    snapshot &&
+    Date.now() - snapshot.generatedAt <
+      MIN_REFRESH_INTERVAL
+  ) {
+    return;
+  }
+
+  const delay = force ? 350 : EVENT_DEBOUNCE;
+
+  const timer = window.setTimeout(() => {
+    refreshTimers.delete(key);
+    void generateSnapshot(type, key);
+  }, delay);
+
+  refreshTimers.set(key, timer);
+}
+
+/**
+ * Subscribe both homepage sections to the same snapshot.
+ * Cached recommendations are delivered before background refresh.
+ */
 export function subscribeHomepageRecommendations(
   type: ContentType,
   listener: SnapshotListener,
 ): () => void {
   let active = true;
 
-  const typeListeners = listeners.get(type) ?? new Set();
+  const typeListeners =
+    listeners.get(type) ?? new Set<SnapshotListener>();
+
   typeListeners.add(listener);
   listeners.set(type, typeListeners);
 
   const key = getSnapshotKey(type);
 
-  const deliver = (snapshot: HomepageSnapshot | null) => {
+  const deliver = (
+    snapshot: HomepageSnapshot | null,
+  ) => {
     if (!active || !snapshot) return;
 
-    memoryCache.set(key, snapshot);
     listener(snapshot);
   };
 
   const load = async () => {
-    let snapshot = memoryCache.get(key) ?? null;
-
-    if (!snapshot) {
-      snapshot = await readPersistentSnapshot(key);
-    }
+    const snapshot = await getPreviousSnapshot(key);
 
     if (!active) return;
 
-    deliver(snapshot);
+    if (snapshot) {
+      deliver(snapshot);
+    } else {
+      // Send the initial eligibility state so For You
+      // does not wait forever for a snapshot on cold start.
+      listener({
+        type,
+        eligible: hasPersonalizationData(),
+        forYou: [],
+        rows: [],
+        fingerprint: getActivityFingerprint(),
+        generatedAt: 0,
+      });
+    }
 
-    const fingerprint = getActivityFingerprint();
+    const currentFingerprint =
+      getActivityFingerprint();
 
     const age = snapshot
       ? Date.now() - snapshot.generatedAt
       : Infinity;
 
     const changed =
-      !snapshot || snapshot.fingerprint !== fingerprint;
+      !snapshot ||
+      snapshot.fingerprint !== currentFingerprint;
 
     const expired = age > SNAPSHOT_TTL;
-    const unusablyOld = age > MAX_STALE_AGE;
 
-    if (!snapshot || changed || expired) {
-      void generateSnapshot(type, key);
-    }
-
-    // If the saved snapshot is too old, don't leave it displayed
-    // indefinitely while a new one is being generated.
-    if (unusablyOld && active) {
-      listener({
-        type,
-        eligible: hasPersonalizationData(),
-        forYou: [],
-        rows: [],
-        fingerprint,
-        generatedAt: 0,
-      });
+    if (!snapshot) {
+      scheduleGeneration(type, key, true);
+    } else if (
+      hasPersonalizationData() &&
+      (changed || expired)
+    ) {
+      scheduleGeneration(type, key);
     }
   };
 
@@ -366,6 +615,7 @@ export function subscribeHomepageRecommendations(
 
   return () => {
     active = false;
+
     typeListeners.delete(listener);
 
     if (typeListeners.size === 0) {
@@ -374,15 +624,39 @@ export function subscribeHomepageRecommendations(
   };
 }
 
+/**
+ * Activity changes are debounced and share one generation job.
+ * Pass force=true for immediate high-priority changes such as
+ * profile switches or explicit recommendation feedback.
+ */
 export function refreshHomepageRecommendations(
   type: ContentType,
+  force = false,
 ): void {
   const key = getSnapshotKey(type);
-  void generateSnapshot(type, key);
+
+  void (async () => {
+    const snapshot = await getPreviousSnapshot(key);
+
+    if (snapshot) {
+      notify(type, snapshot);
+    }
+
+    scheduleGeneration(
+      type,
+      key,
+      force || !snapshot,
+    );
+  })();
 }
 
 export function clearHomepageRecommendationMemory(): void {
   memoryCache.clear();
   clearHomepageGenerationCache();
-  clearGorseInspiredRecommendationCache();
+
+  for (const timer of refreshTimers.values()) {
+    window.clearTimeout(timer);
+  }
+
+  refreshTimers.clear();
 }
