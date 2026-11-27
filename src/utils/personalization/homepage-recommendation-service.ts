@@ -52,7 +52,6 @@ const listeners = new Map<
   ContentType,
   Set<SnapshotListener>
 >();
-
 const refreshTimers = new Map<string, number>();
 
 let databasePromise: Promise<IDBDatabase | null> | null =
@@ -103,37 +102,30 @@ function hasTasteSignals(
     return true;
   }
 
-  if (!profile.preferences) return false;
-
-  return Object.values(profile.preferences).some(
-    (signals) =>
-      Object.values(signals ?? {}).some(
-        (score) =>
-          typeof score === "number" &&
-          Number.isFinite(score) &&
-          score > 0,
-      ),
+  return Object.values(
+    profile.preferences ?? {},
+  ).some((signals) =>
+    Object.values(signals ?? {}).some(
+      (score) =>
+        typeof score === "number" &&
+        Number.isFinite(score) &&
+        score > 0,
+    ),
   );
 }
 
 function hasPersonalizationData(): boolean {
   try {
     if (getWatchHistory().length > 0) return true;
-  } catch {
-    // Check other sources independently.
-  }
+  } catch {}
 
   try {
     if (getLocalWatchlist().length > 0) return true;
-  } catch {
-    // Check other sources independently.
-  }
+  } catch {}
 
   try {
     if (getAllExplicitFeedback().length > 0) return true;
-  } catch {
-    // Check imported taste independently.
-  }
+  } catch {}
 
   return hasTasteSignals(readProfile());
 }
@@ -181,32 +173,28 @@ function getActivityFingerprint(): string {
       item.episode,
     ]);
   } catch {
-    data.history = "unavailable";
+    data.history = [];
   }
 
   try {
-    data.watchlist = getLocalWatchlist().map(
-      (item) => [
-        item.type,
-        item.id,
-        item.saved_date,
-      ],
-    );
+    data.watchlist = getLocalWatchlist().map((item) => [
+      item.type,
+      item.id,
+      item.saved_date,
+    ]);
   } catch {
-    data.watchlist = "unavailable";
+    data.watchlist = [];
   }
 
   try {
-    data.feedback = getAllExplicitFeedback().map(
-      (item) => [
-        item.mediaType,
-        item.id,
-        item.value,
-        item.updatedAt,
-      ],
-    );
+    data.feedback = getAllExplicitFeedback().map((item) => [
+      item.mediaType,
+      item.id,
+      item.value,
+      item.updatedAt,
+    ]);
   } catch {
-    data.feedback = "unavailable";
+    data.feedback = [];
   }
 
   try {
@@ -214,7 +202,7 @@ function getActivityFingerprint(): string {
       "ryuflix_taste_profile",
     );
   } catch {
-    data.taste = "unavailable";
+    data.taste = null;
   }
 
   return hash(JSON.stringify(data));
@@ -238,9 +226,7 @@ function openDatabase(): Promise<IDBDatabase | null> {
       const database = request.result;
 
       if (
-        !database.objectStoreNames.contains(
-          STORE_NAME,
-        )
+        !database.objectStoreNames.contains(STORE_NAME)
       ) {
         database.createObjectStore(STORE_NAME, {
           keyPath: "key",
@@ -323,7 +309,7 @@ async function writePersistentSnapshot(
       transaction.onabort = () => resolve();
     });
   } catch {
-    // Memory cache remains available if IndexedDB fails.
+    // The in-memory snapshot remains usable.
   }
 }
 
@@ -334,8 +320,11 @@ function notify(
   for (const listener of listeners.get(type) ?? []) {
     try {
       listener(snapshot);
-    } catch {
-      // A component error must not interrupt other subscribers.
+    } catch (error) {
+      console.error(
+        "[RyuFlixx] Homepage listener failed:",
+        error,
+      );
     }
   }
 }
@@ -343,10 +332,8 @@ function notify(
 function filterExplicitDislikes(
   items: RecommendationItem[],
 ): RecommendationItem[] {
-  let excluded = new Set<string>();
-
   try {
-    excluded = new Set(
+    const excluded = new Set(
       getAllExplicitFeedback()
         .filter(
           (feedback) =>
@@ -358,50 +345,40 @@ function filterExplicitDislikes(
             `${feedback.mediaType}:${feedback.id}`,
         ),
     );
-  } catch {
-    // Do not discard recommendations if feedback storage fails.
-  }
 
-  return items.filter(
-    (item) =>
-      !excluded.has(
-        `${item.mediaType}:${item.id}`,
-      ),
-  );
+    return items.filter(
+      (item) =>
+        !excluded.has(
+          `${item.mediaType}:${item.id}`,
+        ),
+    );
+  } catch {
+    return items;
+  }
 }
 
 async function getPreviousSnapshot(
   key: string,
 ): Promise<HomepageSnapshot | null> {
-  const memorySnapshot = memoryCache.get(key);
+  const cached = memoryCache.get(key);
 
-  if (memorySnapshot) {
-    return memorySnapshot;
-  }
+  if (cached) return cached;
 
-  const persistentSnapshot =
+  const persistent =
     await readPersistentSnapshot(key);
 
-  if (persistentSnapshot) {
-    memoryCache.set(key, persistentSnapshot);
+  if (persistent) {
+    memoryCache.set(key, persistent);
   }
 
-  return persistentSnapshot;
+  return persistent;
 }
 
-/**
- * One shared generation job supplies both For You
- * and the personalized homepage rows.
- *
- * Crucially, homepage rows are generated even when
- * the Gorse recommendation request fails.
- */
 async function generateSnapshot(
   type: ContentType,
   key: string,
 ): Promise<void> {
   const existing = inFlight.get(key);
-
   if (existing) return existing;
 
   const job = (async () => {
@@ -410,8 +387,6 @@ async function generateSnapshot(
 
     let recommendations: RecommendationItem[] = [];
 
-    // Gorse is one source of ranking, not a dependency
-    // that is allowed to prevent the homepage from generating.
     if (eligible) {
       try {
         recommendations =
@@ -420,18 +395,24 @@ async function generateSnapshot(
             30,
             readProfile(),
           );
-      } catch {
-        recommendations = [];
+      } catch (error) {
+        console.warn(
+          "[RyuFlixx] Recommendation ranking unavailable; generating shelves without it.",
+          error,
+        );
       }
     }
 
     let rows: HomepageRow[] = [];
 
     try {
-      // The row generator receives the already-computed pool.
-      // An empty array is intentional: it prevents a second
-      // expensive Gorse run if the first request failed.
-      clearHomepageGenerationCache();
+      /*
+       * Only clear a potentially failed empty cache.
+       * Successful generator results keep their own TTL cache.
+       */
+      if (!previous || previous.rows.length === 0) {
+        clearHomepageGenerationCache();
+      }
 
       rows = await generateHomepageRows(
         type,
@@ -439,7 +420,7 @@ async function generateSnapshot(
       );
     } catch (error) {
       console.error(
-        "[RyuFlixx] Personalized homepage row generation failed:",
+        "[RyuFlixx] Personalized shelf generation failed:",
         error,
       );
     }
@@ -447,8 +428,6 @@ async function generateSnapshot(
     const visibleRecommendations =
       filterExplicitDislikes(recommendations).slice(0, 12);
 
-    // Never replace a previously useful personalized snapshot
-    // with an empty result from a temporary network/API failure.
     const finalRows =
       rows.length > 0
         ? rows
@@ -489,7 +468,7 @@ async function generateSnapshot(
     await job;
   } catch (error) {
     console.error(
-      "[RyuFlixx] Homepage recommendation generation failed:",
+      "[RyuFlixx] Homepage generation failed:",
       error,
     );
 
@@ -526,26 +505,21 @@ function scheduleGeneration(
   if (
     !force &&
     snapshot &&
+    snapshot.rows.length > 0 &&
     Date.now() - snapshot.generatedAt <
       MIN_REFRESH_INTERVAL
   ) {
     return;
   }
 
-  const delay = force ? 350 : EVENT_DEBOUNCE;
-
   const timer = window.setTimeout(() => {
     refreshTimers.delete(key);
     void generateSnapshot(type, key);
-  }, delay);
+  }, force ? 350 : EVENT_DEBOUNCE);
 
   refreshTimers.set(key, timer);
 }
 
-/**
- * Subscribe both homepage sections to the same snapshot.
- * Cached recommendations are delivered before background refresh.
- */
 export function subscribeHomepageRecommendations(
   type: ContentType,
   listener: SnapshotListener,
@@ -553,20 +527,13 @@ export function subscribeHomepageRecommendations(
   let active = true;
 
   const typeListeners =
-    listeners.get(type) ?? new Set<SnapshotListener>();
+    listeners.get(type) ??
+    new Set<SnapshotListener>();
 
   typeListeners.add(listener);
   listeners.set(type, typeListeners);
 
   const key = getSnapshotKey(type);
-
-  const deliver = (
-    snapshot: HomepageSnapshot | null,
-  ) => {
-    if (!active || !snapshot) return;
-
-    listener(snapshot);
-  };
 
   const load = async () => {
     const snapshot = await getPreviousSnapshot(key);
@@ -574,10 +541,8 @@ export function subscribeHomepageRecommendations(
     if (!active) return;
 
     if (snapshot) {
-      deliver(snapshot);
+      listener(snapshot);
     } else {
-      // Send the initial eligibility state so For You
-      // does not wait forever for a snapshot on cold start.
       listener({
         type,
         eligible: hasPersonalizationData(),
@@ -591,23 +556,33 @@ export function subscribeHomepageRecommendations(
     const currentFingerprint =
       getActivityFingerprint();
 
-    const age = snapshot
-      ? Date.now() - snapshot.generatedAt
-      : Infinity;
-
     const changed =
       !snapshot ||
       snapshot.fingerprint !== currentFingerprint;
 
-    const expired = age > SNAPSHOT_TTL;
+    const expired =
+      !snapshot ||
+      Date.now() - snapshot.generatedAt > SNAPSHOT_TTL;
 
-    if (!snapshot) {
-      scheduleGeneration(type, key, true);
-    } else if (
-      hasPersonalizationData() &&
-      (changed || expired)
+    /*
+     * Critical regression fix:
+     * Empty personalized snapshots are never considered
+     * complete. Retry generation even if their fingerprint
+     * and timestamp look fresh.
+     */
+    const missingPersonalizedRows =
+      !snapshot || snapshot.rows.length === 0;
+
+    if (
+      missingPersonalizedRows ||
+      changed ||
+      expired
     ) {
-      scheduleGeneration(type, key);
+      scheduleGeneration(
+        type,
+        key,
+        missingPersonalizedRows,
+      );
     }
   };
 
@@ -624,11 +599,6 @@ export function subscribeHomepageRecommendations(
   };
 }
 
-/**
- * Activity changes are debounced and share one generation job.
- * Pass force=true for immediate high-priority changes such as
- * profile switches or explicit recommendation feedback.
- */
 export function refreshHomepageRecommendations(
   type: ContentType,
   force = false,
@@ -642,10 +612,13 @@ export function refreshHomepageRecommendations(
       notify(type, snapshot);
     }
 
+    const missingRows =
+      !snapshot || snapshot.rows.length === 0;
+
     scheduleGeneration(
       type,
       key,
-      force || !snapshot,
+      force || missingRows,
     );
   })();
 }
