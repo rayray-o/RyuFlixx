@@ -12,6 +12,8 @@ import {
 } from "@/utils/personalization/gorse-inspired-engine";
 import type { RecommendationItem } from "@/utils/personalization/recommendation-engine";
 import type { TasteProfile } from "@/utils/personalization/taste-engine";
+import { getProfileStorageKey } from "@/utils/profiles";
+import { getAllExplicitFeedback } from "@/utils/personalization/explicit-feedback-engine";
 
 const BASE_URL = "https://api.themoviedb.org/3";
 const CACHE_TTL = 10 * 60 * 1000;
@@ -300,7 +302,6 @@ function getProfileInterests(
     };
   }
 
-  // Read the actual weighted preference maps.
   for (const [name, score] of Object.entries(
     profile.preferences?.genres ?? {},
   )) {
@@ -319,8 +320,6 @@ function getProfileInterests(
     addSignal(countries, name, score);
   }
 
-  // Also read the profile's explicit top-signal arrays.
-  // The old generator completely ignored these.
   for (const item of profile.topGenres ?? []) {
     addSignal(
       genres,
@@ -331,8 +330,6 @@ function getProfileInterests(
   }
 
   for (const item of profile.topKeywords ?? []) {
-    // Keywords are useful ranking signals but aren't
-    // directly translated into TMDB discover shelves.
     void item;
   }
 
@@ -349,12 +346,6 @@ function getProfileInterests(
   };
 }
 
-/**
- * When the taste profile is incomplete, infer interests
- * directly from the already-ranked Gorse recommendation pool.
- *
- * This avoids another batch of TMDB detail requests.
- */
 function enrichInterestsFromRecommendations(
   interests: InterestData,
   recommendations: RecommendationItem[],
@@ -379,7 +370,6 @@ function enrichInterestsFromRecommendations(
   recommendations.forEach((item, index) => {
     if (item.mediaType !== type) return;
 
-    // Higher-ranked recommendations contribute more.
     const weight = Math.max(
       0.25,
       1.5 - index * 0.035,
@@ -536,8 +526,6 @@ function buildRowCandidates(
     });
   }
 
-  // Limit row count while preserving more than one family
-  // whenever the user's signals support it.
   const genres = rows.filter((row) => row.family === "genre");
   const languages = rows.filter((row) => row.family === "language");
   const countries = rows.filter((row) => row.family === "country");
@@ -763,16 +751,40 @@ async function buildRows(
   const excluded = getHistoryIds();
   const usedAcrossPage = new Set<string>();
 
-  const fetchedRows = await Promise.all(
-    candidates.map(async (candidate) => ({
-      candidate,
-      items: await fetchRowItems(type, candidate),
-    })),
+  // Fetch at most three personalized shelves simultaneously.
+  const fetchedRows: Array<{
+    candidate: RowCandidate;
+    items: RecommendationItem[];
+  }> = new Array(candidates.length);
+
+  let nextIndex = 0;
+
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = nextIndex++;
+
+      if (index >= candidates.length) return;
+
+      const candidate = candidates[index];
+
+      fetchedRows[index] = {
+        candidate,
+        items: await fetchRowItems(type, candidate),
+      };
+    }
+  };
+
+  const workerCount = Math.min(3, candidates.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, () => worker()),
   );
 
   const rows: HomepageRow[] = [];
 
   for (const result of fetchedRows) {
+    if (!result) continue;
+
     const ranked = result.items
       .filter(
         (item) =>
@@ -798,20 +810,25 @@ async function buildRows(
       .sort((a, b) => b.score - a.score);
 
     const selected: RecommendationItem[] = [];
+    const selectedKeys: string[] = [];
 
     for (const entry of ranked) {
-      const key =
-        `${entry.item.mediaType}:${entry.item.id}`;
+      const key = `${entry.item.mediaType}:${entry.item.id}`;
 
       if (usedAcrossPage.has(key)) continue;
 
       selected.push(entry.item);
-      usedAcrossPage.add(key);
+      selectedKeys.push(key);
 
       if (selected.length >= ROW_SIZE) break;
     }
 
+    // Only reserve titles after the row passes validation.
     if (selected.length < 4) continue;
+
+    for (const key of selectedKeys) {
+      usedAcrossPage.add(key);
+    }
 
     rows.push({
       id: result.candidate.id,
@@ -842,14 +859,8 @@ async function buildRows(
 }
 
 /**
- * Generates the personalized homepage shelves.
- *
- * It reuses the existing recommendation pool instead of
- * performing another recommendation-engine run.
- *
- * Taste signals are derived immediately from the profile
- * and ranked recommendations. No extra watch-history
- * detail requests are needed.
+ * Generates personalized homepage shelves.
+ * Reuses the supplied recommendation pool when available.
  */
 export async function generateHomepageRows(
   type: ContentType,
@@ -931,6 +942,7 @@ export async function generateHomepageRows(
 export function clearHomepageGenerationCache(): void {
   cache.clear();
 }
+
 export type HomepageRecommendationSnapshot = {
   eligible: boolean;
   forYou: RecommendationItem[];
@@ -946,39 +958,114 @@ type HomepageRecommendationCacheEntry = {
   snapshot: HomepageRecommendationSnapshot;
 };
 
+const HOMEPAGE_RECOMMENDATION_TTL = 5 * 60 * 1000;
+const HOMEPAGE_STORAGE_KEY = "ryuflix_homepage_recommendations_v2";
+
 const homepageRecommendationCache = new Map<
-  ContentType,
+  string,
   HomepageRecommendationCacheEntry
 >();
 
 const homepageRecommendationInFlight = new Map<
-  ContentType,
+  string,
   Promise<void>
 >();
 
 const homepageRecommendationListeners = new Map<
-  ContentType,
+  string,
   Set<HomepageRecommendationListener>
 >();
 
-const HOMEPAGE_RECOMMENDATION_TTL = 5 * 60 * 1000;
+function getHomepageCacheKey(type: ContentType): string {
+  return `${getProfileStorageKey(HOMEPAGE_STORAGE_KEY)}:${type}`;
+}
+
+function readPersistedHomepageSnapshot(
+  type: ContentType,
+): HomepageRecommendationCacheEntry | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(
+      getHomepageCacheKey(type),
+    );
+
+    if (!raw) return null;
+
+    const parsed: unknown = JSON.parse(raw);
+
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const entry = parsed as Partial<HomepageRecommendationCacheEntry>;
+    const snapshot = entry.snapshot as
+      | Partial<HomepageRecommendationSnapshot>
+      | undefined;
+
+    if (
+      typeof entry.expiresAt !== "number" ||
+      !snapshot ||
+      typeof snapshot.eligible !== "boolean" ||
+      !Array.isArray(snapshot.forYou) ||
+      !Array.isArray(snapshot.rows)
+    ) {
+      return null;
+    }
+
+    return {
+      expiresAt: entry.expiresAt,
+      snapshot: snapshot as HomepageRecommendationSnapshot,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getHomepageSnapshot(
+  type: ContentType,
+): HomepageRecommendationCacheEntry | null {
+  const key = getHomepageCacheKey(type);
+  const memoryCached = homepageRecommendationCache.get(key);
+
+  if (memoryCached) return memoryCached;
+
+  const persisted = readPersistedHomepageSnapshot(type);
+
+  if (persisted) {
+    homepageRecommendationCache.set(key, persisted);
+  }
+
+  return persisted;
+}
 
 function publishHomepageRecommendations(
   type: ContentType,
   snapshot: HomepageRecommendationSnapshot,
 ): void {
-  homepageRecommendationCache.set(type, {
+  const key = getHomepageCacheKey(type);
+
+  const entry: HomepageRecommendationCacheEntry = {
     expiresAt: Date.now() + HOMEPAGE_RECOMMENDATION_TTL,
     snapshot,
-  });
+  };
 
-  const listeners = homepageRecommendationListeners.get(type);
+  homepageRecommendationCache.set(key, entry);
+
+  // Persist the last successful homepage across browser refreshes.
+  try {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(key, JSON.stringify(entry));
+    }
+  } catch {
+    // The in-memory result remains available if storage is full.
+  }
+
+  const listeners = homepageRecommendationListeners.get(key);
 
   listeners?.forEach((listener) => {
     try {
       listener(snapshot);
     } catch {
-      // One component must not interrupt other subscribers.
+      // One subscriber must not interrupt the others.
     }
   });
 }
@@ -987,20 +1074,30 @@ export function subscribeHomepageRecommendations(
   type: ContentType,
   listener: HomepageRecommendationListener,
 ): () => void {
-  let listeners = homepageRecommendationListeners.get(type);
+  const key = getHomepageCacheKey(type);
+
+  let listeners = homepageRecommendationListeners.get(key);
 
   if (!listeners) {
     listeners = new Set();
-    homepageRecommendationListeners.set(type, listeners);
+    homepageRecommendationListeners.set(key, listeners);
   }
 
   listeners.add(listener);
 
-  const cached = homepageRecommendationCache.get(type);
+  const cached = getHomepageSnapshot(type);
 
-  if (cached && cached.expiresAt > Date.now()) {
-    listener(cached.snapshot);
-  } else {
+  // Immediately restore cached recommendations, even if stale.
+  if (cached) {
+    try {
+      listener(cached.snapshot);
+    } catch {
+      // Ignore subscriber errors.
+    }
+  }
+
+  // Refresh expired data in the background without blanking it.
+  if (!cached || cached.expiresAt <= Date.now()) {
     void refreshHomepageRecommendations(type);
   }
 
@@ -1008,7 +1105,7 @@ export function subscribeHomepageRecommendations(
     listeners?.delete(listener);
 
     if (listeners?.size === 0) {
-      homepageRecommendationListeners.delete(type);
+      homepageRecommendationListeners.delete(key);
     }
   };
 }
@@ -1016,7 +1113,8 @@ export function subscribeHomepageRecommendations(
 export function refreshHomepageRecommendations(
   type: ContentType,
 ): Promise<void> {
-  const existing = homepageRecommendationInFlight.get(type);
+  const key = getHomepageCacheKey(type);
+  const existing = homepageRecommendationInFlight.get(key);
 
   if (existing) return existing;
 
@@ -1024,7 +1122,6 @@ export function refreshHomepageRecommendations(
     try {
       const profile = getTasteProfile();
 
-      // Run the recommendation engine once.
       const recommendations =
         await getGorseInspiredRecommendations(
           type,
@@ -1032,16 +1129,39 @@ export function refreshHomepageRecommendations(
           profile,
         );
 
-      // Reuse that exact recommendation pool for generated rows.
+      const previous = getHomepageSnapshot(type);
+
+      // Never erase a working homepage because of a temporary
+      // empty recommendation response.
+      if (
+        recommendations.length === 0 &&
+        previous &&
+        (
+          previous.snapshot.forYou.length > 0 ||
+          previous.snapshot.rows.length > 0
+        )
+      ) {
+        return;
+      }
+
+      // Reuse the exact same recommendation pool for generated rows.
       const rows = await generateHomepageRows(
         type,
         recommendations,
       );
 
+      // Explicit feedback also establishes a user's interests.
+      const hasExplicitFeedback = getAllExplicitFeedback().some(
+        (feedback) => feedback.mediaType === type,
+      );
+
       const eligible =
         recommendations.length > 0 &&
-        (getHistoryIds().size > 0 ||
-          profile !== null);
+        (
+          getHistoryIds().size > 0 ||
+          profile !== null ||
+          hasExplicitFeedback
+        );
 
       publishHomepageRecommendations(type, {
         eligible,
@@ -1054,21 +1174,18 @@ export function refreshHomepageRecommendations(
         error,
       );
 
-      const cached = homepageRecommendationCache.get(type);
-
-      if (cached) {
-        publishHomepageRecommendations(type, cached.snapshot);
-      }
+      // Keep the previous snapshot. Never clear the homepage
+      // because a background refresh failed.
     }
   })();
 
-  homepageRecommendationInFlight.set(type, job);
+  homepageRecommendationInFlight.set(key, job);
 
   void job.finally(() => {
-    if (homepageRecommendationInFlight.get(type) === job) {
-      homepageRecommendationInFlight.delete(type);
+    if (homepageRecommendationInFlight.get(key) === job) {
+      homepageRecommendationInFlight.delete(key);
     }
   });
 
   return job;
-               }
+}
